@@ -29,6 +29,10 @@ const profileTemplate = fs.readFileSync(
   path.join(repoRoot, 'web-app', 'apps', 'portal-web', 'src', 'features', 'workers', 'worker_list_profile', 'template.html'),
   'utf8',
 )
+const profileFeature = fs.readFileSync(
+  path.join(repoRoot, 'web-app', 'apps', 'portal-web', 'src', 'features', 'workers', 'worker_list_profile', 'index.js'),
+  'utf8',
+)
 
 test('zdjęcie pracownika ma addytywną kolumnę i pole w schemacie', () => {
   assert.match(migration, /add column if not exists photo_url text/i)
@@ -62,6 +66,13 @@ test('oba ekrany profilu pozwalają wybrać zdjęcie, a pulpit je wykorzystuje',
   assert.match(profileTemplate, /id="wkRemovePhotoBtn"/)
   assert.match(dashboard, /dashboardActiveWorkerMapPhotoUrl/)
   assert.match(dashboard, /location\?\.photoUrl/)
+})
+
+test('lista pracowników korzysta z tych samych domyślnych awatarów co operacje na żywo', () => {
+  assert.match(profileFeature, /resolveOperationalMapAvatarKind/)
+  assert.match(profileFeature, /\/assets\/avatars\/default-\$\{avatarKind\}\.webp/)
+  assert.match(profileTemplate, /worker-profile-list-header/)
+  assert.match(profileTemplate, /ph ph-identification-card/)
 })
 
 test('lista pracownikow pobiera photo_url bez poszerzania produkcyjnego wdrozenia Data Connect', () => {

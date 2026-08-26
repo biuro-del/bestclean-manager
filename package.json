@@ -9,9 +9,12 @@
     "dev:web": "npm --prefix web-app run dev -- --host localhost",
     "build": "node build-webapp.js",
     "start": "node index.js",
-    "test": "node --test",
+    "test": "node --test test/*.test.js test/*.test.mjs",
+    "migrate:cleanzi-admin:audit": "node Cleanzi-admin/scripts/migrate.js --audit",
+    "migrate:cleanzi-admin:apply": "node Cleanzi-admin/scripts/migrate.js --apply",
     "migrate:workers": "node scripts/migrate-worker-model.js",
     "migrate:platform": "node scripts/migrate-worker-model.js",
+    "migrate:task-lifecycle": "node scripts/migrate-task-lifecycle.js",
     "migrate:job-card-photo": "node scripts/migrate-job-card-photo.js",
     "migrate:cleaning-company-onboarding": "node scripts/migrate-cleaning-company-onboarding.js",
     "platform-admin": "node scripts/platform-admin.js"

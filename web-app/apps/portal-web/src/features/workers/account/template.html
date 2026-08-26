@@ -1,6 +1,6 @@
 <div class="worker-account-empty" id="waEmpty" hidden>
   <div class="worker-account-empty-icon" aria-hidden="true">
-    <svg viewBox="0 0 24 24" fill="none"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="1.8"/><path d="M4 21a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    <i class="ph ph-user-circle"></i>
   </div>
   <h2>Brak wybranego pracownika</h2>
   <p>Przejdz do listy profili i kliknij ikone oka przy wybranym pracowniku.</p>
@@ -9,19 +9,10 @@
 
 <div class="worker-account-shell" id="waShell" hidden>
   <header class="worker-account-hero">
-    <div class="worker-account-hero-copy">
-      <button class="worker-account-back" id="waBackBtn" type="button">
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span>Lista Pracowników</span>
-      </button>
-      <h1 class="worker-account-title" id="waTitle">Widok konta uzytkownika</h1>
-    </div>
-    <div class="worker-account-top-actions" aria-label="Akcje konta">
-      <button class="worker-account-action danger" id="waTopDeactivateBtn" type="button">
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" stroke="currentColor" stroke-width="1.8"/><path d="M4 21a8 8 0 0 1 11-7.4M18 15v6m-3-3h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        Dezaktywuj konto
-      </button>
-    </div>
+    <button class="worker-account-back" id="waBackBtn" type="button">
+      <i class="ph ph-arrow-left" aria-hidden="true"></i>
+      <span>Lista Pracowników</span>
+    </button>
   </header>
 
   <div class="worker-account-dashboard">
@@ -30,10 +21,10 @@
         <div class="worker-account-profile-row">
           <div class="worker-account-avatar-wrap">
             <div class="worker-account-avatar" id="waAvatar" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M12 12a4.4 4.4 0 1 0 0-8.8 4.4 4.4 0 0 0 0 8.8Z" stroke="currentColor" stroke-width="1.8"/><path d="M4 21a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              <i class="ph ph-user"></i>
             </div>
             <button class="worker-account-avatar-action" id="waPhotoQuickBtn" type="button" aria-label="Dodaj lub zmie&#324; zdj&#281;cie profilowe" title="Dodaj lub zmie&#324; zdj&#281;cie">
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 7.5 9.4 5h5.2L16 7.5h2A2.5 2.5 0 0 1 20.5 10v7A2.5 2.5 0 0 1 18 19.5H6A2.5 2.5 0 0 1 3.5 17v-7A2.5 2.5 0 0 1 6 7.5h2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.2" stroke="currentColor" stroke-width="1.8"/></svg>
+              <i class="ph ph-camera" aria-hidden="true"></i>
             </button>
           </div>
           <div class="worker-account-identity">
@@ -49,15 +40,15 @@
 
       <section class="worker-account-card worker-account-mini-kpis" aria-label="Podsumowanie pracownika">
         <div class="worker-account-mini-kpi-row">
-          <i aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M9 11.5 11.2 14 16 8.8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="4" y="4" width="16" height="16" rx="4" stroke="currentColor" stroke-width="1.8"/></svg></i>
+          <i class="ph ph-check-square-offset" aria-hidden="true"></i>
           <div><span>Wykonane zlecenia</span><strong id="waKpiOrders">0</strong></div>
         </div>
         <div class="worker-account-mini-kpi-row">
-          <i aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3.2 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></i>
+          <i class="ph ph-clock" aria-hidden="true"></i>
           <div><span>Godziny w miesiacu</span><strong id="waKpiMonth">0h</strong></div>
         </div>
         <div class="worker-account-mini-kpi-row">
-          <i aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="15" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></i>
+          <i class="ph ph-calendar-dots" aria-hidden="true"></i>
           <div><span>Godziny w tygodniu</span><strong id="waKpiWeek">0h</strong></div>
         </div>
       </section>
@@ -65,11 +56,11 @@
       <section class="worker-account-card worker-account-info-card">
         <h2>Informacje podstawowe</h2>
         <dl class="worker-account-details">
-          <div><dt><span class="worker-account-detail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 10h3M8 14h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>ID pracownika</dt><dd id="waCardId">-</dd></div>
-          <div><dt><span class="worker-account-detail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="m5 8 7 5 7-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Email (login)</dt><dd id="waCardEmail">-</dd></div>
-          <div><dt><span class="worker-account-detail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 5h3l1.5 4-2 1.2a11 11 0 0 0 4.3 4.3l1.2-2 4 1.5v3a2 2 0 0 1-2.2 2A15 15 0 0 1 5 7.2 2 2 0 0 1 7 5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></span>Telefon</dt><dd id="waCardPhone">-</dd></div>
-          <div><dt><span class="worker-account-detail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>Dodano</dt><dd id="waCardAdded">-</dd></div>
-          <div><dt><span class="worker-account-detail-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Edytowano</dt><dd id="waCardEdited">-</dd></div>
+          <div><dt><span class="worker-account-detail-icon ph ph-identification-card" aria-hidden="true"></span>ID pracownika</dt><dd id="waCardId">-</dd></div>
+          <div><dt><span class="worker-account-detail-icon ph ph-envelope-simple" aria-hidden="true"></span>Email (login)</dt><dd id="waCardEmail">-</dd></div>
+          <div><dt><span class="worker-account-detail-icon ph ph-phone" aria-hidden="true"></span>Telefon</dt><dd id="waCardPhone">-</dd></div>
+          <div><dt><span class="worker-account-detail-icon ph ph-calendar-plus" aria-hidden="true"></span>Dodano</dt><dd id="waCardAdded">-</dd></div>
+          <div><dt><span class="worker-account-detail-icon ph ph-clock-counter-clockwise" aria-hidden="true"></span>Edytowano</dt><dd id="waCardEdited">-</dd></div>
         </dl>
       </section>
     </aside>
@@ -77,31 +68,31 @@
     <section class="worker-account-main" aria-label="Szczegoly konta pracownika">
       <nav class="worker-account-tabs" aria-label="Zakladki konta">
         <button class="worker-account-tab is-active" data-wa-tab="account" type="button">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="1.8"/><path d="M4 21a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <i class="ph ph-user" aria-hidden="true"></i>
           Konto
         </button>
         <button class="worker-account-tab" data-wa-tab="security" type="button">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2" stroke="currentColor" stroke-width="1.8"/><rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/></svg>
+          <i class="ph ph-lock-key" aria-hidden="true"></i>
           Bezpieczenstwo
         </button>
         <button class="worker-account-tab" data-wa-tab="roles" type="button">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3l7 3v5c0 4.6-2.8 8.2-7 10-4.2-1.8-7-5.4-7-10V6l7-3Z" stroke="currentColor" stroke-width="1.8"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <i class="ph ph-shield-check" aria-hidden="true"></i>
           Role i dostep
         </button>
         <button class="worker-account-tab" data-wa-tab="orders" type="button">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 4h12a2 2 0 0 1 2 2v14l-3-2-3 2-3-2-3 2-3-2-3 2V6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 9h8M8 13h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <i class="ph ph-receipt" aria-hidden="true"></i>
           Zlecenia
         </button>
         <button class="worker-account-tab" data-wa-tab="activity" type="button">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-8M22 19V3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M3 20h19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <i class="ph ph-chart-bar" aria-hidden="true"></i>
           Aktywnosc
         </button>
         <button class="worker-account-tab" data-wa-tab="time" type="button">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l4 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <i class="ph ph-clock" aria-hidden="true"></i>
           Czas pracy
         </button>
         <button class="worker-account-tab" data-wa-tab="files" type="button">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3h6l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13 3v5h5M8.5 13h7M8.5 17h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <i class="ph ph-file-text" aria-hidden="true"></i>
           Pliki
         </button>
       </nav>
@@ -115,10 +106,10 @@
             </div>
             <div class="worker-account-edit-actions" data-wa-edit-actions="account">
               <button class="worker-account-edit-icon" id="waEditAccountBtn" data-wa-edit-tab="account" type="button" aria-label="Edytuj dane uzytkownika" title="Edytuj dane">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 1 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1A2 2 0 1 1 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 .9-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 0 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5.9h.1a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                <i class="ph ph-pencil-simple" aria-hidden="true"></i><span>Edytuj</span>
               </button>
-              <button class="btn2 primary" id="waSaveAccountBtn" data-wa-save-tab="account" type="button" hidden>Zapisz</button>
-              <button class="btn2" id="waCancelAccountBtn" data-wa-cancel-tab="account" type="button" hidden>Anuluj</button>
+              <button class="btn2 primary" id="waSaveAccountBtn" data-wa-save-tab="account" type="button" hidden><i class="ph ph-floppy-disk" aria-hidden="true"></i>Zapisz</button>
+              <button class="btn2" id="waCancelAccountBtn" data-wa-cancel-tab="account" type="button" hidden><i class="ph ph-x" aria-hidden="true"></i>Anuluj</button>
             </div>
           </div>
           <div class="worker-account-photo-editor" id="waPhotoEditor">
@@ -133,13 +124,27 @@
               <button class="btn2 danger" id="waRemovePhotoBtn" type="button">Usu&#324; zdj&#281;cie</button>
             </div>
           </div>
-          <div class="worker-account-form-grid">
+          <div class="worker-account-form-sections">
+            <section class="worker-account-form-section">
+              <div class="worker-account-section-heading">
+                <span class="worker-account-section-icon ph ph-address-book" aria-hidden="true"></span>
+                <div><h3>Dane kontaktowe</h3><p>Podstawowe informacje identyfikacyjne i dane logowania pracownika.</p></div>
+              </div>
+              <div class="worker-account-form-grid">
             <label>ID pracownika<input id="waWorkerId" type="text" /></label>
             <label>Imie i nazwisko<input id="waName" type="text" maxlength="200" /></label>
             <label>Telefon<input id="waPhone" type="text" maxlength="80" placeholder="Dodaj numer telefonu" /></label>
             <label>Email (login)<input id="waEmail" type="email" maxlength="160" autocomplete="email" /></label>
             <label>Status<select id="waActive"><option value="1">Aktywny</option><option value="0">Nieaktywny</option></select></label>
             <label>Ostatnio edytowal<input id="waEditedBy" type="text" readonly /></label>
+              </div>
+            </section>
+            <section class="worker-account-form-section">
+              <div class="worker-account-section-heading">
+                <span class="worker-account-section-icon ph ph-briefcase" aria-hidden="true"></span>
+                <div><h3>Zatrudnienie</h3><p>Rodzaj umowy oraz okres jej obowi&#261;zywania.</p></div>
+              </div>
+              <div class="worker-account-form-grid">
             <label>Rodzaj umowy<select id="waContractType">
               <option value="">Wybierz rodzaj umowy</option>
               <option value="Umowa o prace">Umowa o prace</option>
@@ -154,6 +159,14 @@
                 <label>Do<input id="waContractTo" type="date" /></label>
               </div>
             </div>
+              </div>
+            </section>
+            <section class="worker-account-form-section">
+              <div class="worker-account-section-heading">
+                <span class="worker-account-section-icon ph ph-first-aid-kit" aria-hidden="true"></span>
+                <div><h3>Badania i szkolenia</h3><p>Terminy bada&#324; oraz wymagane przeszkolenia pracownika.</p></div>
+              </div>
+              <div class="worker-account-form-grid">
             <div class="worker-account-range-field">
               <span>Badania BHP</span>
               <div>
@@ -172,7 +185,7 @@
               <span>Przeszkolenie</span>
               <button class="worker-account-training-toggle" id="waTrainingToggle" type="button" aria-haspopup="listbox" aria-expanded="false">
                 <span id="waTrainingValue">Kliknij, aby wybrac przeszkolenia</span>
-                <i aria-hidden="true">v</i>
+                <i class="ph ph-caret-down" aria-hidden="true"></i>
               </button>
               <div class="worker-account-training-menu" id="waTrainingMenu" role="listbox" aria-multiselectable="true" hidden>
                 <label class="worker-account-training-option" for="waTrainingFallbackBhp" role="option" aria-selected="false">
@@ -205,6 +218,8 @@
               <strong>Przeszkolenia:</strong>
               <ul id="waTrainingPreview"><li>Brak wybranych przeszkolen</li></ul>
             </div>
+              </div>
+            </section>
           </div>
         </section>
       </div>
@@ -218,26 +233,53 @@
             </div>
             <div class="worker-account-edit-actions" data-wa-edit-actions="security">
               <button class="worker-account-edit-icon" id="waEditSecurityBtn" data-wa-edit-tab="security" type="button" aria-label="Edytuj bezpieczenstwo" title="Edytuj bezpieczenstwo">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 1 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1A2 2 0 1 1 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 .9-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 0 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5.9h.1a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                <i class="ph ph-pencil-simple" aria-hidden="true"></i><span>Edytuj</span>
               </button>
-              <button class="btn2 primary" id="waSaveSecurityBtn" data-wa-save-tab="security" type="button" hidden>Zapisz</button>
-              <button class="btn2" id="waCancelSecurityBtn" data-wa-cancel-tab="security" type="button" hidden>Anuluj</button>
+              <button class="btn2 primary" id="waSaveSecurityBtn" data-wa-save-tab="security" type="button" hidden><i class="ph ph-floppy-disk" aria-hidden="true"></i>Zapisz</button>
+              <button class="btn2" id="waCancelSecurityBtn" data-wa-cancel-tab="security" type="button" hidden><i class="ph ph-x" aria-hidden="true"></i>Anuluj</button>
             </div>
           </div>
-          <div class="worker-account-warning" id="waSecurityWarning">Nowe haslo ma minimum 6 znakow i jest aktualizowane w Firebase Auth.</div>
-          <div class="worker-account-form-grid">
-            <label>Nowe haslo
-              <span class="worker-account-password-field">
-                <input id="waNewPassword" type="password" maxlength="120" autocomplete="new-password" />
-                <button class="worker-account-password-eye" id="waNewPasswordEyeBtn" type="button" aria-label="Pokaz nowe haslo"></button>
-              </span>
-            </label>
-            <label>Powtorz haslo
-              <span class="worker-account-password-field">
-                <input id="waNewPassword2" type="password" maxlength="120" autocomplete="new-password" />
-                <button class="worker-account-password-eye" id="waNewPassword2EyeBtn" type="button" aria-label="Pokaz powtorzone haslo"></button>
-              </span>
-            </label>
+          <div class="worker-account-security-workspace">
+            <div class="worker-account-warning" id="waSecurityWarning"><i class="ph ph-info" aria-hidden="true"></i><span>Nowe haslo ma minimum 6 znakow i jest aktualizowane w Firebase Auth.</span></div>
+            <section class="worker-account-form-section worker-account-security-fields">
+              <div class="worker-account-section-heading">
+                <span class="worker-account-section-icon ph ph-password" aria-hidden="true"></span>
+                <div><h3>Nowe has&#322;o</h3><p>Ustaw bezpieczne has&#322;o dost&#281;pu do konta pracownika.</p></div>
+              </div>
+              <div class="worker-account-form-grid">
+                <label>Nowe haslo
+                  <span class="worker-account-password-field">
+                    <input id="waNewPassword" type="password" maxlength="120" autocomplete="new-password" />
+                    <button class="worker-account-password-eye" id="waNewPasswordEyeBtn" type="button" aria-label="Pokaz nowe haslo"></button>
+                  </span>
+                </label>
+                <label>Powtorz haslo
+                  <span class="worker-account-password-field">
+                    <input id="waNewPassword2" type="password" maxlength="120" autocomplete="new-password" />
+                    <button class="worker-account-password-eye" id="waNewPassword2EyeBtn" type="button" aria-label="Pokaz powtorzone haslo"></button>
+                  </span>
+                </label>
+              </div>
+            </section>
+            <section class="worker-account-form-section worker-account-danger-zone">
+              <div class="worker-account-section-heading">
+                <span class="worker-account-section-icon ph ph-user-minus" aria-hidden="true"></span>
+                <div>
+                  <h3>Dezaktywacja konta</h3>
+                  <p>Zablokuj pracownikowi dost&#281;p do konta i aplikacji.</p>
+                </div>
+              </div>
+              <div class="worker-account-danger-zone-action">
+                <div>
+                  <strong>Dezaktywuj konto pracownika</strong>
+                  <span>Ta operacja wy&#322;&#261;czy mo&#380;liwo&#347;&#263; logowania. Dane pracownika pozostan&#261; zachowane.</span>
+                </div>
+                <button class="worker-account-action danger" id="waTopDeactivateBtn" type="button">
+                  <i class="ph ph-user-minus" aria-hidden="true"></i>
+                  Dezaktywuj konto
+                </button>
+              </div>
+            </section>
           </div>
         </section>
       </div>
@@ -251,13 +293,19 @@
             </div>
             <div class="worker-account-edit-actions" data-wa-edit-actions="roles">
               <button class="worker-account-edit-icon" id="waEditRolesBtn" data-wa-edit-tab="roles" type="button" aria-label="Edytuj role i dostep" title="Edytuj role i dostep">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 1 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1A2 2 0 1 1 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 .9-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 0 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5.9h.1a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                <i class="ph ph-pencil-simple" aria-hidden="true"></i><span>Edytuj</span>
               </button>
-              <button class="btn2 primary" id="waSaveRoleBtn" data-wa-save-tab="roles" type="button" hidden>Zapisz</button>
-              <button class="btn2" id="waCancelRoleBtn" data-wa-cancel-tab="roles" type="button" hidden>Anuluj</button>
+              <button class="btn2 primary" id="waSaveRoleBtn" data-wa-save-tab="roles" type="button" hidden><i class="ph ph-floppy-disk" aria-hidden="true"></i>Zapisz</button>
+              <button class="btn2" id="waCancelRoleBtn" data-wa-cancel-tab="roles" type="button" hidden><i class="ph ph-x" aria-hidden="true"></i>Anuluj</button>
             </div>
           </div>
-          <div class="worker-account-form-grid">
+          <div class="worker-account-roles-workspace">
+            <section class="worker-account-form-section worker-account-role-controls">
+              <div class="worker-account-section-heading">
+                <span class="worker-account-section-icon ph ph-user-gear" aria-hidden="true"></span>
+                <div><h3>Poziom dost&#281;pu</h3><p>Wybierz rol&#281; organizacyjn&#261; i typ pracownika.</p></div>
+              </div>
+              <div class="worker-account-form-grid">
             <label>Rola<select id="waRole">
               <option value="OWNER" disabled title="Pełny dostęp. Rola wyłącznie dla założyciela organizacji; nie można jej zmienić.">Owner</option>
               <option value="ADMIN" title="Pełny dostęp: podgląd, dodawanie, edycja i usuwanie.">ADMIN</option>
@@ -271,57 +319,61 @@
               <option value="Stały personel na obiekcie">Stały personel na obiekcie</option>
               <option value="Zespół Mobilny">Zespół Mobilny</option>
             </select></label>
+              </div>
+            </section>
+            <section class="worker-account-form-section worker-account-role-preview">
+              <div class="worker-account-section-heading">
+                <span class="worker-account-section-icon ph ph-shield-check" aria-hidden="true"></span>
+                <div><h3>Podgl&#261;d uprawnie&#324;</h3><p>Zakres dost&#281;pu wynikaj&#261;cy z wybranej roli.</p></div>
+              </div>
+              <div class="worker-account-role-list worker-account-role-list-wide" id="waRolePanelPreviewList"></div>
+            </section>
           </div>
-          <div class="worker-account-role-list worker-account-role-list-wide" id="waRolePanelPreviewList"></div>
         </section>
       </div>
 
       <div class="worker-account-panel" data-wa-panel="orders">
         <section class="worker-account-card worker-account-table-block">
           <div class="worker-account-table-head">
-            <div>
+            <div class="worker-account-table-title">
+              <span class="worker-account-section-icon ph ph-receipt" aria-hidden="true"></span>
+              <div>
               <h2>Zlecenia pracownika</h2>
               <p>Lista zlecen przypisanych do aktualnie wybranego pracownika.</p>
+              </div>
             </div>
             <label>Na strone<select id="waOrdersPageSize"><option>5</option><option>10</option><option>25</option><option>50</option></select></label>
           </div>
-          <div class="worker-account-table events-table worker-account-orders-table">
+          <div class="worker-account-table worker-account-data-table events-table worker-account-orders-table" aria-label="Zlecenia pracownika">
             <div class="events-head">
-              <div class="events-select-col"><input type="checkbox" disabled aria-label="Zaznacz wszystkie" /></div><div>Data</div><div>Klient</div><div>Zlecenie</div><div>Strefa</div><div>Status</div><div>Akcja</div>
+              <div>U&#380;ytkownik</div><div>Data</div><div>Klient</div><div>Nazwa zlecenia</div><div>Status</div>
             </div>
-            <div id="waOrderRows"><div class="events-row worker-account-muted"><div class="events-select-col"></div><div>Brak rekordow</div><div></div><div></div><div></div><div></div><div></div></div></div>
+            <div id="waOrderRows"><div class="events-row worker-account-muted worker-account-table-empty-row"><div>Brak rekordow</div></div></div>
           </div>
           <div class="worker-account-pager">
             <span id="waOrdersLabel">Wyswietlono: 0 / 0 | Strona 1 z 1</span>
-            <button class="btn2" id="waOrdersPrev" type="button">&larr;</button>
-            <button class="btn2" id="waOrdersNext" type="button">&rarr;</button>
+            <button class="btn2" id="waOrdersPrev" type="button" aria-label="Poprzednia strona"><i class="ph ph-arrow-left" aria-hidden="true"></i></button>
+            <button class="btn2" id="waOrdersNext" type="button" aria-label="Nast&#281;pna strona"><i class="ph ph-arrow-right" aria-hidden="true"></i></button>
           </div>
         </section>
       </div>
 
       <div class="worker-account-panel" data-wa-panel="activity">
-        <div class="worker-account-kpi-grid">
-          <article><span>Wykonane zlecenia</span><strong id="waActivityOrders">0</strong></article>
-          <article><span>Godziny tydzien</span><strong id="waActivityWeek">0h</strong></article>
-          <article><span>Godziny miesiac</span><strong id="waActivityMonth">0h</strong></article>
-          <article><span>Zdarzenia w miesiacu</span><strong id="waActivityEvents">0</strong></article>
-        </div>
-
         <section class="worker-account-card worker-account-table-block">
           <div class="worker-account-table-head">
-            <h2>Ostatnie zdarzenia</h2>
+            <div class="worker-account-table-title"><span class="worker-account-section-icon ph ph-activity" aria-hidden="true"></span><div><h2>Ostatnie zdarzenia</h2><p>Historia aktywno&#347;ci i zarejestrowanych operacji pracownika.</p></div></div>
             <label>Na strone<select id="waEventsPageSize"><option>5</option><option>10</option><option>25</option><option>50</option></select></label>
           </div>
-          <div class="worker-account-table events-table worker-account-events-table">
+          <div class="worker-account-table worker-account-data-table events-table worker-account-events-table" aria-label="Aktywno&#347;&#263; pracownika">
             <div class="events-head">
-              <div>Klient</div><div>Strefa</div><div>Lokalizacja</div><div>Data</div><div>Start</div><div>Stop</div><div>Czas</div><div>Komentarz</div><div>Edytowal</div><div></div>
+              <div>U&#380;ytkownik</div><div>Data</div><div>Klient</div><div>Strefa</div><div>Lokalizacja</div><div>Start</div><div>Stop</div><div>Czas</div><div>Komentarz</div><div>Edytowa&#322;</div>
             </div>
             <div id="waEventRows"><div class="events-row worker-account-muted worker-account-table-empty-row"><div>Brak rekordow</div></div></div>
           </div>
           <div class="worker-account-pager">
             <span id="waEventsLabel">Wyswietlono: 0 / 0 | Strona 1 z 1</span>
-            <button class="btn2" id="waEventsPrev" type="button">&larr;</button>
-            <button class="btn2" id="waEventsNext" type="button">&rarr;</button>
+            <button class="btn2" id="waEventsPrev" type="button" aria-label="Poprzednia strona"><i class="ph ph-arrow-left" aria-hidden="true"></i></button>
+            <button class="btn2" id="waEventsNext" type="button" aria-label="Nast&#281;pna strona"><i class="ph ph-arrow-right" aria-hidden="true"></i></button>
           </div>
         </section>
       </div>
@@ -329,41 +381,48 @@
       <div class="worker-account-panel" data-wa-panel="time">
         <section class="worker-account-time-detail">
           <div class="worker-account-time-toolbar" aria-label="Filtry czasu pracy">
-            <label>Od (data)<input id="waTimeFrom" type="date" /></label>
-            <label>Do (data)<input id="waTimeTo" type="date" /></label>
-            <label>Wybierz miesiac<select id="waTimeMonthPick"></select></label>
+            <div class="worker-account-time-toolbar-heading">
+              <span class="worker-account-section-icon ph ph-funnel" aria-hidden="true"></span>
+              <div><h2>Filtry czasu pracy</h2><p>Wybierz zakres dat lub miesi&#261;c rozliczeniowy.</p></div>
+            </div>
+            <div class="worker-account-time-filter-grid">
+              <label>Od (data)<input id="waTimeFrom" type="date" /></label>
+              <label>Do (data)<input id="waTimeTo" type="date" /></label>
+              <label>Wybierz miesiac<select id="waTimeMonthPick"></select></label>
+            </div>
             <div class="worker-account-time-toolbar-actions">
-              <button class="btn2" id="waRefreshTimeBtn" type="button">Odswiez</button>
-              <button class="btn2 primary" id="waApplyTimeBtn" type="button">Zastosuj</button>
+              <button class="btn2" id="waRefreshTimeBtn" type="button"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i>Odswiez</button>
+              <button class="btn2 primary" id="waApplyTimeBtn" type="button"><i class="ph ph-check" aria-hidden="true"></i>Zastosuj</button>
             </div>
           </div>
 
           <div class="worker-account-card worker-account-time-month-card">
             <div class="worker-account-time-month-meta">
-              <span>Suma miesiaca</span>
+              <span><i class="ph ph-calendar-blank" aria-hidden="true"></i>Suma miesiaca</span>
               <strong id="waTimeMonthLabel">-</strong>
               <em id="waTimeMonthRange">-</em>
-              <button class="btn2" id="waDownloadTimeBtn" type="button">Pobierz ewidencje pracy</button>
+              <button class="btn2" id="waDownloadTimeBtn" type="button"><i class="ph ph-download-simple" aria-hidden="true"></i>Pobierz ewidencje pracy</button>
             </div>
             <div class="worker-account-time-month-kpis">
-              <div class="wa-time-summary-kpi is-work"><i aria-hidden="true">T</i><span>Czas pracy</span><strong class="mono" id="waTimeMonthWork">00:00</strong></div>
-              <div class="wa-time-summary-kpi is-break"><i aria-hidden="true">P</i><span>Przerwy</span><strong class="mono time-break" id="waTimeMonthBreak">00:00</strong></div>
-              <div class="wa-time-summary-kpi is-net"><i aria-hidden="true">R</i><span>Realny czas pracy</span><strong class="mono" id="waTimeMonthNet">00:00</strong></div>
+              <div class="wa-time-summary-kpi is-work"><i class="ph ph-seal-check" aria-hidden="true"></i><span>Czas zatwierdzony</span><strong class="mono" id="waTimeMonthWork">00:00</strong></div>
+              <div class="wa-time-summary-kpi is-provisional"><i class="ph ph-timer" aria-hidden="true"></i><span>Czas roboczy</span><strong class="mono" id="waTimeMonthProvisional">00:00</strong></div>
+              <div class="wa-time-summary-kpi is-break"><i class="ph ph-coffee" aria-hidden="true"></i><span>Przerwy</span><strong class="mono time-break" id="waTimeMonthBreak">00:00</strong></div>
+              <div class="wa-time-summary-kpi is-net"><i class="ph ph-clock-countdown" aria-hidden="true"></i><span>Realny czas pracy</span><strong class="mono" id="waTimeMonthNet">00:00</strong></div>
             </div>
           </div>
 
           <div class="worker-account-time-list-card">
-            <div class="worker-account-table events-table worker-account-time-table" aria-label="Czas pracy - podsumowanie dzienne">
+            <div class="worker-account-table worker-account-data-table events-table worker-account-time-table" aria-label="Czas pracy - podsumowanie dzienne">
               <div class="events-head">
-                <div class="events-select-col"><input id="waTimeSelectAll" type="checkbox" aria-label="Zaznacz wszystkie rekordy na stronie" /></div><div>Data</div><div>Typ</div><div>Start pracy</div><div>Koniec pracy</div><div>Czas pracy</div><div>Realny czas pracy</div><div>Przerwa</div><div>Edytowal</div>
+                <div>U&#380;ytkownik</div><div>Data</div><div>Start</div><div>Stop</div><div>Czas</div><div>Historia</div><div>Przerwa</div><div>Edytowa&#322;</div>
               </div>
-              <div id="waTimeRows"><div class="events-row worker-account-muted"><div class="events-select-col"></div><div>Brak rekordow</div><div></div><div></div><div></div><div></div><div></div><div></div><div></div></div></div>
+              <div id="waTimeRows"><div class="events-row worker-account-muted worker-account-table-empty-row"><div>Brak rekordow</div></div></div>
             </div>
 
             <div class="worker-account-time-pager">
               <div>
-                <button class="btn2" id="waTimePrev" type="button">&larr; Poprzednia</button>
-                <button class="btn2" id="waTimeNext" type="button">Nastepna &rarr;</button>
+                <button class="btn2" id="waTimePrev" type="button"><i class="ph ph-arrow-left" aria-hidden="true"></i>Poprzednia</button>
+                <button class="btn2" id="waTimeNext" type="button">Nastepna<i class="ph ph-arrow-right" aria-hidden="true"></i></button>
                 <span class="worker-account-muted" id="waTimePageLabel">Strona 1 / 1</span>
               </div>
               <span class="worker-account-muted" id="waTimeShownLabel">Wyswietlono: 0 - Wszystkie: 0 - Na strone: 50</span>
@@ -381,9 +440,7 @@
             </div>
           </div>
           <div class="worker-account-files-empty">
-            <i aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M7 3h6l4 4v14H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13 3v5h5M8.5 13h7M8.5 17h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </i>
+            <i class="ph ph-folder-open" aria-hidden="true"></i>
             <strong>Brak plikow do wyswietlenia</strong>
             <p>Ten panel jest przygotowany pod przyszly modul plikow pracownika.</p>
           </div>
@@ -393,72 +450,59 @@
   </div>
 </div>
 
-<div class="overlay wa-day-editor-overlay" id="waDayEditorOverlay" aria-label="Edycja dnia pracy" role="dialog" aria-modal="true" hidden>
-  <div class="modal wa-day-editor-modal">
-    <button class="wa-day-editor-close" id="waDayEditorClose" type="button" aria-label="Zamknij">&times;</button>
-    <h3>Edycja dnia pracy</h3>
-
-    <div class="wa-day-editor-grid">
-      <label>
-        Data
-        <input id="waDayDateInput" type="date" />
-      </label>
-      <label>
-        Start pracy (czas)
-        <input id="waDayStartTime" type="time" step="1" />
-      </label>
-      <label>
-        Koniec pracy (czas)
-        <input id="waDayEndTime" type="time" step="1" />
-      </label>
-      <label class="wa-day-editor-wide">
-        Przepracowano (HH:MM)
-        <input id="waDayWork" type="text" value="00:00" readonly />
-      </label>
-      <label class="wa-day-editor-wide">
-        Komentarz
-        <textarea id="waDayComment" rows="4" placeholder="Opcjonalnie..."></textarea>
-      </label>
+<div class="overlay worker-account-comment-overlay" id="waEventCommentOverlay" aria-labelledby="waEventCommentTitle" aria-describedby="waEventCommentDescription" role="dialog" aria-modal="true" hidden>
+  <section class="modal worker-account-comment-dialog" id="waEventCommentDialog" tabindex="-1">
+    <header class="worker-account-comment-header">
+      <span class="worker-account-comment-heading-icon" aria-hidden="true"><i class="ph ph-chat-text"></i></span>
+      <div>
+        <h3 id="waEventCommentTitle">Komentarz pracownika</h3>
+        <p id="waEventCommentDescription">Tre&#347;&#263; dodana przez pracownika do tego zdarzenia.</p>
+      </div>
+      <button class="worker-account-comment-close" id="waEventCommentClose" type="button" aria-label="Zamknij komentarz"><i class="ph ph-x" aria-hidden="true"></i></button>
+    </header>
+    <div class="worker-account-comment-body">
+      <p class="worker-account-comment-text" id="waEventCommentText" hidden></p>
+      <div class="worker-account-comment-empty" id="waEventCommentEmpty" role="status">
+        <i class="ph ph-chat-text" aria-hidden="true"></i>
+        <strong>Brak komentarza pracownika</strong>
+        <p>Dla tego zdarzenia pracownik nie doda&#322; komentarza.</p>
+      </div>
     </div>
-
-    <div class="row-actions wa-day-editor-actions">
-      <button class="btn2 danger" id="waDayCancelBtn" type="button">Zamknij</button>
-      <button class="btn2 primary" id="waDaySaveBtn" type="button">Zapisz</button>
-    </div>
-  </div>
+    <footer class="worker-account-comment-actions">
+      <button class="btn2 primary" id="waEventCommentDone" type="button">Gotowe</button>
+    </footer>
+  </section>
 </div>
 
-<div class="overlay wa-time-codes-overlay" id="waTimeCodesOverlay" aria-labelledby="waTimeCodesTitle" role="dialog" aria-modal="true" hidden>
-  <div class="modal wa-time-codes-modal">
-    <button class="wa-time-codes-close" id="waTimeCodesClose" type="button" aria-label="Zamknij">&times;</button>
+<div class="overlay wa-time-codes-overlay" id="waTimeCodesOverlay" aria-labelledby="waTimeCodesTitle" aria-describedby="waTimeCodesMeta" role="dialog" aria-modal="true" hidden>
+  <div class="modal wa-time-codes-modal wa-reconciliation-modal" tabindex="-1">
+    <button class="wa-time-codes-close" id="waTimeCodesClose" type="button" aria-label="Zamknij"><i class="ph ph-x" aria-hidden="true"></i></button>
     <div class="wa-time-codes-heading">
       <span class="wa-time-codes-heading-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M7 5h10M7 12h10M7 19h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="4" cy="5" r="1.2" fill="currentColor"/><circle cx="4" cy="12" r="1.2" fill="currentColor"/><circle cx="4" cy="19" r="1.2" fill="currentColor"/></svg>
+        <i class="ph ph-list-checks"></i>
       </span>
       <div>
         <h3 id="waTimeCodesTitle">Start i stop</h3>
-        <p id="waTimeCodesMeta">Kody START/STOP z wybranego dnia</p>
+        <p id="waTimeCodesMeta">Kody START/STOP</p>
       </div>
     </div>
+    <div class="wa-reconciliation-status-row" id="waReconciliationStatusRow" hidden>
+      <span class="wa-reconciliation-status" id="waReconciliationStatus" data-state="OPEN_SESSION">Wczytywanie stanu dnia…</span>
+      <span class="wa-reconciliation-worker" id="waReconciliationWorker">-</span>
+    </div>
+    <div class="wa-reconciliation-live" id="waReconciliationLive" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div class="wa-reconciliation-problems" id="waReconciliationProblems" role="alert" hidden></div>
     <div class="wa-time-codes-list" id="waTimeCodesList"></div>
-    <div class="wa-time-code-editor" id="waTimeCodeEditor" hidden>
-      <div>
-        <strong id="waTimeCodeEditorTitle">Edytuj godzinę</strong>
-        <small id="waTimeCodeEditorContext">Klient / strefa</small>
-      </div>
-      <label>Nowa godzina<input class="mono" id="waTimeCodeTimeInput" type="time" required /></label>
-      <div class="wa-time-code-editor-actions">
-        <button class="btn2" id="waTimeCodeCancel" type="button">Anuluj</button>
-        <button class="btn2 primary" id="waTimeCodeSave" type="button">Zapisz godzinę</button>
-      </div>
-    </div>
-    <div class="wa-time-codes-total" aria-live="polite">
+
+    <div class="wa-time-codes-total" aria-label="Podsumowanie czasu pracy">
       <span>
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <i class="ph ph-clock" aria-hidden="true"></i>
         Łączny czas pracy
       </span>
-      <strong class="mono" id="waTimeCodesTotal">00:00</strong>
+      <strong class="mono" id="waTimeCodesTotal">00:00:00</strong>
+      <span id="waReconciliationProvisional" hidden>00:00:00</span>
     </div>
+
     <div class="wa-time-codes-actions">
       <button class="btn2 primary" id="waTimeCodesDone" type="button">Gotowe</button>
     </div>
@@ -467,9 +511,10 @@
 
 <div class="overlay wa-export-overlay" id="waExportOverlay" aria-label="Pobierz ewidencje pracy" role="dialog" aria-modal="true" hidden>
   <div class="modal wa-export-modal">
-    <button class="wa-export-close" id="waExportCloseBtn" type="button" aria-label="Zamknij">&times;</button>
+    <button class="wa-export-close" id="waExportCloseBtn" type="button" aria-label="Zamknij"><i class="ph ph-x" aria-hidden="true"></i></button>
     <h3>Pobierz ewidencj&#281; pracy</h3>
     <p class="meta">Wybierz zakres dat, kolumny i format pliku do pobrania.</p>
+    <div class="wa-export-integrity" id="waExportIntegrityProblems" role="alert" hidden></div>
 
     <div class="wa-export-range">
       <label>

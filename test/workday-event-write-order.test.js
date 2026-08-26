@@ -19,39 +19,33 @@ const servicePath = path.join(
 const source = fs.readFileSync(servicePath, 'utf8')
 const createStart = source.indexOf('export async function createEvent')
 const updateStart = source.indexOf('export async function updateEvent')
+const updateEnd = source.indexOf('async function findEventIdsLinkedToWorkday', updateStart)
 const createSource = source.slice(createStart, updateStart)
-const updateSource = source.slice(updateStart)
+const updateSource = source.slice(updateStart, updateEnd)
 
-test('createEvent zapisuje Event bez przedwczesnego FK i łączy go dopiero po utworzeniu Workday', () => {
-  const workdayGuard = createSource.indexOf('assertNoOtherOpenWorkday(')
+test('createEvent zapisuje czynność bez tworzenia lustrzanego Workday', () => {
   const eventWrite = createSource.indexOf('await insertEventForOrg(')
-  const workdayWrite = createSource.indexOf('await createWorkday')
-  const linkWrite = createSource.indexOf('await reidentifyEventForOrg(')
 
-  assert.ok(workdayGuard >= 0)
-  assert.ok(eventWrite > workdayGuard)
   assert.ok(eventWrite >= 0)
-  assert.ok(workdayWrite > eventWrite)
-  assert.ok(linkWrite > workdayWrite)
-  assert.match(createSource.slice(eventWrite, workdayWrite), /workdayId:\s*null/)
-  assert.match(createSource.slice(linkWrite), /workdayId:\s*canonicalWorkdayId/)
-  assert.match(createSource, /PARTIAL_EVENT_WORKDAY_WRITE_UNKNOWN/)
-  assert.match(createSource, /PARTIAL_EVENT_WORKDAY_LINK_UNKNOWN/)
+  assert.match(createSource, /resolveContainingWorkdayId\(integritySnapshot\?\.workdays/)
+  assert.match(createSource.slice(eventWrite), /workdayId:\s*linkedWorkdayId \|\| null/)
+  assert.doesNotMatch(createSource, /await createWorkday/)
+  assert.doesNotMatch(createSource, /await reidentifyEventForOrg/)
+  assert.doesNotMatch(createSource, /assertNoOtherOpenWorkday/)
   assert.doesNotMatch(createSource, /if \(!isOperationNotFoundError\(error, 'InsertEventForOrg'\)\)/)
 })
 
-test('updateEvent nie zmienia Workday, gdy kanoniczny Event zostanie odrzucony', () => {
+test('updateEvent zapisuje wyłącznie sesję i nigdy nie nadpisuje całego Workday', () => {
   const workdayGuard = updateSource.indexOf('assertNoOtherOpenWorkday(')
   const eventWrite = updateSource.indexOf('await updateEventForOrg(')
-  const workdayWrite = updateSource.indexOf('await updateWorkday')
 
   assert.ok(workdayGuard >= 0)
   assert.ok(eventWrite > workdayGuard)
   assert.ok(eventWrite >= 0)
-  assert.ok(workdayWrite > eventWrite)
   assert.match(updateSource, /if \(shouldReidentify\) \{\s+await reidentifyEventForOrg\(/s)
   assert.match(updateSource, /isMissingDataConnectVariable\(error, 'workerLogin'\)/)
-  assert.match(updateSource, /PARTIAL_EVENT_WORKDAY_UPDATE_UNKNOWN/)
+  assert.doesNotMatch(updateSource, /await updateWorkday\(/)
+  assert.doesNotMatch(updateSource, /PARTIAL_EVENT_WORKDAY_UPDATE_UNKNOWN/)
   assert.doesNotMatch(updateSource, /if \(!isOperationNotFoundError\(error, 'UpdateEventForOrg'\)\)/)
 })
 
@@ -66,14 +60,14 @@ test('kontrole integralności używają kompletnych operacji paginowanych wybran
   assert.match(source, /readAllWorkdaysForWorkerIntegrity/)
 })
 
-test('ręczny zapis kontroluje tylko historię wybranego pracownika i nie czeka na polling widoczności', () => {
+test('ręczny zapis kontroluje historię pracownika, powiązuje czynność i nie czeka na polling widoczności', () => {
   assert.match(source, /EventsPageForOrgByWorker/)
   assert.match(source, /WorkdaysPageForOrgByWorker/)
   assert.match(source, /async function readWorkerIntegritySnapshot/)
   assert.match(source, /const \[eventRows, workdayRows, clients, zones, workers\] = await Promise\.all/)
   assert.match(createSource, /const \[, integritySnapshot\] = await Promise\.all/)
   assert.match(createSource, /rows:\s*integritySnapshot\?\.events/)
-  assert.match(createSource, /rows:\s*integritySnapshot\?\.workdays/)
+  assert.match(createSource, /resolveContainingWorkdayId\(integritySnapshot\?\.workdays/)
   assert.match(createSource, /mutationPayload\.workerLogin = workerLogin/)
   assert.match(updateSource, /mutationPayload\.workerLogin = workerLogin/)
   assert.match(source, /fetchPolicy: 'SERVER_ONLY'/)
@@ -89,4 +83,17 @@ test('merge zachowuje kanoniczne pola jawnego Eventu zamiast nadpisywać je nows
   assert.match(source, /merged\[field\] = explicitSource\[field\]/)
   assert.match(source, /existingIsExplicitEvent !== incomingIsExplicitEvent/)
   assert.match(source, /const preferred = incomingIsExplicitEvent \? item : existing/)
+})
+
+test('ewidencja czasu nie wraca do sumy Workday, gdy nie można pobrać sesji Event', () => {
+  const getWorkdaysStart = source.indexOf('export async function getWorkdays')
+  const getWorkerTimeStart = source.indexOf('export async function getWorkerTime', getWorkdaysStart)
+  const getRecentEventsStart = source.indexOf('export async function getRecentEvents', getWorkerTimeStart)
+  const getWorkdaysSource = source.slice(getWorkdaysStart, getWorkerTimeStart)
+  const getWorkerTimeSource = source.slice(getWorkerTimeStart, getRecentEventsStart)
+
+  assert.match(getWorkdaysSource, /getMappedEventsForOrg\(orgId\)/)
+  assert.doesNotMatch(getWorkdaysSource, /getMappedEventsForOrg\(orgId\)\.catch\(\(\) => \[\]\)/)
+  assert.match(getWorkerTimeSource, /source:\s*'events'/)
+  assert.doesNotMatch(getWorkerTimeSource, /\.catch\(\(\) => \(\{ items: \[\] \}\)\)/)
 })

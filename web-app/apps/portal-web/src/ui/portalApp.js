@@ -11,21 +11,45 @@ import {
   completePhoneMfaEnrollment,
   completeTotpEnrollment,
   ensureSessionContext,
+  getOrganizationProfile,
   getCleaningCompanyLegalDocuments,
   getSession,
   getStoredCleaningCompanyEmailLinkEmail,
   isCleaningCompanyEmailLink,
   login,
+  loginWithGoogle,
+  lookupCompanyByNip,
   logout,
+  refreshEmailVerification,
   requestCleaningCompanyEmailLink,
   requestPasswordReset,
+  requestEmailVerification,
   requestPlatformEmailMfaCode,
   requireAuth,
+  saveOrganizationProfile,
+  saveSession,
   selectOrganization,
+  setOrganizationAuthScope,
   startCleaningCompanyGoogleSignIn,
   verifyPlatformEmailMfaCode,
 } from '../auth/authService'
-import { getDataSourceLabel, waitForFirebaseAuthReady } from '../firebase/firebaseClient'
+import { getDataSourceLabel, isFirebaseConfigured, waitForFirebaseAuthReady } from '../firebase/firebaseClient'
+import {
+  bindRegistrationAccount,
+  capturePendingRegistrationEntry,
+  clearPendingRegistrationEntry,
+  completeRegistrationCompany,
+  getPendingRegistrationEntry,
+  getRegistrationPageUrl,
+  hasPendingRegistrationBindToken,
+  isRegistrationApiConfigured,
+  isSafeStripeCheckoutUrl,
+  lookupRegistrationCompany,
+  markPendingGoogleAuthStarted,
+  resumeRegistrations,
+  saveRegistrationConsents,
+  verifyRegistration,
+} from '../services/registrationOnboardingService'
 import { createClient, deleteClient, getClients, updateClient } from '../services/clientService'
 import {
   createWorkerUser,
@@ -48,25 +72,6 @@ import {
   updateEvent,
   updateWorkday,
 } from '../services/workdayService'
-import {
-  createBackup,
-  deleteBackup,
-  ensureBackupAutomation,
-  getBackupDownload,
-  inspectBackupFile,
-  listBackups,
-  restoreBackupById,
-  restoreBackupFromFile,
-  restoreLatestPreRestore,
-} from '../services/backupService'
-import {
-  STYLE_FALLBACK_ID,
-  clearUserStyle,
-  getEffectiveStyle,
-  listAvailableStyles,
-  setOrgDefaultStyle,
-  setUserStyle,
-} from '../services/styleService'
 import { deletePortalTasks, fetchPortalTasks, upsertPortalTasks } from '../services/portalTaskService'
 import {
   deleteScheduleTasks,
@@ -74,12 +79,8 @@ import {
   setScheduleTaskLifecycleStatus,
   upsertScheduleTasks,
 } from '../services/scheduleTaskDataConnectService'
-import {
-  closePlatformOrganization,
-  listPlatformOrganizations,
-  openPlatformOrganization,
-  updatePlatformOrganization,
-} from '../services/platformDataConnectService'
+import { createCleanziAdminPanel } from '../../../../../Cleanzi-admin/frontend/index.js'
+import { isPlatformFirebaseConfigured } from '../../../../../Cleanzi-admin/frontend/platformFirebaseClient.js'
 import { portalLayoutTemplate } from './layoutTemplate'
 import { createRouter } from './router'
 
@@ -98,16 +99,20 @@ import {
   setSelectOptions,
   todayYmd,
   toIso,
+  ymdToWarsawIsoRangeEnd,
+  ymdToWarsawIsoRangeStart,
 } from '../app/shared/index.js'
 
 let portalNoticeTimer = null
-let platformOrganizationsPage = 1
-let platformOrganizationsTotalPages = 1
-let platformOrganizationsLoading = false
-let platformSelectedOrganization = null
+let cleanziAdminPanel = null
 let pendingMfaChallenge = null
 let pendingMfaEnrollmentType = ''
 let pendingEmailMfaChallengeId = ''
+let selectableOrganizations = []
+let pendingRegistration = null
+let activeRegistrationAttempt = null
+let pendingRegistrationNeedsVerification = false
+let companyRegistryMetadata = {}
 let cleaningCompanyLegalDocuments = null
 let cleaningCompanyOnboardingCommandId = ''
 let cleaningCompanyRegistrationAvailable = false
@@ -138,9 +143,6 @@ const ROUTE_SYNC_POLICY_STALE_FIRST = 'stale-first'
 const ROUTE_SYNC_POLICY_FORCE = 'force'
 const ROUTE_SYNC_POLICY_BACKGROUND = 'background'
 const routeSyncMeta = new Map()
-const SETTINGS_TAB_STYLES = 'styles'
-const SETTINGS_TAB_BACKUP = 'backup'
-const SETTINGS_TAB_STORAGE_KEY = 'portal.settings.activeTab'
 const CURRENT_ROUTE_STORAGE_KEY = 'portal.currentRoute'
 const SIDEBAR_COLLAPSE_STORAGE_KEY = 'portal.sidebarCollapsed'
 const SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS = [
@@ -165,9 +167,16 @@ const SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS = [
   { id: 'sub-workday-stop-proposals', kind: 'subsection', label: 'Godziny do weryfikacji', meta: 'Podsekcja dział "Pracownicy"', route: 'workdayStopProposals' },
   { id: 'section-reports', kind: 'section', label: 'Raporty', meta: 'Sekcja', route: 'reports' },
   { id: 'sub-reports-summary', kind: 'subsection', label: 'Zestawienia', meta: 'Podsekcja dział "Raporty"', route: 'reports' },
-  { id: 'section-settings', kind: 'section', label: 'Ustawienia', meta: 'Sekcja', route: 'settingsStyles' },
-  { id: 'sub-settings-styles', kind: 'subsection', label: 'Style', meta: 'Podsekcja dział "Ustawienia"', route: 'settingsStyles' },
-  { id: 'sub-settings-backup', kind: 'subsection', label: 'Kopia zapasowa', meta: 'Podsekcja dział "Ustawienia"', route: 'settingsBackup' },
+  { id: 'section-settings', kind: 'section', label: 'Ustawienia', meta: 'Sekcja', route: 'settings' },
+  { id: 'sub-settings-profile', kind: 'subsection', label: 'Profil', meta: 'Ustawienia · Moje konto', route: 'settingsProfile' },
+  { id: 'sub-settings-notifications', kind: 'subsection', label: 'Powiadomienia', meta: 'Ustawienia · Moje konto', route: 'settingsNotifications' },
+  { id: 'sub-settings-language-app', kind: 'subsection', label: 'Język i aplikacja', meta: 'Ustawienia · Moje konto', route: 'settingsLanguageApp' },
+  { id: 'sub-settings-account-security', kind: 'subsection', label: 'Bezpieczeństwo konta', meta: 'Ustawienia · Moje konto', route: 'settingsAccountSecurity' },
+  { id: 'sub-settings-organization-data', kind: 'subsection', label: 'Dane organizacji', meta: 'Ustawienia · Organizacja', route: 'settingsOrganizationData' },
+  { id: 'sub-settings-alerts', kind: 'subsection', label: 'Alerty', meta: 'Ustawienia · Organizacja', route: 'settingsAlerts' },
+  { id: 'sub-settings-integrations', kind: 'subsection', label: 'Integracje', meta: 'Ustawienia · Organizacja', route: 'settingsIntegrations' },
+  { id: 'sub-settings-billing', kind: 'subsection', label: 'Subskrypcja i rozliczenia', meta: 'Ustawienia · Organizacja', route: 'settingsBilling' },
+  { id: 'sub-settings-data-security', kind: 'subsection', label: 'Bezpieczeństwo i dane', meta: 'Ustawienia · Organizacja', route: 'settingsDataSecurity' },
 ]
 const WORKER_DETAIL_COLUMN_WIDTHS_STORAGE_KEY = 'portal.workerDetailColumnWidths'
 const GRID_COLUMN_RESIZE_CLASS = 'grid-col-resize-active'
@@ -188,9 +197,9 @@ const CALENDAR_TONE_OPTIONS = [
   { value: 'message', label: 'Wiadomość pracownika', css: 'message' },
 ]
 const FLOATING_TABLE_SCROLL_SELECTOR =
-  '#portalRoot :is(.events-table, .workers-table, .zones-table, .rep-tablewrap, .backup-table-wrap)'
+  '#portalRoot :is(.events-table, .workers-table, .zones-table, .rep-tablewrap)'
 const FLOATING_TABLE_SCROLL_CLOSEST_SELECTOR =
-  '.events-table, .workers-table, .zones-table, .rep-tablewrap, .backup-table-wrap'
+  '.events-table, .workers-table, .zones-table, .rep-tablewrap'
 const BLOCKING_MODAL_SELECTORS = [
   '#evEditorOverlay',
   '#evCommentOverlay',
@@ -210,6 +219,18 @@ const PORTAL_NOTIFICATION_ALERT_SELECTORS = [
 ]
 const PORTAL_INTERACTION_FIELD_SELECTOR =
   'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [contenteditable="true"]'
+const PORTAL_SETTINGS_ROUTES = new Set([
+  'settings',
+  'settingsProfile',
+  'settingsNotifications',
+  'settingsLanguageApp',
+  'settingsAccountSecurity',
+  'settingsOrganizationData',
+  'settingsAlerts',
+  'settingsIntegrations',
+  'settingsBilling',
+  'settingsDataSecurity',
+])
 const PORTAL_ROUTE_VIEW_IDS = {
   dashboard: 'view-dashboard',
   calendar: 'view-calendar',
@@ -229,12 +250,15 @@ const PORTAL_ROUTE_VIEW_IDS = {
   clientProfileDetails: 'view-clientProfileDetails',
   reports: 'view-reports',
   settings: 'view-settings',
-  settingsStyles: 'view-settings',
-  settingsBackup: 'view-settings',
-}
-const PORTAL_TEMPLATE_ROUTE_ALIASES = {
-  settingsStyles: 'settings',
-  settingsBackup: 'settings',
+  settingsProfile: 'view-settings',
+  settingsNotifications: 'view-settings',
+  settingsLanguageApp: 'view-settings',
+  settingsAccountSecurity: 'view-settings',
+  settingsOrganizationData: 'view-settings',
+  settingsAlerts: 'view-settings',
+  settingsIntegrations: 'view-settings',
+  settingsBilling: 'view-settings',
+  settingsDataSecurity: 'view-settings',
 }
 const PORTAL_ROUTE_FEATURE_KEYS = {
   dashboard: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'workerProfile', 'orders', 'kanban', 'calendar'],
@@ -254,9 +278,23 @@ const PORTAL_ROUTE_FEATURE_KEYS = {
   clientProfileDetails: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar'],
   reports: ['dashboard', 'events', 'zones', 'clientProfile', 'workerTime', 'reports'],
   settings: ['settings'],
-  settingsStyles: ['settings'],
-  settingsBackup: ['settings'],
+  settingsProfile: ['settings'],
+  settingsNotifications: ['settings'],
+  settingsLanguageApp: ['settings'],
+  settingsAccountSecurity: ['settings'],
+  settingsOrganizationData: ['settings'],
+  settingsAlerts: ['settings'],
+  settingsIntegrations: ['settings'],
+  settingsBilling: ['settings'],
+  settingsDataSecurity: ['settings'],
 }
+const PORTAL_ROUTE_CAPABILITIES = Object.freeze({
+  calendar: 'scheduling',
+  orders: 'scheduling',
+  ordersMap: 'scheduling',
+  kanban: 'zoneTasks',
+  audits: 'qualitySla',
+})
 const PORTAL_ROUTE_BIND_KEYS = {
   dashboard: 'dashboard',
   calendar: 'calendar',
@@ -275,8 +313,15 @@ const PORTAL_ROUTE_BIND_KEYS = {
   clientProfileDetails: 'clientProfile:details',
   reports: 'reports',
   settings: 'settings',
-  settingsStyles: 'settings',
-  settingsBackup: 'settings',
+  settingsProfile: 'settings',
+  settingsNotifications: 'settings',
+  settingsLanguageApp: 'settings',
+  settingsAccountSecurity: 'settings',
+  settingsOrganizationData: 'settings',
+  settingsAlerts: 'settings',
+  settingsIntegrations: 'settings',
+  settingsBilling: 'settings',
+  settingsDataSecurity: 'settings',
 }
 const PORTAL_ROUTE_LOADING_HTML = `
   <div class="portal-section-loading" role="status" aria-live="polite" aria-busy="true" style="min-height:240px;display:grid;place-items:center;padding:32px;">
@@ -305,11 +350,16 @@ function portalRouteExists(route) {
   if (!normalizedRoute) {
     return false
   }
+  const requiredCapability = PORTAL_ROUTE_CAPABILITIES[normalizedRoute]
+  if (requiredCapability && appState.session?.capabilities?.[requiredCapability] !== true) {
+    return false
+  }
   if (normalizedRoute === 'contractProfitability' && !canOpenContractProfitability()) {
     return false
   }
 
-  return [...document.querySelectorAll('[data-route]')].some((node) => node?.dataset?.route === normalizedRoute)
+  return PORTAL_SETTINGS_ROUTES.has(normalizedRoute)
+    || [...document.querySelectorAll('[data-route]')].some((node) => node?.dataset?.route === normalizedRoute)
 }
 
 function readStoredCurrentRoute() {
@@ -512,10 +562,26 @@ function resetPortalState(overrides = {}) {
   routeSyncActiveCount = 0
   routeSyncMeta.clear()
   setRouteSyncOverlayVisible(false)
-  return resetSessionState({
-    settingsActiveTab: readStoredSettingsTab(),
-    ...overrides,
-  })
+  return resetSessionState(overrides)
+}
+
+function cleanupRetiredSettingsStorage() {
+  try {
+    window.sessionStorage.removeItem('portal.settings.activeTab')
+  } catch {
+    // Retired storage cleanup must not block portal startup.
+  }
+
+  try {
+    if (!window.indexedDB) {
+      return
+    }
+    const request = window.indexedDB.deleteDatabase('portal-backups')
+    request.onerror = () => {}
+    request.onblocked = () => {}
+  } catch {
+    // Retired storage cleanup must not block portal startup.
+  }
 }
 
 function parseGridPixelWidths(rawValue) {
@@ -1566,6 +1632,9 @@ function routeHasUsableData(route) {
   if (meta?.loadedAt) {
     return true
   }
+  if (PORTAL_SETTINGS_ROUTES.has(normalizedRoute)) {
+    return true
+  }
 
   switch (normalizedRoute) {
     case 'dashboard':
@@ -1596,9 +1665,6 @@ function routeHasUsableData(route) {
     case 'workdayStopProposals':
       return Boolean(workdayStopProposalsFeature)
     case 'reports':
-    case 'settings':
-    case 'settingsStyles':
-    case 'settingsBackup':
       return true
     default:
       return false
@@ -1676,26 +1742,15 @@ function ymdToDayTimestamp(value) {
 }
 
 function firstDayOfCurrentMonthYmd() {
-  const now = new Date()
-  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-01`
+  return `${todayYmd().slice(0, 7)}-01`
 }
 
 function ymdToIsoRangeStart(ymd) {
-  const value = String(ymd ?? '').trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return ''
-  }
-
-  return `${value}T00:00:00.000Z`
+  return ymdToWarsawIsoRangeStart(ymd)
 }
 
 function ymdToIsoRangeEnd(ymd) {
-  const value = String(ymd ?? '').trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return ''
-  }
-
-  return `${value}T23:59:59.999Z`
+  return ymdToWarsawIsoRangeEnd(ymd)
 }
 
 function calendarDateFromYmd(ymd) {
@@ -2567,12 +2622,21 @@ function roleLevel(role) {
   return 1
 }
 
+function currentSessionRoleLevel() {
+  const declaredLevel = Number(appState.session?.roleLevel)
+  return Math.max(
+    roleLevel(appState.session?.role),
+    roleLevel(appState.session?.roleCode),
+    Number.isFinite(declaredLevel) ? declaredLevel : 0,
+  )
+}
+
 function canManageWorkers() {
-  return roleLevel(appState.session?.role) >= 2
+  return currentSessionRoleLevel() >= 2
 }
 
 function canAdministerWorkers() {
-  return roleLevel(appState.session?.role) >= 3
+  return currentSessionRoleLevel() >= 3
 }
 
 function canDeleteWorkers() {
@@ -2621,6 +2685,25 @@ function syncProfitabilityEntryPermissions() {
   })
 }
 
+function syncPlanFeaturePermissions() {
+  for (const [route, capability] of Object.entries(PORTAL_ROUTE_CAPABILITIES)) {
+    const allowed = appState.session?.capabilities?.[capability] === true
+    document.querySelectorAll(`[data-route="${route}"]`).forEach((node) => {
+      if (node instanceof HTMLElement) node.hidden = !allowed
+    })
+  }
+
+  const zoneTasksAllowed = appState.session?.capabilities?.zoneTasks === true
+  for (const id of ['znQrFunctionClean', 'znQrFunctionSpecial']) {
+    const input = document.getElementById(id)
+    if (input instanceof HTMLInputElement) {
+      input.disabled = !zoneTasksAllowed
+      if (!zoneTasksAllowed) input.checked = false
+      input.title = zoneTasksAllowed ? '' : 'Ta funkcja wymaga planu PRO.'
+    }
+  }
+}
+
 function canDeleteClients() {
   return canDeleteOrganizationRecords()
 }
@@ -2636,42 +2719,6 @@ function canDeleteOrganizationRecords() {
 
 function canDeleteEvents() {
   return canDeleteOrganizationRecords()
-}
-
-function canManageBackupSettings() {
-  return roleLevel(appState.session?.role) >= 3
-}
-
-function normalizeSettingsTab(value) {
-  const normalized = String(value ?? '').trim().toLowerCase()
-  if (normalized === SETTINGS_TAB_BACKUP) {
-    return SETTINGS_TAB_BACKUP
-  }
-  return SETTINGS_TAB_STYLES
-}
-
-function readStoredSettingsTab() {
-  try {
-    return normalizeSettingsTab(window.sessionStorage.getItem(SETTINGS_TAB_STORAGE_KEY))
-  } catch {
-    return SETTINGS_TAB_STYLES
-  }
-}
-
-function resolveStyleMeta(styleId) {
-  const normalized = String(styleId ?? '').trim()
-  const styles = listAvailableStyles()
-  return styles.find((item) => String(item?.id ?? '').trim() === normalized) ?? null
-}
-
-function applyPortalTheme(styleId) {
-  const root = document.getElementById('portalRoot')
-  if (!(root instanceof HTMLElement)) {
-    return
-  }
-
-  const normalized = resolveStyleMeta(styleId)?.id ?? STYLE_FALLBACK_ID
-  root.setAttribute('data-theme', normalized)
 }
 
 function formatBytes(bytes) {
@@ -2717,37 +2764,6 @@ function loadFullCalendar() {
   }
 
   return fullCalendarBundlePromise
-}
-let settingsFeature = null
-
-function getSettingsFeature() {
-  if (!settingsFeature) {
-    throw new Error('Settings feature is not initialized.')
-  }
-  return settingsFeature
-}
-
-function settingsSetActiveTab(tab, options = {}) {
-  return getSettingsFeature().setActiveTab(tab, options)
-}
-
-async function settingsRefreshStyleState(options = {}) {
-  return getSettingsFeature().refreshStyleState(options)
-}
-
-function settingsSetAccessState() {
-  return getSettingsFeature().setAccessState()
-}
-
-function syncSettingsPermissions() {
-  if (!settingsFeature) {
-    return undefined
-  }
-  return getSettingsFeature().syncPermissions()
-}
-
-async function settingsLoadBackups(options = {}) {
-  return getSettingsFeature().loadBackups(options)
 }
 
 let dashboardFeature = null
@@ -3090,9 +3106,26 @@ function bindContractProfitabilityViewFunctions(...args) {
   return getContractProfitabilityFeature().bind(...args)
 }
 
+let settingsFeature = null
+
+function getSettingsFeature() {
+  if (!settingsFeature) {
+    throw new Error('Settings feature is not initialized.')
+  }
+  return settingsFeature
+}
+
+function renderSettingsView(...args) {
+  return getSettingsFeature().render(...args)
+}
+
+function bindSettingsViewFunctions(...args) {
+  return getSettingsFeature().bind(...args)
+}
+
 function portalRouteTemplateKey(route) {
   const normalizedRoute = normalizeNavigationRoute(route)
-  return PORTAL_TEMPLATE_ROUTE_ALIASES[normalizedRoute] || normalizedRoute
+  return PORTAL_SETTINGS_ROUTES.has(normalizedRoute) ? 'settings' : normalizedRoute
 }
 
 function portalRouteViewId(route) {
@@ -3313,10 +3346,6 @@ async function ensurePortalFeatureListReady(featureKeys = []) {
   }
 }
 
-async function ensurePortalSessionCoreReady() {
-  await ensurePortalFeatureReady('settings')
-}
-
 function portalRouteTemplateIsMounted(route) {
   const templateKey = portalRouteTemplateKey(route)
   if (templateKey === 'dashboard') {
@@ -3403,7 +3432,7 @@ function bindPortalRouteOnce(route, navigation = portalNavigation) {
   }
 
   let cleanup = null
-  switch (normalizedRoute) {
+  switch (PORTAL_SETTINGS_ROUTES.has(normalizedRoute) ? 'settings' : normalizedRoute) {
     case 'dashboard':
       cleanup = bindDashboardViewFunctions()
       break
@@ -3453,9 +3482,7 @@ function bindPortalRouteOnce(route, navigation = portalNavigation) {
       cleanup = bindReportsViewFunctions()
       break
     case 'settings':
-    case 'settingsStyles':
-    case 'settingsBackup':
-      cleanup = bindSettingsViewFunctions()
+      cleanup = bindSettingsViewFunctions(navigation)
       break
     default:
       cleanup = () => {}
@@ -3480,6 +3507,7 @@ async function ensurePortalRouteReady(route, navigation = portalNavigation) {
     await mountPortalRouteTemplate(normalizedRoute)
     await ensurePortalFeatureListReady(PORTAL_ROUTE_FEATURE_KEYS[normalizedRoute] || [])
     bindPortalRouteOnce(normalizedRoute, navigation)
+    syncPlanFeaturePermissions()
   })().catch((error) => {
     portalRouteReadyPromises.delete(normalizedRoute)
     showPortalRouteLoadError(normalizedRoute, error)
@@ -3512,6 +3540,7 @@ function setUserChip(session) {
   const userDot = document.getElementById('userDot')
   const organizationChip = document.getElementById('organizationChip')
   const organizationName = document.getElementById('organizationName')
+  const companyProfileOpen = document.getElementById('companyProfileOpen')
 
   if (userName) {
     userName.textContent = session?.name ?? '-'
@@ -3529,8 +3558,12 @@ function setUserChip(session) {
     organizationChip.hidden = !activeOrganizationName
     organizationChip.dataset.platform = String(session?.roleCode ?? '').toUpperCase() === 'PLATFORM_OWNER' ? 'true' : 'false'
     organizationChip.title = organizationChip.dataset.platform === 'true'
-      ? 'Wróć do Centrum platformy'
-      : 'Aktywna organizacja'
+      ? 'Wróć do Panelu admina'
+      : 'Zmień aktywną organizację'
+  }
+  if (companyProfileOpen) {
+    const roleCode = String(session?.roleCode ?? '').toUpperCase()
+    companyProfileOpen.hidden = !activeOrganizationName || !['OWNER', 'ADMIN', 'ADMINISTRATOR', 'SUPERADMIN'].includes(roleCode)
   }
 }
 
@@ -3689,6 +3722,20 @@ function setLoginResetActionVisible(isVisible) {
   }
 }
 
+function hideLoginTenantFlowPanels() {
+  for (const id of [
+    'loginOrganizationCreatePanel',
+    'loginEmailVerificationPanel',
+    'loginRegistrationConsentsPanel',
+    'loginRegistrationCompanyPanel',
+    'loginRegistrationPaymentPanel',
+    'loginRegistrationUnavailablePanel',
+  ]) {
+    const panel = document.getElementById(id)
+    if (panel) panel.hidden = true
+  }
+}
+
 function setCleaningCompanyRegistrationEntryAvailable(isAvailable) {
   cleaningCompanyRegistrationAvailable = isAvailable === true
   const entry = document.getElementById('loginCompanyEntry')
@@ -3778,7 +3825,8 @@ function showLoginCompanyEmailLinkConfirmation(email = '') {
   if (copy) copy.textContent = 'Dokończ bezpieczne potwierdzenie linku, aby przejść do danych firmy.'
 }
 
-function showLoginCredentials({ showResetAction = false } = {}) {
+function showLoginCredentials({ showResetAction = true } = {}) {
+  hideLoginTenantFlowPanels()
   const credentialsPanel = document.getElementById('loginCredentialsPanel')
   const resetPanel = document.getElementById('loginResetPanel')
   const organizationPanel = document.getElementById('loginOrganizationPanel')
@@ -3805,11 +3853,17 @@ function showLoginCredentials({ showResetAction = false } = {}) {
     loginTitle.textContent = 'Zaloguj się'
   }
   if (loginCopy) {
-    loginCopy.textContent = 'Logowanie do panelu firmy sprz\u0105taj\u0105cej Cleanzi.'
+    if (document.getElementById('loginAuthScope')?.value === 'platform') {
+      loginCopy.textContent = 'Zaloguj się do Panelu admina.'
+    } else {
+      loginCopy.textContent = 'Logowanie do panelu firmy sprz\u0105taj\u0105cej Cleanzi.'
+    }
   }
 }
 
 function showLoginPasswordReset(email = '') {
+  hideLoginTenantFlowPanels()
+  hideLoginCompanyPanels()
   const credentialsPanel = document.getElementById('loginCredentialsPanel')
   const resetPanel = document.getElementById('loginResetPanel')
   const organizationPanel = document.getElementById('loginOrganizationPanel')
@@ -3845,6 +3899,8 @@ function showLoginPasswordReset(email = '') {
 }
 
 function showLoginOrganizationSelection(organizations = []) {
+  selectableOrganizations = Array.isArray(organizations) ? organizations : []
+  hideLoginTenantFlowPanels()
   const credentialsPanel = document.getElementById('loginCredentialsPanel')
   const resetPanel = document.getElementById('loginResetPanel')
   const organizationPanel = document.getElementById('loginOrganizationPanel')
@@ -3853,6 +3909,8 @@ function showLoginOrganizationSelection(organizations = []) {
   const mfaEnrollmentPanel = document.getElementById('loginMfaEnrollmentPanel')
   const loginTitle = document.getElementById('loginTitle')
   const loginCopy = document.getElementById('loginCopy')
+  const createOpen = document.getElementById('loginOrganizationCreateOpen')
+  const hasPendingRegistration = Boolean(pendingRegistration?.registrationId || getPendingRegistrationEntry()?.registrationId)
 
   hideLoginCompanyPanels()
 
@@ -3872,14 +3930,25 @@ function showLoginOrganizationSelection(organizations = []) {
     loginTitle.textContent = 'Wybierz organizacj\u0119'
   }
   if (loginCopy) {
-    loginCopy.textContent = 'To konto ma dost\u0119p do kilku organizacji.'
+    loginCopy.textContent = organizations.length
+      ? hasPendingRegistration
+        ? 'Wybierz istniejącą organizację albo jawnie kontynuuj rejestrację nowej firmy.'
+        : 'Wybierz organizację albo rozpocznij osobną rejestrację nowej firmy.'
+      : hasPendingRegistration
+        ? 'Kontynuuj prawidłową próbę rejestracji, aby utworzyć nową firmę.'
+        : 'To konto nie ma jeszcze organizacji. Rozpocznij rejestrację nowej firmy.'
+  }
+  if (createOpen) {
+    createOpen.textContent = hasPendingRegistration
+      ? 'Kontynuuj rejestrację nowej firmy'
+      : 'Zarejestruj nową firmę'
   }
   if (!organizationList) {
     return
   }
 
   organizationList.replaceChildren()
-  organizations.forEach((organization) => {
+  selectableOrganizations.forEach((organization) => {
     const orgId = String(organization?.orgId ?? '').trim()
     const name = String(organization?.organizationName ?? '').trim()
     if (!orgId || !name) {
@@ -3914,7 +3983,38 @@ function showLoginOrganizationSelection(organizations = []) {
   })
 }
 
+function showLoginOrganizationCreate() {
+  hideLoginTenantFlowPanels()
+  for (const id of ['loginCredentialsPanel', 'loginResetPanel', 'loginOrganizationPanel', 'loginEmailVerificationPanel', 'loginMfaChallengePanel', 'loginMfaEnrollmentPanel']) {
+    const panel = document.getElementById(id)
+    if (panel) panel.hidden = true
+  }
+  const panel = document.getElementById('loginOrganizationCreatePanel')
+  const title = document.getElementById('loginTitle')
+  const copy = document.getElementById('loginCopy')
+  if (panel) panel.hidden = false
+  if (title) title.textContent = 'Zarejestruj nową firmę'
+  if (copy) copy.textContent = 'Nową organizację i 7-dniowy Trial można utworzyć wyłącznie z prawidłowej próby rejestracji.'
+  setLoginResetActionVisible(false)
+}
+
+function showLoginEmailVerification() {
+  hideLoginTenantFlowPanels()
+  for (const id of ['loginCredentialsPanel', 'loginResetPanel', 'loginOrganizationPanel', 'loginOrganizationCreatePanel', 'loginMfaChallengePanel', 'loginMfaEnrollmentPanel']) {
+    const panel = document.getElementById(id)
+    if (panel) panel.hidden = true
+  }
+  const panel = document.getElementById('loginEmailVerificationPanel')
+  const title = document.getElementById('loginTitle')
+  const copy = document.getElementById('loginCopy')
+  if (panel) panel.hidden = false
+  if (title) title.textContent = 'Potwierdź adres email'
+  if (copy) copy.textContent = 'Po potwierdzeniu wróć tutaj i wybierz „Sprawdź ponownie”.'
+  setLoginResetActionVisible(false)
+}
+
 function showLoginMfaChallenge(factors = []) {
+  hideLoginTenantFlowPanels()
   const credentialsPanel = document.getElementById('loginCredentialsPanel')
   const resetPanel = document.getElementById('loginResetPanel')
   const organizationPanel = document.getElementById('loginOrganizationPanel')
@@ -3950,6 +4050,7 @@ function showLoginMfaChallenge(factors = []) {
 }
 
 function showLoginMfaEnrollment() {
+  hideLoginTenantFlowPanels()
   const credentialsPanel = document.getElementById('loginCredentialsPanel')
   const resetPanel = document.getElementById('loginResetPanel')
   const organizationPanel = document.getElementById('loginOrganizationPanel')
@@ -4002,6 +4103,138 @@ function startCompanyEmailRetryCooldown() {
   companyEmailRetryTimer = window.setInterval(refreshCompanyEmailRetryControl, 1_000)
 }
 
+function registrationPlanLabel(attempt = activeRegistrationAttempt) {
+  const planCode = String(attempt?.planCode ?? '').toUpperCase()
+  const labels = { TRIAL: 'Trial 7 dni (168 godzin)', GO_PLUS: 'GO+', PLUS: 'PLUS', PRO: 'PRO' }
+  const plan = labels[planCode] || 'wybrany plan'
+  const billingCycle = String(attempt?.billingCycle ?? '').toUpperCase()
+  if (billingCycle === 'MONTHLY') return `${plan} · płatność miesięczna`
+  if (billingCycle === 'YEARLY') return `${plan} · płatność roczna`
+  return plan
+}
+
+function showOnlyLoginFlowPanel(panelId, title, copy) {
+  hideLoginTenantFlowPanels()
+  for (const id of [
+    'loginCredentialsPanel',
+    'loginResetPanel',
+    'loginOrganizationPanel',
+    'loginMfaChallengePanel',
+    'loginMfaEnrollmentPanel',
+  ]) {
+    const panel = document.getElementById(id)
+    if (panel) panel.hidden = true
+  }
+  const panel = document.getElementById(panelId)
+  if (panel) panel.hidden = false
+  const titleNode = document.getElementById('loginTitle')
+  const copyNode = document.getElementById('loginCopy')
+  if (titleNode) titleNode.textContent = title
+  if (copyNode) copyNode.textContent = copy
+  setLoginResetActionVisible(false)
+}
+
+function showLoginRegistrationConsents(attempt = {}) {
+  activeRegistrationAttempt = { ...activeRegistrationAttempt, ...attempt }
+  showOnlyLoginFlowPanel(
+    'loginRegistrationConsentsPanel',
+    'Zgody rejestracyjne',
+    'Zapisz wymagane zgody przed weryfikacją i utworzeniem firmy.',
+  )
+  const plan = document.getElementById('loginRegistrationPlan')
+  if (plan) plan.textContent = `Plan: ${registrationPlanLabel()}`
+  const existing = document.getElementById('loginRegistrationChooseExisting')
+  if (existing) existing.hidden = selectableOrganizations.length === 0
+}
+
+function syncRegistrationCountryFields() {
+  const country = document.getElementById('loginRegistrationCountry')
+  const taxType = document.getElementById('loginRegistrationTaxType')
+  const lookup = document.getElementById('loginRegistrationLookup')
+  const isPolishNip = country?.value === 'PL' && taxType?.value === 'NIP'
+  if (lookup) lookup.hidden = !isPolishNip
+  if (country?.value !== 'PL' && taxType?.value === 'NIP') taxType.value = 'TIN'
+}
+
+function showLoginRegistrationCompany(attempt = {}) {
+  activeRegistrationAttempt = { ...activeRegistrationAttempt, ...attempt }
+  showOnlyLoginFlowPanel(
+    'loginRegistrationCompanyPanel',
+    'Dane firmy',
+    'Te dane utworzą kanoniczny profil firmy. Dostęp pojawi się dopiero po bezpiecznej finalizacji.',
+  )
+  const plan = document.getElementById('loginRegistrationCompanyPlan')
+  if (plan) plan.textContent = `Plan: ${registrationPlanLabel()}`
+  const ownerFirstName = document.getElementById('loginRegistrationOwnerFirstName')
+  const ownerLastName = document.getElementById('loginRegistrationOwnerLastName')
+  const ownerPhone = document.getElementById('loginRegistrationOwnerPhone')
+  if (ownerFirstName && !ownerFirstName.value) ownerFirstName.value = String(activeRegistrationAttempt?.owner?.firstName ?? '')
+  if (ownerLastName && !ownerLastName.value) ownerLastName.value = String(activeRegistrationAttempt?.owner?.lastName ?? '')
+  if (ownerPhone && !ownerPhone.value) ownerPhone.value = String(activeRegistrationAttempt?.owner?.phone ?? '')
+  const country = document.getElementById('loginRegistrationCountry')
+  const normalizedCountry = String(activeRegistrationAttempt?.countryCode ?? 'PL').toUpperCase()
+  if (country && ['PL', 'DE', 'GB', 'US'].includes(normalizedCountry)) country.value = normalizedCountry
+  const taxType = document.getElementById('loginRegistrationTaxType')
+  if (taxType && normalizedCountry !== 'PL' && taxType.value === 'NIP') taxType.value = 'TIN'
+  const billing = document.getElementById('loginRegistrationBillingFields')
+  if (billing) billing.hidden = activeRegistrationAttempt?.paid !== true
+  const billingEmail = document.getElementById('loginRegistrationBillingEmail')
+  if (billingEmail && !billingEmail.value) billingEmail.value = String(activeRegistrationAttempt?.email ?? '')
+  const save = document.getElementById('loginRegistrationCompanySave')
+  if (save) {
+    save.textContent = activeRegistrationAttempt?.paid === true
+      ? 'Utwórz firmę i przejdź do płatności'
+      : 'Utwórz firmę i rozpocznij Trial 7 dni'
+  }
+  const existing = document.getElementById('loginRegistrationCompanyExisting')
+  if (existing) existing.hidden = selectableOrganizations.length === 0
+  syncRegistrationCountryFields()
+}
+
+function showLoginRegistrationPayment(attempt = {}) {
+  activeRegistrationAttempt = { ...activeRegistrationAttempt, ...attempt }
+  showOnlyLoginFlowPanel(
+    'loginRegistrationPaymentPanel',
+    'Płatność oczekuje',
+    'Dostęp operacyjny pozostaje zamknięty, dopóki podpisany webhook Stripe nie potwierdzi płatności.',
+  )
+  const existing = document.getElementById('loginRegistrationPaymentExisting')
+  if (existing) existing.hidden = selectableOrganizations.length === 0
+}
+
+function showLoginRegistrationUnavailable() {
+  showOnlyLoginFlowPanel(
+    'loginRegistrationUnavailablePanel',
+    'Wznów rejestrację',
+    'Portal nie utworzy organizacji ani Triala bez aktywnej, prawidłowej próby rejestracji.',
+  )
+  const existing = document.getElementById('loginRegistrationUnavailableExisting')
+  if (existing) existing.hidden = selectableOrganizations.length === 0
+}
+
+function showExistingOrganizationsFromRegistration() {
+  if (!selectableOrganizations.length) return
+  setLoginError('')
+  showLoginOrganizationSelection(selectableOrganizations)
+}
+
+function formatRegistrationError(error) {
+  const code = String(error?.code ?? '').toUpperCase()
+  const messages = {
+    REGISTRATION_API_NOT_CONFIGURED: 'Portal nie ma skonfigurowanego adresu Registration API.',
+    REGISTRATION_TOKEN_INVALID: 'Link rejestracyjny wygasł albo został już użyty. Wznów rejestrację.',
+    REGISTRATION_NOT_FOUND: 'Nie znaleziono tej próby rejestracji.',
+    REGISTRATION_EXPIRED: 'Próba rejestracji wygasła. Rozpocznij ją ponownie.',
+    REQUIRED_CONSENT_MISSING: 'Zaakceptuj regulamin i politykę prywatności.',
+    TRIAL_ALREADY_USED: 'To konto wykorzystało już bezpłatny Trial. Wybierz plan płatny.',
+    NIP_INVALID: 'Podaj poprawny polski NIP.',
+    COMPANY_NOT_FOUND: 'Nie znaleziono firmy dla podanego NIP.',
+    COMPANY_LOOKUP_UNAVAILABLE: 'Wyszukiwanie firmy jest chwilowo niedostępne. Dane możesz wpisać ręcznie.',
+    PAID_COMPANY_FIELD_REQUIRED: 'Uzupełnij wymagane dane rozliczeniowe.',
+  }
+  return messages[code] || (error instanceof Error ? error.message : 'Nie udało się dokończyć rejestracji.')
+}
+
 function setLoginControlsBusy(isBusy, label = '') {
   loginControlsBusy = isBusy === true
   const loginButton = document.getElementById('loginBtn')
@@ -4011,6 +4244,7 @@ function setLoginControlsBusy(isBusy, label = '') {
   const loginInput = document.getElementById('loginLogin')
   const passwordInput = document.getElementById('loginPass')
   const resetEmail = document.getElementById('loginResetEmail')
+  const authScope = document.getElementById('loginAuthScope')
   const organizationCancel = document.getElementById('loginOrganizationCancel')
   const organizationButtons = document.querySelectorAll('.login-organization-option')
   const companyEmailSend = document.getElementById('loginCompanyEmailSend')
@@ -4039,6 +4273,9 @@ function setLoginControlsBusy(isBusy, label = '') {
   if (resetEmail) {
     resetEmail.disabled = isBusy
   }
+  if (authScope) {
+    authScope.disabled = isBusy
+  }
   if (organizationCancel) {
     organizationCancel.disabled = isBusy
   }
@@ -4065,6 +4302,19 @@ function setLoginControlsBusy(isBusy, label = '') {
     button.disabled = isBusy
   })
   ;[
+    'loginGoogleBtn', 'loginOrganizationCreateOpen', 'loginOrganizationCreateBack',
+    'loginOrganizationCreate',
+    'loginRegistrationTerms', 'loginRegistrationPrivacy', 'loginRegistrationMarketing',
+    'loginRegistrationConsentsSave', 'loginRegistrationChooseExisting', 'loginRegistrationCancel',
+    'loginRegistrationLegalName', 'loginRegistrationCountry', 'loginRegistrationTaxType',
+    'loginRegistrationOwnerFirstName', 'loginRegistrationOwnerLastName', 'loginRegistrationOwnerPhone',
+    'loginRegistrationTaxId', 'loginRegistrationLookup', 'loginRegistrationAddress',
+    'loginRegistrationPostalCode', 'loginRegistrationLocality', 'loginRegistrationBillingEmail',
+    'loginRegistrationInvoiceEmail', 'loginRegistrationBillingPhone', 'loginRegistrationCompanySave',
+    'loginRegistrationCompanyExisting', 'loginRegistrationCompanyCancel',
+    'loginRegistrationPaymentCheck', 'loginRegistrationPaymentExisting', 'loginRegistrationPaymentCancel',
+    'loginRegistrationRestart', 'loginRegistrationUnavailableExisting', 'loginRegistrationUnavailableCancel',
+    'loginEmailVerificationCheck', 'loginEmailVerificationSend', 'loginEmailVerificationCancel',
     'loginMfaFactor', 'loginMfaSendCode', 'loginMfaCode', 'loginMfaConfirm', 'loginMfaCancel',
     'loginMfaChooseTotp', 'loginMfaChooseSms', 'loginMfaChooseEmail', 'loginMfaPhone', 'loginMfaPhoneSend',
     'loginMfaEmail', 'loginMfaEmailSend',
@@ -4591,10 +4841,12 @@ function getWorkdayStopProposalsFeature() {
 }
 
 async function fetchWorkerProfilesForCurrentSession(force = false, options = {}) {
+  await ensurePortalFeatureReady('workerProfile')
   return getWorkerProfileFeature().fetch(force, options)
 }
 
 async function fetchWorkerAccountForCurrentSession(force = false) {
+  await ensurePortalFeatureReady('workerAccount')
   return getWorkerAccountFeature().fetch(force)
 }
 
@@ -4615,6 +4867,7 @@ function workerTimeSyncSelectionUi() {
 }
 
 async function fetchWorkerDetailForCurrentSession(options = {}) {
+  await ensurePortalFeatureReady('workerTimeDetail')
   return getWorkerTimeDetailFeature().fetch(options)
 }
 
@@ -5678,7 +5931,10 @@ function deferRouteOrderDataRefresh(...args) {
 }
 
 function ordersListSourceOrders(...args) {
-  return getCalendarFeature().listSourceOrders(...args)
+  // Worker/client summaries can start loading before the lazily loaded
+  // calendar bundle is ready. An empty cache is a valid state at that point;
+  // throwing here aborts the whole route synchronization.
+  return calendarFeature?.listSourceOrders?.(...args) ?? []
 }
 
 function calendarTimelineOrderDurationMinutes(...args) {
@@ -5858,10 +6114,6 @@ function bindWorkerAccountViewFunctions(router) {
 
 function bindReportsViewFunctions() {
   return getReportsFeature().bind()
-}
-
-function bindSettingsViewFunctions() {
-  return getSettingsFeature().bind()
 }
 
 function createPortalFeatureContext() {
@@ -6048,24 +6300,16 @@ function createPortalFeatureContext() {
     ordersListSourceOrders,
     ordersLoadGoogleMaps,
     ordersSyncRemoteTimelineOrders,
-    SETTINGS_TAB_BACKUP,
-    SETTINGS_TAB_STORAGE_KEY,
-    SETTINGS_TAB_STYLES,
-    STYLE_FALLBACK_ID,
-    applyPortalTheme,
     canAdministerWorkers,
     canDeleteWorkers,
     canDeleteClients,
     canDeleteEvents,
     canEditProfitability,
-    canManageBackupSettings,
     canManageClients,
     canManageEvents,
     canManageWorkers,
     canReadProfitability,
     canResetWorkerPasswords,
-    clearUserStyle,
-    createBackup,
     createBindingHelpers,
     createClient,
     createEvent,
@@ -6077,7 +6321,6 @@ function createPortalFeatureContext() {
     dashboardLateMinutesToHm,
     dashboardWorkerSurnameDisplayName,
     dashboardWorkerSurnameSortKey,
-    deleteBackup,
     deleteClient,
     deleteEvent,
     forceDeletePortalEvents,
@@ -6085,7 +6328,6 @@ function createPortalFeatureContext() {
     deleteZone,
     durationSecondsToHm,
     durationSecondsToHms,
-    ensureBackupAutomation,
     ensureJsPdfLoaded,
     ensurePdfMakeLoaded,
     ensurePdfUnicodeFont,
@@ -6096,45 +6338,32 @@ function createPortalFeatureContext() {
     firstDayOfCurrentMonthYmd,
     formatDatePl,
     formatTime,
-    getBackupDownload,
     getClients,
-    getEffectiveStyle,
     getEventsFingerprintForOrg,
     getNextWorkerIdPreview,
     getWorkdays,
     getWorkers,
     getWorkerTime,
     getZones,
-    inspectBackupFile,
     isUnassignedCleanZone,
     isoToLocalDateTimeInput,
-    listAvailableStyles,
-    listBackups,
     localDateTimeInputToIso,
     mapZoneForView,
     normalizeClientStatus,
     normalizeSearchText,
-    normalizeSettingsTab,
     openEventHistoryFromRow,
     ordersSelectCreatedClientInEditor,
     pad2,
     paginate,
-    readStoredSettingsTab,
     refreshDashboardAfterEventSave,
     refreshDashboardWidgets,
     refreshWorkerAccountTimeAfterWorkdaySave,
     reportHistoryFilterOptions,
     reportHistoryRefreshAfterEventSave,
     resolveClientLabelWithQrFallback,
-    resolveStyleMeta,
-    restoreBackupById,
-    restoreBackupFromFile,
-    restoreLatestPreRestore,
-    setOrgDefaultStyle,
     setPdfUnicodeFont,
     setSelectOptions,
     setSubwelcomeMetric,
-    setUserStyle,
     setWorkerPassword,
     setupResizableGridTable,
     showTransientNotice,
@@ -6198,6 +6427,10 @@ function createPortalFeatureContext() {
   }
 }
 
+/*
+ * Poprzednia implementacja Panelu admina pozostaje w historii Git.
+ * Nowy moduł jest wydzielony do katalogu Cleanzi-admin.
+ *
 function setPlatformCenterMessage(message = '', tone = 'error') {
   const node = document.getElementById('platformCenterMessage')
   if (!node) return
@@ -6438,7 +6671,9 @@ function bindPlatformCenter(router) {
     void loadPlatformOrganizationCenter(router)
   }
   const handleCenterLogout = async () => {
-    if (getSession()?.platformContextId) await closePlatformOrganization().catch(() => {})
+    if (getSession()?.platformContextId && cleanziAdminPanel) {
+      await cleanziAdminPanel.closeContext({ silent: true }).catch(() => {})
+    }
     logout()
     resetPortalState()
     setPlatformCenterVisible(false)
@@ -6578,6 +6813,223 @@ function bindPlatformCenter(router) {
   }
 }
 
+*/
+
+function getCleanziAdminPanel(router) {
+  if (!cleanziAdminPanel) {
+    cleanziAdminPanel = createCleanziAdminPanel({
+      router,
+      acceptPlatformContext,
+      clearPlatformContextSession,
+      getSession,
+      logout,
+      resetPortalState,
+      setUserChip,
+      activatePortalSession,
+      showPortal,
+      showLoginScreen,
+      showLoginCredentials,
+    })
+  }
+  return cleanziAdminPanel
+}
+
+async function showPlatformOrganizationCenter(router, options = {}) {
+  return getCleanziAdminPanel(router).show(options)
+}
+
+function bindPlatformCenter(router) {
+  return getCleanziAdminPanel(router).bind()
+}
+
+function setCompanyProfileMessage(message = '', tone = 'error') {
+  const node = document.getElementById('companyProfileMessage')
+  if (!node) return
+  node.textContent = message
+  node.dataset.tone = message ? tone : ''
+}
+
+function setCompanyProfileValue(id, value) {
+  const input = document.getElementById(id)
+  if (input instanceof HTMLInputElement) input.value = String(value ?? '')
+}
+
+function fillCompanyProfile(profile = {}) {
+  const form = document.getElementById('companyProfileForm')
+  if (form) form.dataset.version = String(Number(profile.version || 0))
+  setCompanyProfileValue('companyProfileNip', profile.nip)
+  setCompanyProfileValue('companyProfileRegon', profile.regon)
+  setCompanyProfileValue('companyProfileLegalName', profile.legalName)
+  setCompanyProfileValue('companyProfileAddress', profile.registeredAddress)
+  setCompanyProfileValue('companyProfilePostalCode', profile.postalCode)
+  setCompanyProfileValue('companyProfileCity', profile.city)
+  setCompanyProfileValue('companyProfileOwnerName', profile.ownerFullName)
+  setCompanyProfileValue('companyProfileBillingName', profile.billingName)
+  setCompanyProfileValue('companyProfileBillingNip', profile.billingNip)
+  setCompanyProfileValue('companyProfileBillingEmail', profile.billingEmail)
+  setCompanyProfileValue('companyProfileBillingAddress', profile.billingAddress)
+  setCompanyProfileValue('companyProfileBillingPostalCode', profile.billingPostalCode)
+  setCompanyProfileValue('companyProfileBillingCity', profile.billingCity)
+  companyRegistryMetadata = {
+    registryProvider: profile.registryProvider || '',
+    registryFetchedAt: profile.registryFetchedAt || null,
+  }
+}
+
+async function showCompanyProfileEditor(session, { required = false } = {}) {
+  const overlay = document.getElementById('companyProfileOverlay')
+  if (!overlay) return
+  const closeButton = document.getElementById('companyProfileClose')
+  const title = document.getElementById('companyProfileTitle')
+  const copy = document.getElementById('companyProfileCopy')
+  overlay.hidden = false
+  if (closeButton) closeButton.hidden = required
+  if (title) title.textContent = required ? 'Uzupełnij dane organizacji' : 'Profil firmy'
+  if (copy) {
+    copy.textContent = required
+      ? 'Uzupełnienie profilu jest wymagane przed dalszą pracą właściciela.'
+      : 'Zaktualizuj dane firmy lub pobierz je ponownie z GUS.'
+  }
+  setCompanyProfileMessage('Pobieranie profilu firmy...', 'success')
+  try {
+    const data = await getOrganizationProfile(session.activeOrgId)
+    fillCompanyProfile(data?.profile || {})
+    setCompanyProfileMessage('Uzupełnij wymagane dane i zapisz profil.', 'success')
+  } catch (error) {
+    setCompanyProfileMessage(error instanceof Error ? error.message : 'Nie udało się pobrać profilu firmy.')
+  }
+}
+
+async function showRequiredCompanyProfile(session) {
+  const overlay = document.getElementById('companyProfileOverlay')
+  const required = session?.onboardingRequired === true && String(session?.roleCode ?? '').toUpperCase() === 'OWNER'
+  if (!required) {
+    if (overlay) overlay.hidden = true
+    return
+  }
+  await showCompanyProfileEditor(session, { required: true })
+}
+
+function bindCompanyProfileOnboarding() {
+  const form = document.getElementById('companyProfileForm')
+  const lookup = document.getElementById('companyProfileLookup')
+  const logoutButton = document.getElementById('companyProfileLogout')
+  const closeButton = document.getElementById('companyProfileClose')
+  const openButton = document.getElementById('companyProfileOpen')
+  if (!form) return () => {}
+
+  const readValue = (id) => String(document.getElementById(id)?.value ?? '').trim()
+  const handleLookup = async () => {
+    lookup.disabled = true
+    setCompanyProfileMessage('Pobieranie danych z GUS...', 'success')
+    try {
+      const company = await lookupCompanyByNip(readValue('companyProfileNip'))
+      setCompanyProfileValue('companyProfileNip', company?.nip)
+      setCompanyProfileValue('companyProfileRegon', company?.regon)
+      setCompanyProfileValue('companyProfileLegalName', company?.legalName)
+      setCompanyProfileValue('companyProfileAddress', company?.registeredAddress)
+      setCompanyProfileValue('companyProfilePostalCode', company?.postalCode)
+      setCompanyProfileValue('companyProfileCity', company?.city)
+      companyRegistryMetadata = {
+        registryProvider: 'GUS_BIR1',
+        registryFetchedAt: new Date().toISOString(),
+      }
+      setCompanyProfileMessage(company?.cached ? 'Dane pobrano z bezpiecznej pamięci GUS.' : 'Dane pobrano z GUS.', 'success')
+    } catch (error) {
+      setCompanyProfileMessage(error instanceof Error ? error.message : 'Nie udało się pobrać danych z GUS.')
+    } finally {
+      lookup.disabled = false
+    }
+  }
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    const session = appState.session
+    if (!session?.activeOrgId) return
+    const saveButton = document.getElementById('companyProfileSave')
+    saveButton.disabled = true
+    setCompanyProfileMessage('Zapisywanie profilu...', 'success')
+    try {
+      const data = await saveOrganizationProfile(
+        session.activeOrgId,
+        Number(form.dataset.version || 0),
+        {
+          nip: readValue('companyProfileNip'),
+          regon: readValue('companyProfileRegon'),
+          legalName: readValue('companyProfileLegalName'),
+          registeredAddress: readValue('companyProfileAddress'),
+          postalCode: readValue('companyProfilePostalCode'),
+          city: readValue('companyProfileCity'),
+          countryCode: 'PL',
+          ownerFullName: readValue('companyProfileOwnerName'),
+          billingName: readValue('companyProfileBillingName'),
+          billingNip: readValue('companyProfileBillingNip'),
+          billingEmail: readValue('companyProfileBillingEmail'),
+          billingAddress: readValue('companyProfileBillingAddress'),
+          billingPostalCode: readValue('companyProfileBillingPostalCode'),
+          billingCity: readValue('companyProfileBillingCity'),
+          billingCountryCode: 'PL',
+          ...companyRegistryMetadata,
+        },
+      )
+      fillCompanyProfile(data?.profile || {})
+      if (!data?.completeness?.baseComplete) {
+        setCompanyProfileMessage(`Uzupełnij pola: ${(data?.completeness?.missingBase || []).join(', ')}.`)
+        return
+      }
+      session.onboardingRequired = false
+      session.onboardingStatus = 'COMPLETED'
+      session.organizationName = data.profile?.legalName || session.organizationName
+      session.orgName = session.organizationName
+      saveSession(session)
+      setUserChip(session)
+      document.getElementById('companyProfileOverlay').hidden = true
+      setCompanyProfileMessage('Profil firmy zapisano.', 'success')
+    } catch (error) {
+      setCompanyProfileMessage(error instanceof Error ? error.message : 'Nie udało się zapisać profilu firmy.')
+    } finally {
+      saveButton.disabled = false
+    }
+  }
+  const handleLogout = () => document.getElementById('logoutBtn')?.click()
+  const handleClose = () => {
+    const overlay = document.getElementById('companyProfileOverlay')
+    if (overlay) overlay.hidden = true
+  }
+  const handleOpen = () => {
+    const session = appState.session
+    const roleCode = String(session?.roleCode ?? '').toUpperCase()
+    if (!session?.activeOrgId || !['OWNER', 'ADMIN', 'ADMINISTRATOR', 'SUPERADMIN'].includes(roleCode)) return
+    void showCompanyProfileEditor(session, { required: false })
+  }
+  lookup?.addEventListener('click', handleLookup)
+  form.addEventListener('submit', handleSubmit)
+  logoutButton?.addEventListener('click', handleLogout)
+  closeButton?.addEventListener('click', handleClose)
+  openButton?.addEventListener('click', handleOpen)
+  return () => {
+    lookup?.removeEventListener('click', handleLookup)
+    form.removeEventListener('submit', handleSubmit)
+    logoutButton?.removeEventListener('click', handleLogout)
+    closeButton?.removeEventListener('click', handleClose)
+    openButton?.removeEventListener('click', handleOpen)
+  }
+}
+
+function bindTenantOrganizationSwitcher() {
+  const chip = document.getElementById('organizationChip')
+  if (!chip) return () => {}
+  const handleSwitch = () => {
+    const session = appState.session
+    if (!session || String(session.roleCode ?? '').toUpperCase() === 'PLATFORM_OWNER') return
+    stopDashboardAutoRefresh()
+    setLoginError('')
+    showLoginScreen()
+    showLoginOrganizationSelection(Array.isArray(session.organizations) ? session.organizations : [])
+  }
+  chip.addEventListener('click', handleSwitch)
+  return () => chip.removeEventListener('click', handleSwitch)
+}
+
 async function activatePortalSession(session, router, { restoreRoute = false } = {}) {
   const activeOrgId = String(session?.activeOrgId ?? session?.orgId ?? '').trim()
   const organizationName = String(session?.organizationName ?? '').trim()
@@ -6587,12 +7039,11 @@ async function activatePortalSession(session, router, { restoreRoute = false } =
 
   resetPortalState({ session })
   syncProfitabilityEntryPermissions()
+  syncPlanFeaturePermissions()
   showPortal()
   setUserChip(session)
-  await ensurePortalSessionCoreReady()
-  syncSettingsPermissions()
+  await showRequiredCompanyProfile(session)
   syncProfitabilityEntryPermissions()
-  await settingsRefreshStyleState({ silent: true })
 
   if (restoreRoute) {
     await router.go(readStoredCurrentRoute())
@@ -6604,6 +7055,241 @@ async function activatePortalSession(session, router, { restoreRoute = false } =
 
   if (dashboardFeature && normalizeNavigationRoute(appState.currentRoute) === 'dashboard') {
     startDashboardAutoRefresh()
+  }
+}
+
+function organizationsFromLoginResult(result) {
+  if (result?.status === 'READY' && result.session) {
+    const organizations = Array.isArray(result.session.organizations) ? result.session.organizations : []
+    if (organizations.length) return organizations
+    const orgId = String(result.session.activeOrgId ?? '').trim()
+    const organizationName = String(result.session.organizationName ?? '').trim()
+    return orgId && organizationName
+      ? [{ orgId, organizationName, role: String(result.session.roleCode ?? '') }]
+      : []
+  }
+  return Array.isArray(result?.organizations) ? result.organizations : []
+}
+
+function isRegistrationVerificationError(error) {
+  const code = String(error?.code ?? '').toUpperCase()
+  return code.includes('EMAIL') && (code.includes('VERIFY') || code.includes('VERIFIED'))
+}
+
+async function routePendingRegistrationAttempt(attempt) {
+  activeRegistrationAttempt = attempt
+  if (attempt.status === 'PAYMENT_PENDING') {
+    showLoginRegistrationPayment(attempt)
+    return
+  }
+  if (attempt.status === 'EMAIL_VERIFIED' || attempt.status === 'PORTAL_ONBOARDING') {
+    showLoginRegistrationCompany(attempt)
+    return
+  }
+  if (attempt.status === 'AUTH_CREATED') {
+    if (attempt.consentsComplete !== true) {
+      showLoginRegistrationConsents(attempt)
+      return
+    }
+    try {
+      await verifyPendingRegistrationAndShowCompany()
+    } catch (error) {
+      if (!isRegistrationVerificationError(error)) throw error
+      pendingRegistrationNeedsVerification = true
+      showLoginEmailVerification()
+      setLoginError('Potwierdź adres email, a następnie sprawdź ponownie.', 'success')
+    }
+    return
+  }
+  showLoginRegistrationUnavailable()
+}
+
+async function continuePendingRegistration() {
+  const pending = pendingRegistration || getPendingRegistrationEntry()
+  if (!pending?.registrationId) {
+    showLoginRegistrationUnavailable()
+    return
+  }
+  pendingRegistration = pending
+  if (!isRegistrationApiConfigured()) {
+    showLoginRegistrationUnavailable()
+    setLoginError('Portal nie ma skonfigurowanego adresu Registration API.')
+    return
+  }
+
+  setLoginControlsBusy(true, 'Wznawianie rejestracji...')
+  setLoginError('')
+  try {
+    if (
+      activeRegistrationAttempt?.registrationId === pending.registrationId
+      && activeRegistrationAttempt.status === 'AUTH_CREATED'
+    ) {
+      await routePendingRegistrationAttempt(activeRegistrationAttempt)
+      return
+    }
+    if (hasPendingRegistrationBindToken(pending.registrationId)) {
+      await bindRegistrationAccount(pending.registrationId)
+      const fallbackAttempt = {
+        registrationId: pending.registrationId,
+        planCode: 'UNKNOWN',
+        paid: false,
+        status: 'AUTH_CREATED',
+      }
+      try {
+        const resumed = await resumeRegistrations(pending.registrationId)
+        activeRegistrationAttempt = resumed.find((item) => item.registrationId === pending.registrationId) || fallbackAttempt
+      } catch {
+        activeRegistrationAttempt = fallbackAttempt
+      }
+      await routePendingRegistrationAttempt(activeRegistrationAttempt)
+      return
+    }
+
+    let registrations
+    try {
+      registrations = await resumeRegistrations(pending.registrationId)
+    } catch (error) {
+      if (isRegistrationVerificationError(error)) {
+        pendingRegistrationNeedsVerification = true
+        showLoginEmailVerification()
+        return
+      }
+      throw error
+    }
+    const attempt = registrations.find((item) => item.registrationId === pending.registrationId)
+    if (!attempt) {
+      showLoginRegistrationUnavailable()
+      return
+    }
+    await routePendingRegistrationAttempt(attempt)
+  } catch (error) {
+    showLoginRegistrationUnavailable()
+    setLoginError(formatRegistrationError(error))
+  } finally {
+    setLoginControlsBusy(false)
+  }
+}
+
+async function offerPendingRegistrationChoice(result) {
+  const pending = pendingRegistration || getPendingRegistrationEntry()
+  if (!pending?.registrationId) return false
+  pendingRegistration = pending
+  let bindError = null
+  if (hasPendingRegistrationBindToken(pending.registrationId)) {
+    try {
+      await bindRegistrationAccount(pending.registrationId)
+      const fallbackAttempt = {
+        registrationId: pending.registrationId,
+        planCode: 'UNKNOWN',
+        paid: false,
+        status: 'AUTH_CREATED',
+        consentsComplete: false,
+      }
+      try {
+        const resumed = await resumeRegistrations(pending.registrationId)
+        activeRegistrationAttempt = resumed.find((item) => item.registrationId === pending.registrationId) || fallbackAttempt
+      } catch {
+        activeRegistrationAttempt = fallbackAttempt
+      }
+    } catch (error) {
+      bindError = error
+    }
+  }
+  selectableOrganizations = organizationsFromLoginResult(result)
+  if (selectableOrganizations.length) {
+    showLoginOrganizationSelection(selectableOrganizations)
+    if (bindError) setLoginError(formatRegistrationError(bindError))
+  } else if (bindError) {
+    showLoginRegistrationUnavailable()
+    setLoginError(formatRegistrationError(bindError))
+  } else {
+    await continuePendingRegistration()
+  }
+  return true
+}
+
+async function resolveDeferredRegistrationContext() {
+  try {
+    return await ensureSessionContext(null)
+  } catch (error) {
+    if (String(error?.code ?? '').toUpperCase() === 'REGISTRATION_REQUIRED') {
+      return { status: 'ORGANIZATION_ONBOARDING_REQUIRED', organizations: [] }
+    }
+    throw error
+  }
+}
+
+async function verifyPendingRegistrationAndShowCompany() {
+  const pending = pendingRegistration || getPendingRegistrationEntry()
+  if (!pending?.registrationId) throw new Error('Brak aktywnej próby rejestracji.')
+  try {
+    await verifyRegistration(pending.registrationId)
+  } catch (error) {
+    if (String(error?.code ?? '').toUpperCase() === 'REQUIRED_CONSENT_MISSING') {
+      activeRegistrationAttempt = {
+        ...activeRegistrationAttempt,
+        registrationId: pending.registrationId,
+        status: 'AUTH_CREATED',
+        consentsComplete: false,
+      }
+      showLoginRegistrationConsents(activeRegistrationAttempt)
+      setLoginError('Zapisz wymagane zgody przed dalszą weryfikacją.')
+      return false
+    }
+    throw error
+  }
+  pendingRegistrationNeedsVerification = false
+  const attempts = await resumeRegistrations(pending.registrationId)
+  const attempt = attempts.find((item) => item.registrationId === pending.registrationId)
+  if (!attempt) throw new Error('Registration API nie zwróciło aktywnej próby po weryfikacji.')
+  showLoginRegistrationCompany(attempt)
+  return true
+}
+
+function registrationOwnerPayload() {
+  const firstName = String(document.getElementById('loginRegistrationOwnerFirstName')?.value ?? '').trim()
+  const lastName = String(document.getElementById('loginRegistrationOwnerLastName')?.value ?? '').trim()
+  const phone = String(document.getElementById('loginRegistrationOwnerPhone')?.value ?? '').trim()
+  if (!firstName || !lastName) throw new Error('Uzupełnij imię i nazwisko właściciela.')
+  return {
+    firstName,
+    lastName,
+    ...(phone ? { phone } : {}),
+    locale: activeRegistrationAttempt?.owner?.locale,
+    timezone: activeRegistrationAttempt?.owner?.timezone,
+  }
+}
+
+function registrationCompanyPayload() {
+  const read = (id) => String(document.getElementById(id)?.value ?? '').trim()
+  const legalName = read('loginRegistrationLegalName')
+  const countryCode = read('loginRegistrationCountry').toUpperCase()
+  const taxIdType = read('loginRegistrationTaxType').toUpperCase()
+  const taxIdValue = read('loginRegistrationTaxId')
+  const addressLine1 = read('loginRegistrationAddress')
+  const locality = read('loginRegistrationLocality')
+  const postalCode = read('loginRegistrationPostalCode')
+  const billingEmail = read('loginRegistrationBillingEmail').toLowerCase()
+  if (!legalName || !countryCode || !taxIdType || !taxIdValue || !addressLine1 || !locality || !postalCode) {
+    throw new Error('Uzupełnij nazwę prawną, identyfikator podatkowy oraz pełny adres firmy.')
+  }
+  if (activeRegistrationAttempt?.paid === true && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(billingEmail)) {
+    throw new Error('Podaj poprawny e-mail rozliczeniowy dla płatnego planu.')
+  }
+  const billingPhone = read('loginRegistrationBillingPhone')
+  const invoiceEmail = read('loginRegistrationInvoiceEmail').toLowerCase()
+  return {
+    legalName,
+    registrationCountryCode: countryCode,
+    taxIdType,
+    taxIdValue,
+    addressLine1,
+    locality,
+    postalCode,
+    countryCode,
+    ...(billingEmail ? { billingEmail } : {}),
+    ...(billingPhone ? { billingPhone } : {}),
+    ...(invoiceEmail ? { invoiceEmail } : {}),
   }
 }
 
@@ -6794,6 +7480,7 @@ function bindPlatformLogin(router) {
   const loginButton = byId('loginBtn')
   const loginInput = byId('loginLogin')
   const passwordInput = byId('loginPass')
+  const authScope = byId('loginAuthScope')
   const passwordToggle = byId('loginPasswordToggle')
   const resetPanel = byId('loginResetPanel')
   const resetEmail = byId('loginResetEmail')
@@ -6802,6 +7489,36 @@ function bindPlatformLogin(router) {
   const resetOpen = byId('loginResetOpen')
   const organizationList = byId('loginOrganizationList')
   const organizationCancel = byId('loginOrganizationCancel')
+  const googleButton = byId('loginGoogleBtn')
+  const googleDivider = byId('loginProviderDivider')
+  const createOpen = byId('loginOrganizationCreateOpen')
+  const createBack = byId('loginOrganizationCreateBack')
+  const createButton = byId('loginOrganizationCreate')
+  const registrationTerms = byId('loginRegistrationTerms')
+  const registrationPrivacy = byId('loginRegistrationPrivacy')
+  const registrationMarketing = byId('loginRegistrationMarketing')
+  const registrationConsentsSave = byId('loginRegistrationConsentsSave')
+  const registrationLookup = byId('loginRegistrationLookup')
+  const registrationCountry = byId('loginRegistrationCountry')
+  const registrationTaxType = byId('loginRegistrationTaxType')
+  const registrationCompanySave = byId('loginRegistrationCompanySave')
+  const registrationPaymentCheck = byId('loginRegistrationPaymentCheck')
+  const registrationRestart = byId('loginRegistrationRestart')
+  const registrationExistingButtons = [
+    byId('loginRegistrationChooseExisting'),
+    byId('loginRegistrationCompanyExisting'),
+    byId('loginRegistrationPaymentExisting'),
+    byId('loginRegistrationUnavailableExisting'),
+  ].filter(Boolean)
+  const registrationCancelButtons = [
+    byId('loginRegistrationCancel'),
+    byId('loginRegistrationCompanyCancel'),
+    byId('loginRegistrationPaymentCancel'),
+    byId('loginRegistrationUnavailableCancel'),
+  ].filter(Boolean)
+  const verificationCheck = byId('loginEmailVerificationCheck')
+  const verificationSend = byId('loginEmailVerificationSend')
+  const verificationCancel = byId('loginEmailVerificationCancel')
   const challengePanel = byId('loginMfaChallengePanel')
   const enrollmentPanel = byId('loginMfaEnrollmentPanel')
   const factor = byId('loginMfaFactor')
@@ -6836,7 +7553,42 @@ function bindPlatformLogin(router) {
   const companyBasicsSignOut = byId('companyBasicsSignOut')
   if (!loginButton || !loginInput || !passwordInput || !resetPanel || !resetEmail || !resetSend || !resetBack || !resetOpen) return () => {}
 
+  const requestedPanel = new URLSearchParams(window.location.search).get('panel')?.trim().toLowerCase()
+  if (authScope && requestedPanel === 'admin') {
+    authScope.value = 'platform'
+  } else if (authScope && isPlatformFirebaseConfigured() && !isFirebaseConfigured()) {
+    authScope.value = 'platform'
+  }
+
+  const selectedAuthScope = () => authScope?.value === 'platform' ? 'platform' : 'organization'
+  const updateAuthScopeCopy = () => {
+    const loginCopy = byId('loginCopy')
+    const loginScreen = byId('loginScreen')
+    const platformHeading = byId('platformLoginHeading')
+    const isPlatformLogin = selectedAuthScope() === 'platform'
+    if (loginScreen) loginScreen.dataset.authScope = isPlatformLogin ? 'platform' : 'organization'
+    if (platformHeading) platformHeading.setAttribute('aria-hidden', isPlatformLogin ? 'false' : 'true')
+    if (googleButton) googleButton.hidden = isPlatformLogin
+    if (googleDivider) googleDivider.hidden = isPlatformLogin
+    if (loginCopy && !byId('loginCredentialsPanel')?.hidden) {
+      loginCopy.textContent = isPlatformLogin
+        ? 'Zaloguj się do Panelu admina.'
+        : 'Zaloguj się do portalu Cleanzi.'
+    }
+  }
+  updateAuthScopeCopy()
+
   const continueResult = async (result) => {
+    if (
+      selectedAuthScope() === 'organization'
+      && (pendingRegistration?.registrationId || getPendingRegistrationEntry()?.registrationId)
+      && !['MFA_CHALLENGE_REQUIRED', 'PLATFORM_MFA_ENROLLMENT_REQUIRED', 'PLATFORM_SELECTION_REQUIRED'].includes(result?.status)
+    ) {
+      const contextResult = result?.status === 'AUTHENTICATED'
+        ? await resolveDeferredRegistrationContext()
+        : result
+      if (await offerPendingRegistrationChoice(contextResult)) return
+    }
     if (result?.status === 'MFA_CHALLENGE_REQUIRED') {
       pendingMfaChallenge = { factors: result.factors || [], verificationId: '' }
       showLoginMfaChallenge(result.factors)
@@ -6853,6 +7605,14 @@ function bindPlatformLogin(router) {
     }
     if (result?.status === 'ORG_SELECTION_REQUIRED') {
       showLoginOrganizationSelection(result.organizations)
+      return
+    }
+    if (result?.status === 'ORGANIZATION_ONBOARDING_REQUIRED') {
+      showLoginOrganizationSelection([])
+      return
+    }
+    if (result?.status === 'EMAIL_VERIFICATION_REQUIRED') {
+      showLoginEmailVerification()
       return
     }
     if (result?.status === 'CLEANING_COMPANY_ONBOARDING_REQUIRED') {
@@ -6879,7 +7639,12 @@ function bindPlatformLogin(router) {
     setLoginControlsBusy(true, 'Logowanie...')
     setLoginError('')
     try {
-      await continueResult(await login({ login: loginInput.value, password: passwordInput.value }))
+      await continueResult(await login({
+        login: loginInput.value,
+        password: passwordInput.value,
+        authScope: selectedAuthScope(),
+        deferContext: selectedAuthScope() === 'organization' && Boolean(pendingRegistration?.registrationId),
+      }))
     } catch (error) {
       logout()
       resetPortalState()
@@ -6890,12 +7655,26 @@ function bindPlatformLogin(router) {
       setLoginControlsBusy(false)
     }
   }
+  const handleGoogleLogin = async () => {
+    setLoginControlsBusy(true, 'Logowanie przez Google...')
+    setLoginError('')
+    try {
+      const result = await loginWithGoogle({
+        deferContext: Boolean(pendingRegistration?.registrationId),
+      })
+      if (result?.status !== 'REDIRECTING') await continueResult(result)
+    } catch (error) {
+      setLoginError(formatLoginError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
   const handleReset = async (event) => {
     event?.preventDefault?.()
     setLoginControlsBusy(true, 'Wysyłanie...')
     setLoginError('')
     try {
-      await requestPasswordReset(resetEmail.value)
+      await requestPasswordReset(resetEmail.value, selectedAuthScope())
       setLoginError('Jeśli konto z tym adresem istnieje, wysłaliśmy link do zresetowania hasła. Sprawdź również folder spam.', 'success')
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Nie udało się wysłać linku.')
@@ -7014,7 +7793,192 @@ function bindPlatformLogin(router) {
     if (!button) return
     setLoginControlsBusy(true, 'Wybieranie...')
     try {
-      await continueResult(await selectOrganization(button.dataset.orgId))
+      const result = await selectOrganization(button.dataset.orgId)
+      if (result?.status !== 'READY' || !result.session) {
+        throw new Error('Nie udało się zatwierdzić wybranej organizacji.')
+      }
+      const pending = pendingRegistration || getPendingRegistrationEntry()
+      if (pending?.registrationId && !hasPendingRegistrationBindToken(pending.registrationId)) {
+        try {
+          const attempts = await resumeRegistrations(pending.registrationId)
+          if (!attempts.some((item) => item.registrationId === pending.registrationId)) {
+            clearPendingRegistrationEntry(pending.registrationId)
+            pendingRegistration = null
+            activeRegistrationAttempt = null
+          }
+        } catch {
+          // Selecting an existing valid organization must not be blocked by an
+          // unrelated registration-resume outage.
+        }
+      }
+      await activatePortalSession(result.session, router)
+    } catch (error) {
+      setLoginError(formatLoginError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const openOrganizationCreate = () => {
+    setLoginError('')
+    if (pendingRegistration?.registrationId || getPendingRegistrationEntry()?.registrationId) {
+      void continuePendingRegistration()
+      return
+    }
+    showLoginOrganizationCreate()
+  }
+  const closeOrganizationCreate = () => {
+    setLoginError('')
+    showLoginOrganizationSelection(selectableOrganizations)
+  }
+  const handleOrganizationCreate = () => {
+    window.location.assign(getRegistrationPageUrl())
+  }
+  const handleRegistrationConsents = async () => {
+    if (!registrationTerms?.checked || !registrationPrivacy?.checked) {
+      setLoginError('Zaakceptuj regulamin i politykę prywatności.')
+      return
+    }
+    setLoginControlsBusy(true, 'Zapisywanie zgód...')
+    setLoginError('')
+    try {
+      const pending = pendingRegistration || getPendingRegistrationEntry()
+      if (!pending?.registrationId) throw new Error('Brak aktywnej próby rejestracji.')
+      await saveRegistrationConsents(pending.registrationId, {
+        terms: registrationTerms.checked,
+        privacy: registrationPrivacy.checked,
+        marketing: registrationMarketing?.checked === true,
+      })
+      activeRegistrationAttempt = {
+        ...activeRegistrationAttempt,
+        registrationId: pending.registrationId,
+        status: 'AUTH_CREATED',
+        consentsComplete: true,
+      }
+      try {
+        await verifyPendingRegistrationAndShowCompany()
+      } catch (error) {
+        if (isRegistrationVerificationError(error)) {
+          pendingRegistrationNeedsVerification = true
+          showLoginEmailVerification()
+          setLoginError('Potwierdź adres email, a następnie sprawdź ponownie.', 'success')
+          return
+        }
+        throw error
+      }
+    } catch (error) {
+      setLoginError(formatRegistrationError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const handleRegistrationLookup = async () => {
+    if (registrationCountry?.value !== 'PL' || registrationTaxType?.value !== 'NIP') return
+    setLoginControlsBusy(true, 'Pobieranie danych...')
+    setLoginError('')
+    try {
+      const company = await lookupRegistrationCompany(byId('loginRegistrationTaxId')?.value)
+      if (byId('loginRegistrationTaxId')) byId('loginRegistrationTaxId').value = company?.nip || byId('loginRegistrationTaxId').value
+      if (byId('loginRegistrationLegalName')) byId('loginRegistrationLegalName').value = company?.name || ''
+      if (byId('loginRegistrationAddress')) byId('loginRegistrationAddress').value = company?.addressLine1 || ''
+      if (byId('loginRegistrationPostalCode')) byId('loginRegistrationPostalCode').value = company?.postalCode || ''
+      if (byId('loginRegistrationLocality')) byId('loginRegistrationLocality').value = company?.locality || ''
+      setLoginError('Dane pobrano z oficjalnego rejestru. Możesz je poprawić przed zapisem.', 'success')
+    } catch (error) {
+      setLoginError(formatRegistrationError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const handleRegistrationCompany = async () => {
+    setLoginControlsBusy(true, activeRegistrationAttempt?.paid === true ? 'Otwieranie płatności...' : 'Tworzenie firmy...')
+    setLoginError('')
+    try {
+      const pending = pendingRegistration || getPendingRegistrationEntry()
+      if (!pending?.registrationId) throw new Error('Brak aktywnej próby rejestracji.')
+      await bindRegistrationAccount(pending.registrationId, registrationOwnerPayload())
+      const result = await completeRegistrationCompany(pending.registrationId, registrationCompanyPayload())
+      if (result?.nextAction === 'OPEN_CHECKOUT') {
+        if (!isSafeStripeCheckoutUrl(result.checkoutUrl)) {
+          throw new Error('Registration API zwróciło niedozwolony adres płatności.')
+        }
+        window.location.assign(result.checkoutUrl)
+        return
+      }
+      if (result?.nextAction !== 'OPEN_DASHBOARD' || !String(result?.orgId ?? '').trim()) {
+        throw new Error('Registration API nie zwróciło bezpiecznej akcji końcowej.')
+      }
+      clearPendingRegistrationEntry(pending.registrationId)
+      pendingRegistration = null
+      activeRegistrationAttempt = null
+      const selected = await selectOrganization(result.orgId)
+      if (selected?.status !== 'READY' || !selected.session) {
+        throw new Error('Firma została utworzona, ale portal nie odtworzył jeszcze sesji. Zaloguj się ponownie.')
+      }
+      await activatePortalSession(selected.session, router)
+    } catch (error) {
+      setLoginError(formatRegistrationError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const handleRegistrationPaymentCheck = async () => {
+    setLoginControlsBusy(true, 'Sprawdzanie płatności...')
+    setLoginError('')
+    try {
+      const pending = pendingRegistration || getPendingRegistrationEntry()
+      if (!pending?.registrationId) throw new Error('Brak aktywnej próby rejestracji.')
+      const attempts = await resumeRegistrations(pending.registrationId)
+      const attempt = attempts.find((item) => item.registrationId === pending.registrationId)
+      if (attempt?.status === 'PAYMENT_PENDING') {
+        showLoginRegistrationPayment(attempt)
+        setLoginError('Płatność nie została jeszcze potwierdzona. Dostęp pozostaje zablokowany.', 'success')
+        return
+      }
+      const context = await resolveDeferredRegistrationContext()
+      clearPendingRegistrationEntry(pending.registrationId)
+      pendingRegistration = null
+      activeRegistrationAttempt = null
+      if (context?.status === 'READY' && context.session) {
+        await activatePortalSession(context.session, router)
+        return
+      }
+      if (context?.status === 'ORG_SELECTION_REQUIRED') {
+        showLoginOrganizationSelection(context.organizations)
+        return
+      }
+      throw new Error('Płatność nie została jeszcze aktywowana przez webhook Stripe.')
+    } catch (error) {
+      setLoginError(formatRegistrationError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const handleVerificationSend = async () => {
+    setLoginControlsBusy(true, 'Wysyłanie...')
+    try {
+      const result = await requestEmailVerification()
+      setLoginError(result.verified ? 'Adres email jest już potwierdzony.' : 'Wiadomość weryfikacyjna została wysłana.', 'success')
+    } catch (error) {
+      setLoginError(formatLoginError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const handleVerificationCheck = async () => {
+    setLoginControlsBusy(true, 'Sprawdzanie...')
+    try {
+      const result = await refreshEmailVerification({
+        deferContext: pendingRegistrationNeedsVerification || Boolean(pendingRegistration?.registrationId),
+      })
+      if (result?.status === 'EMAIL_VERIFICATION_REQUIRED') {
+        setLoginError('Adres email nie został jeszcze potwierdzony.')
+        return
+      }
+      if (pendingRegistrationNeedsVerification) {
+        await verifyPendingRegistrationAndShowCompany()
+      } else {
+        await continueResult(result)
+      }
     } catch (error) {
       setLoginError(formatLoginError(error))
     } finally {
@@ -7051,6 +8015,7 @@ function bindPlatformLogin(router) {
         factorUid: factor?.value,
         verificationCode: mfaCode?.value,
         verificationId: pendingMfaChallenge?.verificationId,
+        deferContext: Boolean(pendingRegistration?.registrationId),
       }))
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : 'Nie udało się potwierdzić MFA.')
@@ -7192,11 +8157,28 @@ function bindPlatformLogin(router) {
   }
 
   loginForm?.addEventListener('submit', submit)
+  googleButton?.addEventListener('click', handleGoogleLogin)
+  authScope?.addEventListener('change', updateAuthScopeCopy)
   passwordToggle?.addEventListener('click', togglePasswordVisibility)
   resetOpen.addEventListener('click', openReset)
   resetBack.addEventListener('click', closeReset)
   organizationList?.addEventListener('click', handleOrganization)
   organizationCancel?.addEventListener('click', cancelFlow)
+  createOpen?.addEventListener('click', openOrganizationCreate)
+  createBack?.addEventListener('click', closeOrganizationCreate)
+  createButton?.addEventListener('click', handleOrganizationCreate)
+  registrationConsentsSave?.addEventListener('click', handleRegistrationConsents)
+  registrationLookup?.addEventListener('click', handleRegistrationLookup)
+  registrationCountry?.addEventListener('change', syncRegistrationCountryFields)
+  registrationTaxType?.addEventListener('change', syncRegistrationCountryFields)
+  registrationCompanySave?.addEventListener('click', handleRegistrationCompany)
+  registrationPaymentCheck?.addEventListener('click', handleRegistrationPaymentCheck)
+  registrationRestart?.addEventListener('click', handleOrganizationCreate)
+  registrationExistingButtons.forEach((button) => button.addEventListener('click', showExistingOrganizationsFromRegistration))
+  registrationCancelButtons.forEach((button) => button.addEventListener('click', cancelFlow))
+  verificationCheck?.addEventListener('click', handleVerificationCheck)
+  verificationSend?.addEventListener('click', handleVerificationSend)
+  verificationCancel?.addEventListener('click', cancelFlow)
   factor?.addEventListener('change', updateFactor)
   sendMfaCode?.addEventListener('click', requestMfaCode)
   confirmMfa?.addEventListener('click', resolveMfa)
@@ -7221,11 +8203,28 @@ function bindPlatformLogin(router) {
       companyEmailRetryTimer = null
     }
     loginForm?.removeEventListener('submit', submit)
+    googleButton?.removeEventListener('click', handleGoogleLogin)
+    authScope?.removeEventListener('change', updateAuthScopeCopy)
     passwordToggle?.removeEventListener('click', togglePasswordVisibility)
     resetOpen.removeEventListener('click', openReset)
     resetBack.removeEventListener('click', closeReset)
     organizationList?.removeEventListener('click', handleOrganization)
     organizationCancel?.removeEventListener('click', cancelFlow)
+    createOpen?.removeEventListener('click', openOrganizationCreate)
+    createBack?.removeEventListener('click', closeOrganizationCreate)
+    createButton?.removeEventListener('click', handleOrganizationCreate)
+    registrationConsentsSave?.removeEventListener('click', handleRegistrationConsents)
+    registrationLookup?.removeEventListener('click', handleRegistrationLookup)
+    registrationCountry?.removeEventListener('change', syncRegistrationCountryFields)
+    registrationTaxType?.removeEventListener('change', syncRegistrationCountryFields)
+    registrationCompanySave?.removeEventListener('click', handleRegistrationCompany)
+    registrationPaymentCheck?.removeEventListener('click', handleRegistrationPaymentCheck)
+    registrationRestart?.removeEventListener('click', handleOrganizationCreate)
+    registrationExistingButtons.forEach((button) => button.removeEventListener('click', showExistingOrganizationsFromRegistration))
+    registrationCancelButtons.forEach((button) => button.removeEventListener('click', cancelFlow))
+    verificationCheck?.removeEventListener('click', handleVerificationCheck)
+    verificationSend?.removeEventListener('click', handleVerificationSend)
+    verificationCancel?.removeEventListener('click', cancelFlow)
     factor?.removeEventListener('change', updateFactor)
     sendMfaCode?.removeEventListener('click', requestMfaCode)
     confirmMfa?.removeEventListener('click', resolveMfa)
@@ -7257,15 +8256,15 @@ function bindLogout() {
     stopEventsPolling()
     stopDashboardAutoRefresh()
     dashboardHideMetricPopover()
-    if (getSession()?.platformContextId) await closePlatformOrganization().catch(() => {})
+    if (getSession()?.platformContextId && cleanziAdminPanel) {
+      await cleanziAdminPanel.closeContext({ silent: true }).catch(() => {})
+    }
     resetPortalState()
     clearStoredCurrentRoute()
 
     logout()
     setUserChip(null)
-    syncSettingsPermissions()
     syncProfitabilityEntryPermissions()
-    applyPortalTheme(STYLE_FALLBACK_ID)
     showLoginScreen()
     showLoginCredentials()
     setLoginError('')
@@ -7400,12 +8399,6 @@ async function syncRouteDataNow(normalizedRoute, options = {}) {
     return
   }
 
-  if (normalizedRoute === 'settings' || normalizedRoute === 'settingsStyles' || normalizedRoute === 'settingsBackup') {
-    await settingsRefreshStyleState({ silent: true })
-    if (appState.settingsActiveTab === SETTINGS_TAB_BACKUP && canManageBackupSettings()) {
-      await settingsLoadBackups({ runAutomation: true })
-    }
-  }
 }
 
 async function syncRouteData(route, options = {}) {
@@ -7460,8 +8453,12 @@ export function mountPortalApp() {
     return () => {}
   }
 
+  cleanupRetiredSettingsStorage()
   host.innerHTML = portalLayoutTemplate
-  applyPortalTheme(STYLE_FALLBACK_ID)
+  pendingRegistration = capturePendingRegistrationEntry()
+  if (pendingRegistration?.registrationId) setOrganizationAuthScope()
+  activeRegistrationAttempt = null
+  pendingRegistrationNeedsVerification = false
   portalFeatureContext = createPortalFeatureContext()
 
   const handleRouteShellChange = (route) => {
@@ -7574,20 +8571,9 @@ export function mountPortalApp() {
       return
     }
 
-    if (routeName === 'settings' || routeName === 'settingsStyles' || routeName === 'settingsBackup') {
-      const requestedTab =
-        routeName === 'settingsStyles'
-          ? SETTINGS_TAB_STYLES
-          : routeName === 'settingsBackup'
-            ? SETTINGS_TAB_BACKUP
-            : normalizeSettingsTab(appState.settingsActiveTab || readStoredSettingsTab())
-      settingsSetAccessState()
-      if (requestedTab === SETTINGS_TAB_BACKUP && !canManageBackupSettings()) {
-        settingsSetActiveTab(SETTINGS_TAB_STYLES, { persist: false })
-      } else {
-        settingsSetActiveTab(requestedTab, { persist: false })
-      }
-      await syncRouteData(routeName)
+    if (PORTAL_SETTINGS_ROUTES.has(routeName)) {
+      renderSettingsView(routeName)
+      return
     }
   }
 
@@ -7686,6 +8672,8 @@ export function mountPortalApp() {
     bindRouteButtons(navigation),
     bindPlatformLogin(navigation),
     bindPlatformCenter(navigation),
+    bindCompanyProfileOnboarding(),
+    bindTenantOrganizationSwitcher(),
     bindLogout(),
     cleanupPortalLazyRoutes,
     () => document.removeEventListener('visibilitychange', handleVisibilityChange),
@@ -7715,11 +8703,18 @@ export function mountPortalApp() {
       return
     }
 
-    const session = requireAuth() ?? getSession()
+    const session = pendingRegistration?.registrationId ? null : requireAuth() ?? getSession()
 
     if (firebaseUser) {
       try {
-        const result = await ensureSessionContext(session)
+        const result = pendingRegistration?.registrationId
+          ? await resolveDeferredRegistrationContext()
+          : await ensureSessionContext(session)
+        if (pendingRegistration?.registrationId && await offerPendingRegistrationChoice(result)) {
+          resetPortalState()
+          setLoginControlsBusy(false)
+          return
+        }
         if (result?.status === 'PLATFORM_MFA_ENROLLMENT_REQUIRED') {
           resetPortalState()
           showLoginMfaEnrollment()
@@ -7738,6 +8733,18 @@ export function mountPortalApp() {
           setLoginControlsBusy(false)
           return
         }
+        if (result?.status === 'ORGANIZATION_ONBOARDING_REQUIRED') {
+          resetPortalState()
+          showLoginOrganizationSelection([])
+          setLoginControlsBusy(false)
+          return
+        }
+        if (result?.status === 'EMAIL_VERIFICATION_REQUIRED') {
+          resetPortalState()
+          showLoginEmailVerification()
+          setLoginControlsBusy(false)
+          return
+        }
         if (result?.status === 'CLEANING_COMPANY_ONBOARDING_REQUIRED') {
           resetPortalState()
           await showCleaningCompanyBasicsOverlay()
@@ -7752,15 +8759,13 @@ export function mountPortalApp() {
         const message = error instanceof Error ? error.message : 'Błąd inicjalizacji sesji.'
         console.error(message)
         stopDashboardAutoRefresh()
-        logout()
+        if (!pendingRegistration?.registrationId) logout()
         resetPortalState()
         clearStoredCurrentRoute()
         showLoginScreen()
         setUserChip(null)
-        applyPortalTheme(STYLE_FALLBACK_ID)
-        syncSettingsPermissions()
         syncProfitabilityEntryPermissions()
-        setLoginError(formatLoginError(error))
+        setLoginError(pendingRegistration?.registrationId ? formatRegistrationError(error) : formatLoginError(error))
       }
     } else {
       stopDashboardAutoRefresh()
@@ -7769,9 +8774,24 @@ export function mountPortalApp() {
       showLoginScreen()
       showLoginCredentials()
       setUserChip(null)
-      applyPortalTheme(STYLE_FALLBACK_ID)
-      syncSettingsPermissions()
       syncProfitabilityEntryPermissions()
+      if (pendingRegistration?.googleRequested) {
+        try {
+          if (!isRegistrationApiConfigured()) {
+            throw new Error('Portal nie ma skonfigurowanego adresu Registration API.')
+          }
+          markPendingGoogleAuthStarted()
+          pendingRegistration = { ...pendingRegistration, googleRequested: false }
+          const result = await loginWithGoogle({ deferContext: true, forceRedirect: true })
+          if (result?.status !== 'REDIRECTING') {
+            await offerPendingRegistrationChoice(await resolveDeferredRegistrationContext())
+          }
+          setLoginControlsBusy(false)
+          return
+        } catch (error) {
+          setLoginError(formatRegistrationError(error))
+        }
+      }
     }
     setLoginControlsBusy(false)
   })()
@@ -7809,8 +8829,8 @@ export function mountPortalApp() {
     calendarFeature = null
     zonesFeature = null
     eventsFeature = null
-    settingsFeature = null
     reportsFeature = null
+    settingsFeature = null
     workerProfileFeature = null
     workerAccountFeature = null
     workerTimeFeature = null

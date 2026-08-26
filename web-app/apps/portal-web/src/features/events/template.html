@@ -55,23 +55,20 @@
     </div>
   </header>
 
-  <div class="events-filter-date-row">
-    <div class="events-filter-field">
+  <div class="events-filter-grid">
+    <div class="events-filter-field events-filter-date-field" data-events-date-picker>
       <label for="evFrom">Od (start)</label>
       <input id="evFrom" type="date" />
     </div>
-    <div class="events-filter-field">
+    <div class="events-filter-field events-filter-date-field" data-events-date-picker>
       <label for="evTo">Do (start)</label>
       <input id="evTo" type="date" />
     </div>
-    <div class="events-filter-field">
+    <div class="events-filter-field events-filter-date-field" data-events-date-picker>
       <label for="evMonth">Miesiąc</label>
       <input id="evMonth" type="month" />
     </div>
-  </div>
-
-  <div class="events-filter-main-row">
-    <div class="events-filter-field">
+    <div class="events-filter-field events-filter-field--wide">
       <label for="evWorkerText">Pracownik</label>
       <div class="events-filter-combo" data-events-filter-combo="worker">
         <input id="evWorker" type="hidden" />
@@ -95,7 +92,7 @@
         <div class="events-filter-combo-list" id="evWorkerList" role="listbox"></div>
       </div>
     </div>
-    <div class="events-filter-field">
+    <div class="events-filter-field events-filter-field--wide">
       <label for="evStrefaText">Strefa</label>
       <div class="events-filter-combo" data-events-filter-combo="zone">
         <input id="evStrefa" type="hidden" />
@@ -119,7 +116,7 @@
         <div class="events-filter-combo-list" id="evStrefaList" role="listbox"></div>
       </div>
     </div>
-    <div class="events-filter-field">
+    <div class="events-filter-field events-filter-field--wide">
       <label for="evPomText">Klient</label>
       <div class="events-filter-combo" data-events-filter-combo="client">
         <input id="evPom" type="hidden" />
@@ -143,11 +140,11 @@
         <div class="events-filter-combo-list" id="evPomList" role="listbox"></div>
       </div>
     </div>
-    <div class="events-filter-field">
+    <div class="events-filter-field events-filter-field--compact">
       <label for="evRoomId">Kod QR</label>
       <input id="evRoomId" class="mono" type="text" placeholder="np. BC0007" />
     </div>
-    <div class="events-filter-field">
+    <div class="events-filter-field events-filter-field--compact">
       <label for="evStatus">Status</label>
       <select id="evStatus">
         <option value="">(wszystkie)</option>
@@ -156,7 +153,7 @@
         <option value="OPEN">OPEN</option>
       </select>
     </div>
-    <div class="events-filter-field">
+    <div class="events-filter-field events-filter-field--search">
       <label for="evQ">Szukaj</label>
       <input id="evQ" type="search" placeholder="szukaj po tekście..." />
     </div>
@@ -174,9 +171,38 @@
     </label>
     <div class="events-filter-actions">
       <button class="btn2 secondary" id="evAddBtn" type="button"><i class="ph ph-plus" aria-hidden="true"></i><span>Dodaj zdarzenie</span></button>
-      <button class="btn2 danger" id="evDeleteSelectedBtn" type="button" disabled><i class="ph ph-trash-simple" aria-hidden="true"></i><span data-event-button-label>Usuń</span></button>
-      <button class="btn2 events-export-action" id="evExportPdfBtn" type="button"><i class="ph ph-file-pdf" aria-hidden="true"></i><span>PDF</span></button>
-      <button class="btn2 events-export-action" id="evExportExcelBtn" type="button"><i class="ph ph-file-xls" aria-hidden="true"></i><span>Excel</span></button>
+      <button class="btn2 events-delete-button" id="evDeleteSelectedBtn" type="button" disabled><i class="ph ph-trash-simple" aria-hidden="true"></i><span data-event-button-label>Usuń</span></button>
+      <div class="events-download-menu" data-events-download-menu>
+        <button
+          class="btn2 events-download-trigger"
+          id="evDownloadBtn"
+          type="button"
+          aria-haspopup="menu"
+          aria-controls="evDownloadMenu"
+          aria-expanded="false"
+        >
+          <i class="ph ph-download-simple" aria-hidden="true"></i>
+          <span data-events-download-label>Pobierz</span>
+          <i class="ph ph-caret-down events-download-trigger__caret" aria-hidden="true"></i>
+        </button>
+        <div class="events-download-popover" id="evDownloadMenu" role="menu" aria-label="Format pobierania" hidden>
+          <button type="button" role="menuitem" data-events-export-format="pdf">
+            <span class="events-download-option__icon is-pdf" aria-hidden="true"><i class="ph ph-file-pdf"></i></span>
+            <span><strong>PDF</strong><small>Dokument do druku</small></span>
+            <i class="ph ph-arrow-down" aria-hidden="true"></i>
+          </button>
+          <button type="button" role="menuitem" data-events-export-format="csv">
+            <span class="events-download-option__icon is-csv" aria-hidden="true"><i class="ph ph-file-csv"></i></span>
+            <span><strong>CSV</strong><small>Dane rozdzielane średnikiem</small></span>
+            <i class="ph ph-arrow-down" aria-hidden="true"></i>
+          </button>
+          <button type="button" role="menuitem" data-events-export-format="xls">
+            <span class="events-download-option__icon is-xls" aria-hidden="true"><i class="ph ph-file-xls"></i></span>
+            <span><strong>XLS</strong><small>Arkusz programu Excel</small></span>
+            <i class="ph ph-arrow-down" aria-hidden="true"></i>
+          </button>
+        </div>
+      </div>
       <button class="btn2" id="evClearFiltersBtn" type="button"><i class="ph ph-funnel-x" aria-hidden="true"></i><span>Resetuj filtry</span></button>
       <button class="btn2" id="evResetBtn" type="button"><i class="ph ph-arrows-clockwise" aria-hidden="true"></i><span>Odśwież</span></button>
       <button class="btn2 primary" id="evSearchBtn" type="button"><i class="ph ph-magnifying-glass" aria-hidden="true"></i><span>Szukaj</span></button>
@@ -200,6 +226,13 @@
     </div>
     <span class="events-table-scroll-hint"><i class="ph ph-arrows-left-right" aria-hidden="true"></i> Przesuń tabelę, aby zobaczyć wszystkie dane</span>
   </div>
+  <aside class="events-record-legend" aria-label="Legenda oznaczeń rekordów">
+    <strong>Legenda</strong>
+    <span><i class="events-record-legend-dot is-blue" aria-hidden="true"></i> Zakończone zdarzenie w strefie</span>
+    <span><i class="events-record-legend-dot is-green" aria-hidden="true"></i> Aktywne zdarzenie — brak STOP</span>
+    <span><i class="events-record-legend-dot is-red" aria-hidden="true"></i> Rekord wymaga sprawdzenia</span>
+    <span><i class="events-record-legend-row" aria-hidden="true"></i> Fioletowy pasek — cały czas pracy pracownika</span>
+  </aside>
   <div class="events-head">
     <div class="events-select-col"><input id="evSelectAll" type="checkbox" aria-label="Zaznacz wszystko na stronie" /></div>
     <div><i class="ph ph-user" aria-hidden="true"></i><span>Pracownik</span></div>
@@ -306,7 +339,7 @@
           <span class="ev-editor-step">1</span>
           <div>
             <h4 id="evAssignmentTitle">Pracownik i miejsce</h4>
-            <p>Wskaż, kogo i jakiej lokalizacji dotyczy zdarzenie.</p>
+            <p>Wybierz pracownika i obiekt. Strefa oraz lokalizacja są opcjonalne.</p>
           </div>
         </div>
 
@@ -334,9 +367,9 @@
           </div>
 
           <div class="field">
-            <label for="evEditStrefaSearch"><i class="ph ph-stack" aria-hidden="true"></i> Strefa obiektu <span aria-hidden="true">*</span></label>
+            <label for="evEditStrefaSearch"><i class="ph ph-stack" aria-hidden="true"></i> Strefa <em>opcjonalnie</em></label>
             <div class="ev-editor-picker">
-              <input id="evEditStrefaSearch" type="text" placeholder="Wpisz nazwę strefy..." autocomplete="off" aria-haspopup="listbox" aria-expanded="false" aria-required="true" />
+              <input id="evEditStrefaSearch" type="text" placeholder="Wpisz nazwę strefy..." autocomplete="off" aria-haspopup="listbox" aria-expanded="false" aria-required="false" />
               <i class="ph ph-caret-down ev-editor-picker-caret" aria-hidden="true"></i>
               <select id="evEditStrefa" class="ev-editor-picker-list" aria-label="Lista stref">
                 <option value="">(wybierz)</option>
@@ -345,7 +378,7 @@
           </div>
 
           <div class="field">
-            <label for="evEditLocationSearch"><i class="ph ph-map-pin" aria-hidden="true"></i> Lokalizacja strefy</label>
+            <label for="evEditLocationSearch"><i class="ph ph-map-pin" aria-hidden="true"></i> Lokalizacja <em>opcjonalnie</em></label>
             <div class="ev-editor-picker">
               <input id="evEditLocationSearch" type="text" placeholder="Wpisz lub wybierz lokalizację..." autocomplete="off" aria-haspopup="listbox" aria-expanded="false" />
               <i class="ph ph-caret-down ev-editor-picker-caret" aria-hidden="true"></i>
@@ -368,44 +401,43 @@
           <span class="ev-editor-step">2</span>
           <div>
             <h4 id="evTimeTitle">Czas zdarzenia</h4>
-            <p>Możesz zapisać sam START, sam STOP albo pełną parę.</p>
+            <p id="evTimeDescription">Ustaw początek zdarzenia i opcjonalny czas zakończenia.</p>
           </div>
         </div>
 
         <div class="ev-editor-time-grid">
-          <div class="ev-editor-time-card ev-editor-time-card--start">
+          <div class="ev-editor-time-card ev-editor-time-card--start" data-event-time-picker>
             <div class="ev-editor-time-card-head">
-              <span class="ev-editor-time-icon" aria-hidden="true"><i class="ph ph-play-circle"></i></span>
+              <span class="ev-editor-time-icon" aria-hidden="true"><i class="ph ph-clock-countdown"></i></span>
               <div>
                 <label for="evEditStart">START</label>
-                <small>Początek pracy</small>
+                <small id="evEditStartLabel">Początek zdarzenia</small>
               </div>
+              <span class="ev-editor-time-state" aria-hidden="true"><i class="ph ph-check"></i></span>
             </div>
-            <input class="mono" id="evEditStart" type="datetime-local" aria-describedby="evTimeHelp" />
+            <input class="mono" id="evEditStart" type="datetime-local" aria-describedby="evTimeHelp" required />
           </div>
 
-          <div class="ev-editor-time-card ev-editor-time-card--stop">
+          <div class="ev-editor-time-card ev-editor-time-card--stop" data-event-time-picker>
             <div class="ev-editor-time-card-head">
-              <span class="ev-editor-time-icon" aria-hidden="true"><i class="ph ph-stop-circle"></i></span>
+              <span class="ev-editor-time-icon" aria-hidden="true"><i class="ph ph-check-circle"></i></span>
               <div>
                 <label for="evEditStop">STOP <em>opcjonalnie</em></label>
-                <small>Koniec pracy</small>
+                <small id="evEditStopLabel">Koniec zdarzenia</small>
               </div>
-              <button class="ev-stop-now-btn" id="evStopNowBtn" type="button" title="Ustaw STOP na aktualną godzinę">
-                <i class="ph ph-clock" aria-hidden="true"></i> Teraz
-              </button>
+              <span class="ev-editor-time-state" aria-hidden="true"><i class="ph ph-check"></i></span>
             </div>
             <input class="mono" id="evEditStop" type="datetime-local" aria-describedby="evTimeHelp" />
           </div>
         </div>
 
-        <p class="ev-editor-time-help" id="evTimeHelp"><i class="ph ph-info" aria-hidden="true"></i> Pozostaw STOP pusty, jeśli pracownik nadal pracuje.</p>
+        <p class="ev-editor-time-help" id="evTimeHelp"><i class="ph ph-info" aria-hidden="true"></i> START jest wymagany. STOP możesz uzupełnić opcjonalnie lub pozostawić pusty.</p>
 
         <div class="ev-editor-time-summary" id="evEditorTimeSummary" data-state="empty" aria-live="polite">
           <span class="ev-editor-summary-icon" aria-hidden="true"><i class="ph ph-timer"></i></span>
           <div>
             <small id="evEditorTimeSummaryLabel">Status zdarzenia</small>
-            <strong id="evEditorTimeSummaryText">Uzupełnij START, STOP lub oba pola.</strong>
+            <strong id="evEditorTimeSummaryText">Uzupełnij godzinę START.</strong>
           </div>
           <b class="mono" id="evEditorDuration">--:--</b>
         </div>
@@ -430,7 +462,7 @@
       <div class="ev-editor-footer-actions">
         <button class="btn2" id="evCancelBtn" type="button"><i class="ph ph-x-circle" aria-hidden="true"></i><span>Anuluj</span></button>
         <button class="btn2 primary" id="evSaveBtn" type="button">
-          <i class="ph ph-check-circle" aria-hidden="true"></i><span data-event-button-label>Zapisz</span>
+          <i class="ph ph-check" aria-hidden="true"></i><span data-event-button-label>Zapisz</span>
         </button>
       </div>
     </footer>

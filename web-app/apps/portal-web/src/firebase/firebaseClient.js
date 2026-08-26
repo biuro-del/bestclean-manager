@@ -5,10 +5,16 @@ import { connectDataConnectEmulator, getDataConnect } from 'firebase/data-connec
 import { connectorConfig } from '@dataconnect/generated'
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCdRVjbPWm6MueCHOwsmmbdkEKZoO6Dy-k',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'iclean-room.firebaseapp.com',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'iclean-room',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:1080573912983:web:d64286e3776c009788c6d2',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+}
+
+const dataConnectConfig = {
+  connector: import.meta.env.VITE_DATACONNECT_CONNECTOR,
+  service: import.meta.env.VITE_DATACONNECT_SERVICE,
+  location: import.meta.env.VITE_DATACONNECT_LOCATION,
 }
 
 const requiredConfigKeys = ['apiKey', 'authDomain', 'projectId', 'appId']
@@ -33,6 +39,10 @@ export function isFirebaseConfigured() {
   return requiredConfigKeys.every((key) => hasValue(firebaseConfig[key]))
 }
 
+export function isDataConnectConfigured() {
+  return ['connector', 'service', 'location'].every((key) => hasValue(dataConnectConfig[key]))
+}
+
 export function getDataSourceLabel() {
   return isFirebaseConfigured() ? 'Data Connect' : 'Mock'
 }
@@ -54,13 +64,14 @@ export function ensureFirebase() {
     appCheckInitialized = true
   }
   const auth = getAuth(app)
-  const dataConnect = getDataConnect(connectorConfig)
+  Object.assign(connectorConfig, dataConnectConfig)
+  const dataConnect = isDataConnectConfigured() ? getDataConnect(connectorConfig) : null
 
   const emulatorHost = import.meta.env.VITE_DATACONNECT_EMULATOR_HOST
   const emulatorPort = Number(import.meta.env.VITE_DATACONNECT_EMULATOR_PORT ?? 9399)
   const useEmulators = isTrue(import.meta.env.VITE_USE_EMULATORS)
 
-  if (!emulatorConnected && useEmulators && hasValue(emulatorHost)) {
+  if (dataConnect && !emulatorConnected && useEmulators && hasValue(emulatorHost)) {
     connectDataConnectEmulator(dataConnect, emulatorHost, emulatorPort)
     emulatorConnected = true
   }

@@ -54,6 +54,15 @@ test('reader referencyjny pobiera deterministyczne strony i odrzuca katalog powy
   )
 })
 
+test('legacy reference fallback działa tylko lokalnie i może być jawnie wyłączony', async () => {
+  const { isLocalReferenceReadFallbackEnabled } = await readPolicy()
+
+  assert.equal(isLocalReferenceReadFallbackEnabled({ dev: true }), true)
+  assert.equal(isLocalReferenceReadFallbackEnabled({ dev: true, enabled: '1' }), true)
+  assert.equal(isLocalReferenceReadFallbackEnabled({ dev: true, enabled: 'false' }), false)
+  assert.equal(isLocalReferenceReadFallbackEnabled({ dev: false, enabled: 'true' }), false)
+})
+
 test('konektor read-guard jest równoległy, zawiera wyłącznie ograniczone odczyty i ma własny SDK', () => {
   const config = read('dataconnect', 'read-guard-dry-run', 'dataconnect.yaml')
   const connector = read('dataconnect', 'read-guard-dry-run', 'connectors', 'read-guard', 'connector.yaml')
@@ -107,10 +116,11 @@ test('klienci i strefy używają stron, a lista pracowników zachowuje bezpośre
     assert.match(source, /const READ_CACHE_MS = 5 \* 60 \* 1000/)
     assert.match(source, new RegExp(`fetchAllReferenceRows\\([\\s\\S]*?${operation}`))
     assert.match(source, /createReferenceReadUnavailableError/)
+    assert.match(source, /isLocalReferenceReadFallbackEnabled\(\{[\s\S]*?dev: import\.meta\.env\.DEV/)
   }
 
-  assert.doesNotMatch(clientService, /\bclientsForOrg\b/)
-  assert.doesNotMatch(zoneService, /\bzonesForOrg\b/)
+  assert.match(clientService, /const response = await clientsForOrg\(\{ orgId \}\)/)
+  assert.match(zoneService, /const response = await zonesForOrg\(\{ orgId \}\)/)
   assert.match(workerService, /const READ_CACHE_MS = 5 \* 60 \* 1000/)
   assert.match(workerService, /const response = await workersList\(orgId\)/)
   assert.doesNotMatch(workerService, /workersPageForOrg/)

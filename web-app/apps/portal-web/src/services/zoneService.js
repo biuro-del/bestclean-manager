@@ -3,12 +3,14 @@ import {
   insertZoneForOrg,
   platformAuthHeaders,
   updateZoneForOrg,
+  zonesForOrg,
   zonesPageForOrg,
 } from './platformDataConnectService'
 import {
   createReferenceReadUnavailableError,
   fetchAllReferenceRows,
   isDataConnectOperationNotFound,
+  isLocalReferenceReadFallbackEnabled,
 } from './referenceDataReadPolicy'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
@@ -134,6 +136,22 @@ function mapZone(orgId, row) {
 }
 
 async function fetchZoneRows(orgId) {
+  if (
+    isLocalReferenceReadFallbackEnabled({
+      dev: import.meta.env.DEV,
+      enabled: import.meta.env.VITE_ALLOW_LOCAL_REFERENCE_READ_FALLBACK,
+    })
+  ) {
+    const response = await zonesForOrg({ orgId })
+    const rows = response?.data?.zones
+    if (!Array.isArray(rows)) {
+      const error = new Error('Katalog stref zwrocil nieprawidlowa odpowiedz.')
+      error.code = 'REFERENCE_DATA_RESPONSE_INVALID'
+      throw error
+    }
+    return rows
+  }
+
   try {
     return await fetchAllReferenceRows({
       loadPage: ({ limit, offset }) => zonesPageForOrg({ orgId, limit, offset }),

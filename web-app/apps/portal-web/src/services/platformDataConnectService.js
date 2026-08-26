@@ -1,7 +1,12 @@
 import * as generated from '@dataconnect/generated'
 import * as readGuardGenerated from '@dataconnect/read-guard-generated'
 import { getSession, platformEmailMfaHeaders } from '../auth/authService'
-import { ensureFirebase, isFirebaseConfigured, waitForFirebaseAuthReady } from '../firebase/firebaseClient'
+import { ensureFirebase } from '../firebase/firebaseClient'
+import {
+  ensurePlatformFirebase,
+  isPlatformFirebaseConfigured,
+  waitForPlatformFirebaseAuthReady,
+} from '../../../../../Cleanzi-admin/frontend/platformFirebaseClient'
 
 const PLATFORM_CONTEXT_HEADER = 'X-Platform-Context-Id'
 
@@ -26,9 +31,9 @@ export function platformContextHeaders(session = getSession()) {
 }
 
 async function firebaseUser() {
-  if (!isFirebaseConfigured()) throw new Error('Brak konfiguracji Firebase.')
-  const firebase = ensureFirebase()
-  const user = firebase?.auth?.currentUser || (await waitForFirebaseAuthReady())
+  if (!isPlatformFirebaseConfigured()) throw new Error('Brak konfiguracji Firebase dla Panelu admina.')
+  const firebase = ensurePlatformFirebase()
+  const user = firebase?.auth?.currentUser || (await waitForPlatformFirebaseAuthReady())
   if (!user) throw new Error('Sesja Firebase wygasła. Zaloguj się ponownie.')
   return user
 }
@@ -80,11 +85,12 @@ function variablesFromArgs(args) {
 }
 
 function wrap(kind, operationName, directOperation) {
-  return (...args) => (
-    isPlatformSession()
-      ? executePlatformDataConnect(kind, operationName, variablesFromArgs(args))
-      : directOperation(...args)
-  )
+  return (...args) => {
+    if (isPlatformSession()) return executePlatformDataConnect(kind, operationName, variablesFromArgs(args))
+    const dataConnect = ensureFirebase()?.dataConnect
+    if (!dataConnect) throw new Error('Brak konfiguracji Data Connect. Uzupełnij zmienne VITE_DATACONNECT_*.')
+    return directOperation(dataConnect, ...args)
+  }
 }
 
 export async function listPlatformOrganizations(filters = {}) {
@@ -133,12 +139,6 @@ export async function updatePlatformOrganization(orgId, action = '', payload = {
   return parseResponse(response)
 }
 
-export const upsertOrgUiStyleForOrg = wrap('mutation', 'UpsertOrgUiStyleForOrg', generated.upsertOrgUiStyleForOrg)
-export const deleteOrgUiStyleForOrg = wrap('mutation', 'DeleteOrgUiStyleForOrg', generated.deleteOrgUiStyleForOrg)
-export const upsertMyUiStylePreference = wrap('mutation', 'UpsertMyUiStylePreference', generated.upsertMyUiStylePreference)
-export const deleteMyUiStylePreference = wrap('mutation', 'DeleteMyUiStylePreference', generated.deleteMyUiStylePreference)
-export const upsertUserUiStylePreferenceForOrg = wrap('mutation', 'UpsertUserUiStylePreferenceForOrg', generated.upsertUserUiStylePreferenceForOrg)
-export const deleteUserUiStylePreferenceForOrg = wrap('mutation', 'DeleteUserUiStylePreferenceForOrg', generated.deleteUserUiStylePreferenceForOrg)
 export const insertClientForOrg = wrap('mutation', 'InsertClientForOrg', generated.insertClientForOrg)
 export const updateClientForOrg = wrap('mutation', 'UpdateClientForOrg', generated.updateClientForOrg)
 export const deleteClientForOrg = wrap('mutation', 'DeleteClientForOrg', generated.deleteClientForOrg)

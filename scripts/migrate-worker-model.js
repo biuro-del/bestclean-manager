@@ -45,11 +45,14 @@ async function loadSecretManagerDatabaseConfig() {
   }
 
   const projectId = text(
-    process.env.FIREBASE_PROJECT_ID ||
+    process.env.DEV_SECRET_PROJECT_ID ||
+      process.env.PLATFORM_FIREBASE_PROJECT_ID ||
+      process.env.FIREBASE_PROJECT_ID ||
       process.env.GOOGLE_CLOUD_PROJECT ||
       process.env.GCLOUD_PROJECT ||
-      'iclean-room',
+      '',
   )
+  if (!projectId) throw new Error('FIREBASE_PROJECT_ID_REQUIRED_FOR_SECRET_MANAGER')
   const auth = new GoogleAuth({
     scopes: ['https://www.googleapis.com/auth/cloud-platform'],
   })
@@ -86,10 +89,11 @@ async function loadSecretManagerDatabaseConfig() {
     accessSecret(text(process.env.DEV_DB_USER_SECRET) || 'PORTAL_DB_USER'),
     accessSecret(text(process.env.DEV_DB_PASS_SECRET) || 'PORTAL_DB_PASS'),
   ])
-  process.env.CLOUD_SQL_CONNECTION_NAME ||=
-    'iclean-room:europe-west3:iclean-room-instance'
+  if (!text(process.env.CLOUD_SQL_CONNECTION_NAME || process.env.INSTANCE_CONNECTION_NAME)) {
+    throw new Error('CLOUD_SQL_CONNECTION_NAME_MISSING')
+  }
+  if (!text(process.env.DB_NAME || process.env.PGDATABASE)) throw new Error('DB_NAME_MISSING')
   process.env.DB_CONNECTOR ||= 'cloudsql'
-  process.env.DB_NAME ||= 'iclean-room-database'
   process.env.DB_USER = dbUser
   process.env.DB_PASS = dbPass
 }

@@ -19,19 +19,27 @@ function functionSource(name, nextName) {
 }
 
 test('odczyt QR START blokuje tylko dzisiejsze lub niejednoznaczne Workday pod LIMIT 2 i FOR UPDATE', () => {
-  const body = functionSource('fetchActiveMobileWorkday', 'fetchMobileWorkdays')
-  assert.match(body, /is_today_warsaw/i)
+  const body = functionSource('fetchMobileOpenWorkdayState', 'fetchMobileWorkdays')
+  assert.match(body, /start_at at time zone 'Europe\/Warsaw'/i)
+  assert.match(body, /business_day_relation/i)
+  assert.match(body, /then 'TODAY'/i)
+  assert.match(body, /then 'PRIOR'/i)
+  assert.match(body, /else 'FUTURE'/i)
+  assert.match(body, /now\(\) at time zone 'Europe\/Warsaw'/i)
   assert.match(
     body,
-    /and\s*\(\s*\(\(w\.start_at at time zone 'Europe\/Warsaw'\)::date\s*=\s*\(now\(\) at time zone 'Europe\/Warsaw'\)::date\)\s*or w\.start_at is null\s*\)\s*order by start_at desc nulls last, updated_at desc nulls last\s*limit 2\s*for update/i,
+    /and\s*\(\s*\(\(w\.start_at at time zone 'Europe\/Warsaw'\)::date\s*=\s*\(now\(\) at time zone 'Europe\/Warsaw'\)::date\)\s*or w\.start_at is null\s*\)/i,
   )
-  assert.match(body, /resolveSingleOpenWorkday\(result\.rows\)/)
+  assert.match(body, /limit 2\s*for update/i)
+  assert.match(body, /for update/i)
+  assert.match(body, /resolveOpenWorkdayState\(result\.rows\)/)
+  assert.doesNotMatch(body, /limit\s+1/i)
 })
 
 test('kontrakt QR START tworzy Workday przy samych historycznych rekordach bez ich modyfikacji', () => {
   const historicalOpenWorkdays = [
-    { workday_id: 'WD-OLD-1', is_today_warsaw: false },
-    { workday_id: 'WD-OLD-2', is_today_warsaw: false },
+    { workday_id: 'WD-OLD-1', start_at: '2026-07-21T05:00:00.000Z', is_today_warsaw: false },
+    { workday_id: 'WD-OLD-2', start_at: '2026-07-22T05:00:00.000Z', is_today_warsaw: false },
   ]
   const before = JSON.parse(JSON.stringify(historicalOpenWorkdays))
   const workflow = functionSource('processMobileWorkflowScan', 'handleMobileWorkflowRequest')
@@ -74,15 +82,30 @@ test('START i STOP nie sa blokowane przez odczyt Eventow; kontrola cyklu jest ty
   assert.ok(branchStart >= 0 && branchStop > branchStart && branchClean > branchStop)
   assert.ok(unresolvedRead > branchClean && cycleRead > unresolvedRead)
   assert.doesNotMatch(body.slice(0, branchClean), /fetchOpenMobileCycles|fetchUnresolvedMobileCycles|resolveSingleOpenCycle/)
-  assert.match(body.slice(branchClean), /assertNoUnresolvedOpenEvents\(unresolvedCycleRows\)/)
-  assert.match(body.slice(branchClean), /resolveSingleOpenCycle\(openCycleRows, activeWorkday\?\.workday_id\)/)
+  assert.match(body.slice(branchClean), /partitionMobileUnresolvedCycles/)
+  assert.match(body.slice(branchClean), /assertNoUnresolvedOpenEvents\(unresolvedCycleState\.blocking\)/)
+  assert.match(body.slice(branchClean), /resolveOpenCycleState\(openCycleRows, activeWorkday\?\.workday_id\)\.activeCycle/)
 })
 
-test('snapshot nie wybiera arbitralnie pierwszego Eventu przy konflikcie', () => {
+test('snapshot wybiera tylko dzisiejszy Workday i raportuje stare rekordy bez ich modyfikacji', () => {
   const body = functionSource('buildMobileSnapshotFromDb', 'closeMobileEvent')
-  assert.match(body, /resolveSingleOpenCycle\(openCycleRows, activeWorkdayRaw\?\.workday_id\)/)
+  assert.match(body, /fetchMobileOpenWorkdayState/)
+  assert.match(body, /openWorkdayState\.activeWorkday/)
+  assert.match(body, /resolveOpenCycleState\(openCycleRows, activeWorkdayRaw\?\.workday_id\)/)
+  assert.match(body, /staleOpenWorkday:/)
+  assert.match(body, /repairRequired/)
+  assert.match(body, /blockStart:\s*false/)
   assert.match(body, /openCycleIntegrity/)
   assert.doesNotMatch(body, /openCycleRows\.find/)
+  assert.doesNotMatch(body, /update\s+public\.workday/i)
+})
+
+test('scan opiera START CLEAN i STOP wylacznie na dzisiejszym Workday', () => {
+  const body = functionSource('processMobileWorkflowScan', 'handleMobileWorkflowRequest')
+  assert.match(body, /const openWorkdayState = await fetchMobileOpenWorkdayState/)
+  assert.match(body, /let activeWorkday = openWorkdayState\.activeWorkday/)
+  assert.match(body, /resolveOpenCycleState\(openCycleRows, activeWorkday\?\.workday_id\)\.activeCycle/)
+  assert.doesNotMatch(body, /openWorkdayState\.staleWorkdays\[[^\]]+\]/)
 })
 
 test('STOP zamyka wszystkie otwarte Eventy aktywnego dnia wedlug tej samej normalizacji', () => {
@@ -97,11 +120,13 @@ test('triggerowe konflikty Event i Workday mają stabilne odpowiedzi 409', () =>
   const body = source.slice(start, end)
   assert.match(body, /23505/)
   assert.match(body, /event_single_open_clean_per_worker/)
+  assert.match(body, /event_single_open_clean_per_workday/)
   assert.match(body, /OPEN_CLEAN_EVENT_EXISTS/)
   assert.match(body, /23514/)
   assert.match(body, /OPEN_EVENT_TYPE_REQUIRED/)
   assert.match(body, /OPEN_EVENT_WORKER_REQUIRED/)
   assert.match(body, /workday_single_open_per_worker/)
+  assert.match(body, /workday_single_open_per_worker_day/)
   assert.match(body, /OPEN_WORKDAY_EXISTS/)
   assert.match(body, /OPEN_WORKDAY_WORKER_REQUIRED/)
   assert.match(body, /status:\s*409/g)
@@ -139,7 +164,7 @@ test('mobilny runtime wymaga schematu dla CLEAN, ale flagą blokuje wyłącznie 
   )
   assert.match(
     scan,
-    /else \{\s*requireScanGps\('CLEAN', zoneIsSpecial\)\s*assertMobileCorrelationEnabled\(worker\)\s*await createMobileCycle/,
+    /else \{\s*const startsIndividualOrder = zone\.kind === 'INDIVIDUAL'\s*requireScanGps\('CLEAN_START', startsIndividualOrder\)\s*assertMobileCorrelationEnabled\(worker\)\s*await createMobileCycle/,
   )
   const sameZoneBranchStart = scan.indexOf(
     "if (normalizeText(activeCycle.zone_id).toLowerCase() === normalizeText(zone.id).toLowerCase())",
@@ -153,4 +178,38 @@ test('mobilny runtime wymaga schematu dla CLEAN, ale flagą blokuje wyłącznie 
   assert.doesNotMatch(request, /await assertMobileCorrelationSchemaReady\(client\)/)
   assert.match(snapshot, /availableEventColumns\.has\('event_type'\)/)
   assert.match(snapshot, /START i STOP pozostają dostępne/)
+})
+
+test('GPS jest wymagany i zapisywany tylko dla nowego START oraz startu zlecenia indywidualnego', () => {
+  const scan = functionSource('processMobileWorkflowScan', 'handleMobileWorkflowRequest')
+  const branchStart = scan.indexOf("if (zone.kind === 'START')")
+  const branchStop = scan.indexOf("} else if (zone.kind === 'STOP')", branchStart)
+  const branchClean = scan.indexOf('} else {', branchStop)
+  const sameZoneStart = scan.indexOf(
+    "if (normalizeText(activeCycle.zone_id).toLowerCase() === normalizeText(zone.id).toLowerCase())",
+    branchClean,
+  )
+  const switchStart = scan.indexOf('} else {', sameZoneStart)
+
+  assert.ok(branchStart >= 0 && branchStop > branchStart && branchClean > branchStop)
+  assert.ok(sameZoneStart > branchClean && switchStart > sameZoneStart)
+
+  const requirements = [...scan.matchAll(/requireScanGps\('([^']+)'(?:,\s*([^)]+))?\)/g)].map((match) => ({
+    action: match[1],
+    condition: match[2] || '',
+  }))
+  assert.deepEqual(requirements, [
+    { action: 'START', condition: '' },
+    { action: 'CLEAN_START', condition: 'startsIndividualOrder' },
+    { action: 'CLEAN_START', condition: 'startsIndividualOrder' },
+  ])
+
+  const stopBranch = scan.slice(branchStop, branchClean)
+  const sameZoneBranch = scan.slice(sameZoneStart, switchStart)
+  assert.doesNotMatch(stopBranch, /requireScanGps|scanGpsNote/)
+  assert.doesNotMatch(sameZoneBranch, /requireScanGps|scanGpsNote/)
+  assert.doesNotMatch(scan, /zoneIsSpecial|activeCycleIsSpecial|CLEAN_STOP|STOP_GPS/)
+
+  assert.equal((scan.match(/scanGpsNote\('START'\)/g) || []).length, 1)
+  assert.equal((scan.match(/scanGpsNote\('CLEAN_START', startsIndividualOrder\)/g) || []).length, 3)
 })

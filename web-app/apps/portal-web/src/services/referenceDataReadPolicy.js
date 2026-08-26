@@ -5,6 +5,13 @@ function text(value) {
   return String(value ?? '').trim()
 }
 
+export function isLocalReferenceReadFallbackEnabled({ dev = false, enabled } = {}) {
+  if (dev !== true) return false
+
+  const normalized = text(enabled).toLowerCase()
+  return !['0', 'false', 'no', 'off'].includes(normalized)
+}
+
 function errorMessage(error) {
   if (error instanceof Error) return text(error.message)
   try {

@@ -2,8 +2,9 @@ const DAY_MS = 24 * 60 * 60 * 1000
 
 const PLAN_LABELS = {
   TRIAL: 'Trial',
-  START: 'Start',
-  PRO: 'Pro',
+  GO_PLUS: 'GO+',
+  PLUS: 'PLUS',
+  PRO: 'PRO',
 }
 
 function text(value) {
@@ -78,4 +79,11 @@ export function renderSubscriptionBadge(session) {
   chip.title = hasEndDate
     ? `Pakiet ${planName} • ważny do ${endDate.toLocaleDateString('pl-PL')}`
     : `Pakiet ${planName} • aktywny`
+
+  const workerUsage = session?.usage?.workerSlots
+  if (workerUsage && Number.isFinite(Number(workerUsage.used))) {
+    const overage = Math.max(0, Number(workerUsage.overage) || 0)
+    chip.title += ` • stanowiska ${Number(workerUsage.used)}/${Number(workerUsage.included) || 0}`
+    if (overage > 0) chip.title += ` (+${overage} ponad pakiet)`
+  }
 }

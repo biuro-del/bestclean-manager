@@ -37,6 +37,40 @@ type OrganizationMember @table(
   createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
 }
 
+type OrganizationProfile @table(
+  name: "organization_profile",
+  singular: "organizationProfile",
+  plural: "organizationProfiles",
+  key: "orgId"
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+  nip: String @col(name: "nip", dataType: "varchar(10)")
+  regon: String @col(name: "regon", dataType: "varchar(14)")
+  legalName: String @col(name: "legal_name", dataType: "varchar(300)")
+  registeredAddress: String @col(name: "registered_address")
+  street: String @col(name: "street", dataType: "varchar(180)")
+  buildingNumber: String @col(name: "building_number", dataType: "varchar(40)")
+  unitNumber: String @col(name: "unit_number", dataType: "varchar(40)")
+  postalCode: String @col(name: "postal_code", dataType: "varchar(12)")
+  city: String @col(name: "city", dataType: "varchar(120)")
+  countryCode: String! @col(name: "country_code", dataType: "varchar(2)") @default(value: "PL")
+  ownerFullName: String @col(name: "owner_full_name", dataType: "varchar(200)")
+  billingName: String @col(name: "billing_name", dataType: "varchar(300)")
+  billingNip: String @col(name: "billing_nip", dataType: "varchar(10)")
+  billingAddress: String @col(name: "billing_address")
+  billingPostalCode: String @col(name: "billing_postal_code", dataType: "varchar(12)")
+  billingCity: String @col(name: "billing_city", dataType: "varchar(120)")
+  billingCountryCode: String! @col(name: "billing_country_code", dataType: "varchar(2)") @default(value: "PL")
+  billingEmail: String @col(name: "billing_email", dataType: "varchar(160)")
+  registryProvider: String @col(name: "registry_provider", dataType: "varchar(40)")
+  registryFetchedAt: Timestamp @col(name: "registry_fetched_at")
+  version: Int! @col(name: "version") @default(value: 0)
+  createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
+  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
+  updatedByUid: String @col(name: "updated_by_uid", dataType: "varchar(128)")
+}
+
 type OrganizationSubscription @table(
   name: "organization_subscription",
   singular: "organizationSubscription",
@@ -58,35 +92,6 @@ type OrganizationSubscription @table(
   createdAt: Timestamp @col(name: "created_at")
   updatedAt: Timestamp @col(name: "updated_at")
   version: Int! @col(name: "version") @default(value: 0)
-}
-
-type OrgUiStyle @table(
-  name: "org_ui_style",
-  singular: "orgUiStyle",
-  plural: "orgUiStyles",
-  key: "orgId"
-) {
-  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
-  organization: Organization! @ref(fields: "orgId", references: "orgId")
-
-  defaultStyleId: String! @col(name: "default_style_id", dataType: "varchar(64)")
-  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
-  updatedBy: String @col(name: "updated_by", dataType: "varchar(120)")
-}
-
-type UserUiStylePreference @table(
-  name: "user_ui_style_preference",
-  singular: "userUiStylePreference",
-  plural: "userUiStylePreferences",
-  key: ["orgId", "uid"]
-) {
-  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
-  organization: Organization! @ref(fields: "orgId", references: "orgId")
-
-  uid: String! @col(name: "uid", dataType: "varchar(128)")
-  styleId: String! @col(name: "style_id", dataType: "varchar(64)")
-  updatedAt: Timestamp! @col(name: "updated_at") @default(expr: "request.time")
-  updatedBy: String @col(name: "updated_by", dataType: "varchar(120)")
 }
 
 type Worker @table(
@@ -405,6 +410,7 @@ type Workday @table(
   endScanAt: Timestamp @col(name: "end_scan_at")
   autoCloseAt: Timestamp @col(name: "auto_close_at")
   endAt: Timestamp @col(name: "end_at")
+  businessDateYmd: String @col(name: "business_date_ymd", dataType: "varchar(10)")
 
   durationSec: Int @col(name: "duration_sec")
   status: String @col(name: "status")
@@ -431,6 +437,28 @@ type Workday @table(
 
   updatedBy: String @col(name: "updated_by")
   comment: String @col(name: "comment")
+}
+
+type WorkdayReconciliationAudit @table(
+  name: "workday_reconciliation_audit",
+  singular: "workdayReconciliationAudit",
+  plural: "workdayReconciliationAudits",
+  key: ["orgId", "auditId"]
+) {
+  orgId: String! @col(name: "org_id", dataType: "varchar(64)")
+  organization: Organization! @ref(fields: "orgId", references: "orgId")
+
+  auditId: String! @col(name: "audit_id", dataType: "varchar(64)")
+  workdayId: String! @col(name: "workday_id", dataType: "varchar(64)")
+  idempotencyKey: String! @col(name: "idempotency_key", dataType: "varchar(128)")
+  requestHash: String! @col(name: "request_hash", dataType: "varchar(64)")
+  action: String! @col(name: "action", dataType: "varchar(32)")
+  reason: String! @col(name: "reason")
+  actorUid: String! @col(name: "actor_uid", dataType: "varchar(128)")
+  beforeSnapshot: String! @col(name: "before_snapshot")
+  afterSnapshot: String! @col(name: "after_snapshot")
+  responseSnapshot: String! @col(name: "response_snapshot")
+  createdAt: Timestamp! @col(name: "created_at") @default(expr: "request.time")
 }
 
 type WorkdayPause @table(

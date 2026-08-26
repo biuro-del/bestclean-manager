@@ -20,56 +20,6 @@ query MyOrganizations @auth(level: USER) {
   }
 }
 
-query OrgUiStyleForOrg($orgId: String!) @auth(level: USER) {
-  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
-    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
-    }
-
-  orgUiStyle(key: { orgId: $orgId }) {
-    orgId
-    defaultStyleId
-    updatedAt
-    updatedBy
-  }
-}
-
-query MyUiStylePreference($orgId: String!) @auth(level: USER) {
-  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
-    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
-    }
-
-  userUiStylePreference(key: { orgId: $orgId, uid_expr: "auth.uid" }) {
-    orgId
-    uid
-    styleId
-    updatedAt
-    updatedBy
-  }
-}
-
-query UserUiStylePreferencesForOrg($orgId: String!) @auth(level: USER) {
-  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
-    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do odczytu preferencji stylow.")
-    }
-
-  userUiStylePreferences(
-    where: { orgId: { eq: $orgId } }
-    orderBy: [{ uid: ASC }]
-  ) {
-    orgId
-    uid
-    styleId
-    updatedAt
-    updatedBy
-  }
-}
-
 query CanManageWorkersForOrg($orgId: String!) @auth(level: USER) {
   organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
     @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
@@ -286,6 +236,7 @@ query WorkdaysForOrg($orgId: String!) @auth(level: USER) {
     endScanAt
     autoCloseAt
     endAt
+    businessDateYmd
     durationSec
     status
     deviceId
@@ -321,6 +272,43 @@ query WorkdaysPageForOrg($orgId: String!, $fromStartAt: Timestamp!, $toStartAt: 
     endScanAt
     autoCloseAt
     endAt
+    businessDateYmd
+    durationSec
+    status
+    deviceId
+    gps
+    startEventId
+    endEventId
+    startObject
+    stopObject
+    comment
+    updatedBy
+    updatedAt
+  }
+}
+
+query WorkdaysPageForOrgByBusinessDate($orgId: String!, $fromBusinessDateYmd: String!, $toBusinessDateYmd: String!, $limit: Int, $offset: Int) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAĹ»YSTA']", message: "Brak roli w organizacji.")
+    }
+
+  workdays(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId }, businessDateYmd: { ge: $fromBusinessDateYmd, le: $toBusinessDateYmd } }
+    orderBy: [{ businessDateYmd: DESC }, { startAt: DESC }]
+  ) {
+    workdayId
+    workerLogin
+    workerName
+    utilityRoomId
+    startAt
+    endScanAt
+    autoCloseAt
+    endAt
+    businessDateYmd
     durationSec
     status
     deviceId
@@ -356,6 +344,7 @@ query WorkdaysIntegrityPageForOrg($orgId: String!, $limit: Int, $offset: Int) @a
     endScanAt
     autoCloseAt
     endAt
+    businessDateYmd
     durationSec
     status
     deviceId
@@ -391,6 +380,43 @@ query WorkdaysPageForOrgByWorker($orgId: String!, $workerLogin: String!, $fromSt
     endScanAt
     autoCloseAt
     endAt
+    businessDateYmd
+    durationSec
+    status
+    deviceId
+    gps
+    startEventId
+    endEventId
+    startObject
+    stopObject
+    comment
+    updatedBy
+    updatedAt
+  }
+}
+
+query WorkdaysPageForOrgByWorkerAndStatus($orgId: String!, $workerLogin: String!, $status: String!, $fromStartAt: Timestamp!, $toStartAt: Timestamp!, $limit: Int, $offset: Int) @auth(level: USER) {
+  organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" }) @redact
+    @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+      status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+      role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
+    }
+
+  workdays(
+    limit: $limit
+    offset: $offset
+    where: { orgId: { eq: $orgId }, workerLogin: { eq: $workerLogin }, status: { eq: $status }, startAt: { ge: $fromStartAt, le: $toStartAt } }
+    orderBy: [{ startAt: DESC }]
+  ) {
+    workdayId
+    workerLogin
+    workerName
+    utilityRoomId
+    startAt
+    endScanAt
+    autoCloseAt
+    endAt
+    businessDateYmd
     durationSec
     status
     deviceId
@@ -426,6 +452,7 @@ query WorkdaysPageForOrgByRoom($orgId: String!, $utilityRoomId: String!, $fromSt
     endScanAt
     autoCloseAt
     endAt
+    businessDateYmd
     durationSec
     status
     deviceId
@@ -461,6 +488,7 @@ query WorkdaysPageForOrgByStatus($orgId: String!, $status: String!, $fromStartAt
     endScanAt
     autoCloseAt
     endAt
+    businessDateYmd
     durationSec
     status
     deviceId
@@ -490,6 +518,7 @@ query WorkdaysFingerprintForOrg($orgId: String!, $fromStartAt: Timestamp!, $toSt
     workdayId
     startAt
     endAt
+    businessDateYmd
     status
     updatedAt
   }
@@ -1048,6 +1077,7 @@ query WorkerWorkdaysForOrg($orgId: String!, $workerLogin: String!) @auth(level: 
     endScanAt
     autoCloseAt
     endAt
+    businessDateYmd
     durationSec
     status
     deviceId

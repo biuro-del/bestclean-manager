@@ -48,3 +48,37 @@ test('decyzja o propozycji unieważnia pulpit, aby licznik nie czekał na TTL ca
 
   assert.match(proposals, /new CustomEvent\('portal:workday-updated', \{\s*detail: \{\s*source: 'workday-stop-proposal-decision'/s)
 })
+
+test('alert Brak QR STOP otwiera wyłącznie listę dni z brakującym STOP', () => {
+  const dashboard = fs.readFileSync(
+    path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'features', 'dashboard', 'index.js'),
+    'utf8',
+  )
+
+  const events = fs.readFileSync(
+    path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'features', 'events', 'index.js'),
+    'utf8',
+  )
+
+  assert.match(dashboard, /title: `Brak QR STOP: \$\{openQrStopCount\}`,[\s\S]*action: 'open-missing-qr-stop-list'/)
+  assert.match(dashboard, /data-dash-alert-action=/)
+  assert.match(dashboard, /appState\.eventsDashboardMissingQrStopFocus = \{[\s\S]*kind: 'historical-missing-qr-stop'/)
+  assert.match(dashboard, /await Promise\.resolve\(window\.go\('events'\)\)/)
+  assert.match(events, /function dashboardMissingQrStopFocus\(\)/)
+  assert.match(events, /renderDashboardMissingQrStopFocusPage\(\)/)
+  assert.match(events, /data-event-missing-stop-back/)
+  assert.match(events, /if \(dashboardMissingQrStopFocus\(\)\) \{[\s\S]*renderDashboardMissingQrStopFocusPage\(\)[\s\S]*return/s)
+})
+
+test('kandydat zachowuje produkcyjną kolejność: pracownik, potem miejsce realizacji', () => {
+  const dashboard = fs.readFileSync(
+    path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'features', 'dashboard', 'index.js'),
+    'utf8',
+  )
+
+  assert.match(dashboard, /const workerLabel = workers\.join\(', '\)/)
+  assert.match(
+    dashboard,
+    /<strong>\$\{escapeHtml\(workerLabel\)\}<\/strong>\s*<small>\$\{escapeHtml\(primaryLabel\)\}<\/small>/,
+  )
+})

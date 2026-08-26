@@ -1,9 +1,11 @@
-import { platformContextHeaders } from './platformDataConnectService'
+import {
+  isPlatformSession,
+  platformAuthHeaders,
+  platformContextHeaders,
+} from './platformDataConnectService'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
 
 const READ_CACHE_MS = 5 * 60 * 1000
-const DEFAULT_FUNCTIONS_REGION = 'europe-west3'
-const DEFAULT_FUNCTIONS_PROJECT = 'iclean-room'
 const workersCache = new Map()
 
 function cachedWorkersKey(orgId) {
@@ -228,15 +230,18 @@ function resolveFunctionEndpoint(envKey, functionName) {
     return `/__functions/${functionName}`
   }
 
-  const projectId =
-    String(import.meta.env.VITE_FIREBASE_PROJECT_ID ?? DEFAULT_FUNCTIONS_PROJECT).trim() || DEFAULT_FUNCTIONS_PROJECT
+  const projectId = String(import.meta.env.VITE_FIREBASE_PROJECT_ID ?? '').trim()
+  const region = String(import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION ?? '').trim()
   const host = String(import.meta.env.VITE_FUNCTIONS_EMULATOR_HOST ?? '').trim()
   const port = Number(import.meta.env.VITE_FUNCTIONS_EMULATOR_PORT ?? 5001)
   if (useEmulators && host) {
-    return `http://${host}:${port}/${projectId}/${DEFAULT_FUNCTIONS_REGION}/${functionName}`
+    if (!projectId || !region) throw new Error('Brak konfiguracji projektu lub regionu Firebase Functions.')
+    return `http://${host}:${port}/${projectId}/${region}/${functionName}`
   }
 
-  return `https://${DEFAULT_FUNCTIONS_REGION}-${projectId}.cloudfunctions.net/${functionName}`
+  const functionsBase = String(import.meta.env.VITE_FIREBASE_FUNCTIONS_BASE_URL ?? '').trim().replace(/\/+$/, '')
+  if (!functionsBase) throw new Error('Brak VITE_FIREBASE_FUNCTIONS_BASE_URL dla tej operacji.')
+  return `${functionsBase}/${functionName}`
 }
 
 async function readResponsePayload(response) {
@@ -350,9 +355,10 @@ function resolveFunctionErrorMessage(body, rawText = '', statusCode = null, endp
 }
 
 async function callAuthorizedFunction(functionName, envKey, payload, fallbackMessage, options = {}) {
-  const firebase = ensureFirebase()
+  const platformRequest = isPlatformSession()
+  const firebase = platformRequest ? null : ensureFirebase()
   const user = firebase?.auth?.currentUser ?? null
-  if (!user) {
+  if (!platformRequest && !user) {
     throw new Error('Musisz byc zalogowany, aby wykonac te operacje.')
   }
 
@@ -370,12 +376,14 @@ async function callAuthorizedFunction(functionName, envKey, payload, fallbackMes
   const requestBody = method === 'GET' ? null : JSON.stringify(payload ?? {})
 
   const sendRequest = async (forceTokenRefresh = false) => {
-    const idToken = await user.getIdToken(forceTokenRefresh)
+    const authorizationHeaders = platformRequest
+      ? await platformAuthHeaders({ requireContext: true, forceRefresh: forceTokenRefresh })
+      : { Authorization: `Bearer ${await user.getIdToken(forceTokenRefresh)}` }
     return fetch(requestEndpoint, {
       method,
       headers: {
         ...(method === 'GET' ? {} : { 'Content-Type': 'application/json' }),
-        Authorization: `Bearer ${idToken}`,
+        ...authorizationHeaders,
         ...platformContextHeaders(),
       },
       ...(method === 'GET' ? {} : { body: requestBody }),

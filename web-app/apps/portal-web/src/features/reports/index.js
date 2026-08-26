@@ -1,4 +1,11 @@
 import template from './template.html?raw'
+import { reportBusinessDateYmd } from './reportBusinessDateModel.js'
+import {
+  reportAttendanceSessionDurationSec,
+  reportClosedSessionDurationSec,
+  reportHasClosedSession,
+} from './reportEventAccountingModel.js'
+import { workIntervalsTotalSeconds } from '../workers/workIntervals.js'
 
 export const route = 'reports'
 export const viewId = 'view-reports'
@@ -10,22 +17,17 @@ export function createReportsFeature(ctx) {
     zoneNameWithQrHtml,
     ymdToIsoRangeStart,
     ymdToIsoRangeEnd,
-    workStatusIntervalsTotalSeconds,
     workStatusIntervalFromTimes,
     visiblePortalZones,
-    updateEvent,
     toIso,
     todayYmd,
     setSelectOptions,
     resolveClientLabelWithQrFallback,
-    refreshDashboardWidgets,
     pad2,
     normalizeVisibleEventComment,
-    localDateAndTimeInputToIso,
     formatTime,
     formatDatePl,
     firstDayOfCurrentMonthYmd,
-    fetchEventsForCurrentSession,
     eventTypeInfo,
     ensureSelectValue,
     daysAgoYmd,
@@ -43,7 +45,6 @@ export function createReportsFeature(ctx) {
     getZones,
     normalizeSearchText,
     openEventEditor,
-    showTransientNotice,
   } = ctx
 
   let reportsViewInitPromise = null
@@ -366,8 +367,7 @@ export function createReportsFeature(ctx) {
     items.forEach((item) => {
       const rawLocation = String(item.lokalizacja ?? item.location ?? item.zoneName ?? item.strefa ?? '').trim()
       const key = rawLocation || 'Brak lokalizacji'
-      const duration = Number(item.durationSec ?? 0)
-      const durationSec = Number.isFinite(duration) && duration >= 0 ? Math.floor(duration) : 0
+      const durationSec = reportEventDurationSec(item)
 
       if (!grouped.has(key)) {
         grouped.set(key, { location: key, totalSec: 0, count: 0 })
@@ -759,20 +759,6 @@ export function createReportsFeature(ctx) {
     return key
   }
 
-  function reportHistoryStoreEditableSource(dayKey, suffix, sourceItem) {
-    const editable = reportHistoryResolveEditableEvent({ sourceItem })
-    if (!editable) {
-      return ''
-    }
-
-    const key = `${String(dayKey ?? '').trim()}::${String(suffix ?? '').trim() || 'marker'}`
-    appState.reportHistoryEditableMap = {
-      ...(appState.reportHistoryEditableMap || {}),
-      [key]: editable,
-    }
-    return key
-  }
-
   function reportHistoryEditButtonHtml(editKey) {
     if (!canManageEvents() || !editKey) {
       return '-'
@@ -841,119 +827,6 @@ export function createReportsFeature(ctx) {
     return startIso ? source : null
   }
 
-  function reportHistorySourceIds(source) {
-    return [source?.eventId, source?.workdayId, source?.id]
-      .map((value) => String(value ?? '').trim())
-      .filter((value, index, list) => value && list.indexOf(value) === index)
-  }
-
-  function reportHistoryApplyClosedWorkerDay(dayKey, endAt, closedTargets = []) {
-    const normalizedDayKey = String(dayKey ?? '').trim()
-    const endIso = toIso(endAt)
-    if (!normalizedDayKey || !endIso || !Array.isArray(appState.reportHistoryRows)) {
-      return false
-    }
-
-    const targetMap = new Map()
-    closedTargets.forEach((target) => {
-      const source = target?.sourceItem ?? target
-      const targetIds = [...reportHistorySourceIds(source), ...reportHistorySourceIds(target)]
-      targetIds.forEach((targetId) => {
-        targetMap.set(targetId, target)
-      })
-    })
-
-    let changed = false
-    appState.reportHistoryRows = appState.reportHistoryRows.map((row) => {
-      if (String(row?.dayKey ?? '').trim() !== normalizedDayKey) {
-        return row
-      }
-
-      changed = true
-      const details = Array.isArray(row.details) ? row.details : []
-      const nextDetails = details.map((detail) => {
-        const sourceIds = reportHistorySourceIds(detail?.sourceItem)
-        const target = sourceIds.map((sourceId) => targetMap.get(sourceId)).find(Boolean)
-        const shouldClose =
-          Boolean(target) ||
-          (!targetMap.size && String(detail?.statusLabel ?? '').trim().toUpperCase() === 'RUNNING')
-        if (!shouldClose) {
-          return detail
-        }
-
-        const detailEndIso = toIso(target?.endAt) || endIso
-        const sourceStartIso = toIso(detail?.sourceItem?.startAt ?? detail?.sourceItem?.dayStartAt)
-        const targetDuration = Number(target?.durationSec ?? 0)
-        const fallbackDuration =
-          reportHistoryToTimestamp(sourceStartIso) && reportHistoryToTimestamp(detailEndIso)
-            ? reportHistoryRangeSecondsFromTimestamps(reportHistoryToTimestamp(sourceStartIso), reportHistoryToTimestamp(detailEndIso))
-            : 0
-        const durationSec = Number.isFinite(targetDuration) && targetDuration > 0 ? Math.floor(targetDuration) : fallbackDuration
-
-        return {
-          ...detail,
-          stopLabel: formatTime(detailEndIso),
-          durationLabel: durationSecondsToHms(durationSec),
-          statusLabel: 'CLOSED',
-          sortEndTs: reportHistoryToTimestamp(detailEndIso) || Number(detail?.sortEndTs ?? 0),
-          sourceItem: {
-            ...(detail.sourceItem || {}),
-            endAt: detailEndIso,
-            dayEndAt: detailEndIso,
-            closeMarkedAt: detailEndIso,
-            endReason: 'WORKDAY_STOP',
-            durationSec,
-            status: 'CLOSED',
-          },
-        }
-      })
-
-      const seedTarget = closedTargets[0] ?? {}
-      const seedSource = seedTarget?.sourceItem ?? row?.qrStartSourceItem ?? row?.dayStartSourceItem ?? {}
-      const rowStartIso = toIso(row?.dayStartIso ?? row?.qrStartSourceItem?.dayStartAt ?? row?.qrStartSourceItem?.startAt)
-      const endTs = reportHistoryToTimestamp(endIso)
-      const startTs = Number(row?.dayStartTs ?? 0) || reportHistoryToTimestamp(rowStartIso)
-      const closedSecFromSpan = reportHistoryRangeSecondsFromTimestamps(startTs, endTs)
-      const detailsClosedSec = nextDetails.reduce((sum, detail) => {
-        if (String(detail?.statusLabel ?? '').trim().toUpperCase() !== 'CLOSED') {
-          return sum
-        }
-        return sum + reportHistoryClosedDurationSec(detail?.sourceItem || {})
-      }, 0)
-      const nextClosedSec = closedSecFromSpan || detailsClosedSec || Number(row?.closedSec ?? 0) || 0
-      const stopSource = {
-        ...(row?.qrStopSourceItem || {}),
-        ...(seedSource || {}),
-        historyMarkerOnly: true,
-        dayStartAt: rowStartIso || toIso(seedSource?.startAt ?? seedSource?.dayStartAt),
-        dayEndAt: endIso,
-        endAt: endIso,
-        closeMarkedAt: endIso,
-        endReason: 'WORKDAY_STOP',
-        status: 'WORKDAY_CLOSED',
-      }
-
-      return {
-        ...row,
-        runningCount: nextDetails.filter((detail) => String(detail?.statusLabel ?? '').trim().toUpperCase() === 'RUNNING').length,
-        closedSec: nextClosedSec,
-        dayEndIso: endIso,
-        dayEndTs: endTs || Number(row?.dayEndTs ?? 0),
-        dayEndIsBoundary: true,
-        dayEndSourceItem: stopSource,
-        latestRunningStartTs: 0,
-        qrStopLabel: formatTime(endIso),
-        qrStopSourceItem: stopSource,
-        details: nextDetails,
-      }
-    })
-
-    if (changed) {
-      reportHistorySetSummaryRows(appState.reportHistoryRows)
-    }
-    return changed
-  }
-
   function reportHistoryRenderDetails(row, tab, dayKey = '') {
     const details = Array.isArray(row.details) ? row.details : []
     if (!details.length && tab !== 'workers') {
@@ -997,15 +870,15 @@ export function createReportsFeature(ctx) {
 
     if (tab === 'workers') {
       const hasDayStop = reportHistoryHasDayStop(row)
-      const qrStartEditKey = reportHistoryStoreEditableSource(dayKey, 'marker-start', row?.qrStartSourceItem)
-      const qrStopEditKey = reportHistoryStoreEditableSource(dayKey, 'marker-stop', row?.qrStopSourceItem)
+      const reconciliationAction = canManageEvents() && dayKey
+        ? `<button class="btn2" type="button" data-rep-history-reconcile-day="${escapeHtml(dayKey)}">Przegląd</button>`
+        : '-'
       const qrStartIsSystem = reportHistoryIsSystemEntrySource(row?.qrStartSourceItem)
       const qrStopIsSystem = reportHistoryIsSystemEntrySource(row?.qrStopSourceItem)
       const detailsBody = details
         .map(
-          (detail, detailIndex) => {
+          (detail) => {
             const resolvedClient = resolveClientLabelWithQrFallback(detail.clientLabel || '-', detail.zoneLabel || '-')
-            const editKey = reportHistoryStoreEditableDetail(dayKey, detailIndex, detail)
             return `
             <tr>
               <td>${escapeHtml(resolvedClient)}</td>
@@ -1015,7 +888,7 @@ export function createReportsFeature(ctx) {
               <td class="time-stop">${escapeHtml(detail.stopLabel || '-')}</td>
               <td class="ta-right">${escapeHtml(detail.durationLabel || '-')}</td>
               <td class="ta-right">${escapeHtml(detail.statusLabel || '-')}</td>
-              <td class="ta-right rep-history-edit-cell">${reportHistoryEditButtonHtml(editKey)}</td>
+              <td class="ta-right rep-history-edit-cell">${reconciliationAction}</td>
             </tr>
           `
           },
@@ -1046,7 +919,7 @@ export function createReportsFeature(ctx) {
           <td class="time-stop">-</td>
           <td class="ta-right">-</td>
           <td class="ta-right">QR START</td>
-          <td class="ta-right rep-history-edit-cell">${reportHistoryEditButtonHtml(qrStartEditKey)}</td>
+          <td class="ta-right rep-history-edit-cell">${reconciliationAction}</td>
         </tr>
       `
       const qrStopRow = `
@@ -1058,7 +931,7 @@ export function createReportsFeature(ctx) {
           <td class="time-stop">${escapeHtml(row.qrStopLabel || '-')}</td>
           <td class="ta-right">-</td>
           <td class="ta-right">QR STOP</td>
-          <td class="ta-right rep-history-edit-cell">${reportHistoryEditButtonHtml(qrStopEditKey)}</td>
+          <td class="ta-right rep-history-edit-cell">${reconciliationAction}</td>
         </tr>
       `
       const body = `${hasDayStop ? qrStopRow : ''}${detailsBody}${qrStartRow}`
@@ -1067,7 +940,7 @@ export function createReportsFeature(ctx) {
         <div class="rep-history-detail">
           <table class="rep-history-detail-table">
             <thead>
-              <tr><th>Klient</th><th>Strefa</th><th>Lok.</th><th class="time-start">Start</th><th class="time-stop">Stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th><th class="ta-right">Edytuj</th></tr>
+              <tr><th>Klient</th><th>Strefa</th><th>Lok.</th><th class="time-start">Start</th><th class="time-stop">Stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th><th class="ta-right">Napraw dzień</th></tr>
             </thead>
             <tbody>${body}</tbody>
           </table>
@@ -1113,17 +986,15 @@ export function createReportsFeature(ctx) {
     const stopValue = hasOpenDay ? '--:--:--' : String(row?.qrStopLabel ?? '').trim() || '--:--:--'
     const workValue = durationSecondsToHms(Number(row?.closedSec ?? 0))
     const dayKey = String(row?.dayKey ?? '').trim()
-    const canStopDay = hasOpenDay && Boolean(dayKey) && canManageEvents()
-    const stopDayBusy = canStopDay && appState.reportHistoryClosingDayKey === dayKey
-    const stopDayButton = canStopDay
+    const canReconcileDay = Boolean(dayKey) && canManageEvents()
+    const reconciliationButton = canReconcileDay
       ? `
         <button
           class="btn2 rep-history-stopday-btn"
           type="button"
-          data-rep-history-stop-day="${escapeHtml(dayKey)}"
-          ${stopDayBusy ? 'disabled' : ''}
+          data-rep-history-reconcile-day="${escapeHtml(dayKey)}"
         >
-          ${stopDayBusy ? 'Zamykanie...' : 'Zamknij dzień pracy'}
+          Przegląd i naprawa dnia
         </button>
       `
       : ''
@@ -1144,127 +1015,9 @@ export function createReportsFeature(ctx) {
             <strong>${escapeHtml(workValue)}</strong>
           </div>
         </div>
-        ${stopDayButton}
+        ${reconciliationButton}
       </div>
     `
-  }
-
-  function reportHistoryPromptStopDateTime({ dayKey = '', dayLabel = '-', workerName = '-' } = {}) {
-    const normalizedDayKey = String(dayKey ?? '').trim()
-    const initialDate = /^\d{4}-\d{2}-\d{2}$/.test(normalizedDayKey) ? normalizedDayKey : todayYmd()
-    return new Promise((resolve) => {
-      const existingOverlay = document.getElementById('repHistoryStopDayOverlay')
-      if (existingOverlay) {
-        existingOverlay.remove()
-      }
-
-      const overlay = document.createElement('div')
-      overlay.id = 'repHistoryStopDayOverlay'
-      overlay.className = 'overlay rep-history-stopday-overlay'
-      overlay.setAttribute('role', 'dialog')
-      overlay.setAttribute('aria-modal', 'true')
-      overlay.innerHTML = `
-        <div class="modal modal-sm rep-history-stopday-modal" role="document">
-          <div class="modal-header">
-            <div>
-              <div class="modal-title">Zakończ dzień</div>
-              <div class="modal-subtitle">${escapeHtml(workerName)} · ${escapeHtml(dayLabel)}</div>
-            </div>
-            <button class="icon-btn" type="button" data-rep-history-stop-close aria-label="Zamknij">x</button>
-          </div>
-          <div class="modal-body">
-            <div class="form-grid">
-              <div class="form-field span-2">
-                <label for="repHistoryStopDayDateInput">Data zakończenia</label>
-                <input
-                  class="rep-history-stopday-date"
-                  id="repHistoryStopDayDateInput"
-                  type="date"
-                  value="${escapeHtml(initialDate)}"
-                />
-              </div>
-              <div class="form-field span-2">
-                <label for="repHistoryStopDayInput">Godzina zakończenia</label>
-                <input
-                  id="repHistoryStopDayInput"
-                  type="time"
-                  step="60"
-                />
-                <div class="field-hint">Domyślnie ustawiona jak dzień rozpoczęcia pracy. Możesz ją zmienić.</div>
-              </div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button class="btn2" type="button" data-rep-history-stop-cancel>Anuluj</button>
-            <button class="btn" type="button" data-rep-history-stop-confirm>Zakończ dzień</button>
-          </div>
-        </div>
-      `
-
-      const cleanup = () => {
-        overlay.remove()
-        document.removeEventListener('keydown', onKeyDown)
-      }
-
-      const closeWith = (isoValue) => {
-        cleanup()
-        resolve(String(isoValue ?? '').trim())
-      }
-
-      const dateInput = overlay.querySelector('#repHistoryStopDayDateInput')
-      const input = overlay.querySelector('#repHistoryStopDayInput')
-      const cancelButton = overlay.querySelector('[data-rep-history-stop-cancel]')
-      const closeButton = overlay.querySelector('[data-rep-history-stop-close]')
-      const confirmButton = overlay.querySelector('[data-rep-history-stop-confirm]')
-
-      const submit = () => {
-        const iso = localDateAndTimeInputToIso(dateInput?.value, input?.value)
-        if (!iso) {
-          alert('Podaj poprawną datę i godzinę zakończenia.')
-          if (!String(dateInput?.value ?? '').trim()) {
-            dateInput?.focus()
-          } else {
-            input?.focus()
-          }
-          return
-        }
-
-        closeWith(iso)
-      }
-
-      const onKeyDown = (event) => {
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          closeWith('')
-          return
-        }
-
-        if (event.key === 'Enter') {
-          const target = event.target
-          if (target instanceof HTMLInputElement) {
-            event.preventDefault()
-            submit()
-          }
-        }
-      }
-
-      cancelButton?.addEventListener('click', () => closeWith(''))
-      closeButton?.addEventListener('click', () => closeWith(''))
-      confirmButton?.addEventListener('click', submit)
-      overlay.addEventListener('click', (event) => {
-        if (event.target === overlay) {
-          closeWith('')
-        }
-      })
-      document.addEventListener('keydown', onKeyDown)
-
-      document.body.appendChild(overlay)
-      overlay.style.display = 'flex'
-      window.setTimeout(() => {
-        input?.focus()
-        input?.select?.()
-      }, 0)
-    })
   }
 
   function reportEventsDefaultDates() {
@@ -1315,13 +1068,13 @@ export function createReportsFeature(ctx) {
     }
   }
 
-  async function reportHistoryCloseWorkerDay(dayKey) {
+  async function reportHistoryOpenWorkerDayReconciliation(dayKey) {
     if (!appState.session?.orgId) {
       return
     }
 
     if (!canManageEvents()) {
-      alert('Brak uprawnień do zakończenia dnia.')
+      alert('Brak uprawnień do przeglądu i naprawy dnia.')
       return
     }
 
@@ -1332,7 +1085,7 @@ export function createReportsFeature(ctx) {
 
     const currentTab = reportHistoryNormalizeTab(appState.reportHistoryTab)
     if (currentTab !== 'workers') {
-      alert('Zakończenie dnia jest dostępne tylko w zakładce Osoby.')
+      alert('Przegląd dnia jest dostępny tylko w zakładce Osoby.')
       return
     }
 
@@ -1340,142 +1093,102 @@ export function createReportsFeature(ctx) {
       (item) => String(item?.dayKey ?? '').trim() === normalizedDayKey,
     )
     if (!row) {
-      alert('Nie znaleziono dnia do zamknięcia. Odśwież historię.')
+      alert('Nie znaleziono dnia do przeglądu. Odśwież historię.')
       return
     }
 
-    const runningDetails = (Array.isArray(row.details) ? row.details : []).filter((detail) => {
+    const details = Array.isArray(row.details) ? row.details : []
+    const runningDetail = details.find((detail) => {
       const status = String(detail?.statusLabel ?? '').trim().toUpperCase()
       return status === 'RUNNING' && detail?.sourceItem
     })
     const dayStartSource = reportHistoryDayStartCloseSource(row)
-    const closeTargets = runningDetails.length
-      ? runningDetails
-      : dayStartSource
-        ? [
-            {
-              sourceItem: dayStartSource,
-              statusLabel: 'RUNNING',
-              isDayMarkerClose: true,
-            },
-          ]
-        : []
-
-    if (!closeTargets.length) {
-      alert('Brak otwartego dnia pracy do zamknięcia. Odśwież historię.')
-      return
-    }
+    const source = runningDetail?.sourceItem
+      ?? dayStartSource
+      ?? row?.qrStartSourceItem
+      ?? details.find((detail) => detail?.sourceItem)?.sourceItem
+      ?? row
 
     const workerSelect = document.getElementById('repHistoryWorker')
     const workerSearch = document.getElementById('repHistoryWorkerSearch')
-    const workerLogin = String(workerSelect?.value ?? '').trim()
-    const workerName = String(workerSelect?.selectedOptions?.[0]?.textContent ?? workerSearch?.value ?? '').trim() || 'pracownika'
-    const dayLabel = formatDatePl(`${normalizedDayKey}T00:00:00.000Z`)
-    const selectedEndIso = await reportHistoryPromptStopDateTime({
+    const workerLoginValue = String(
+      source?.workerLogin ?? source?.workerId ?? row?.workerLogin ?? workerSelect?.value ?? '',
+    ).trim()
+    const workerNameValue = String(
+      source?.workerName
+        ?? source?.name
+        ?? row?.workerName
+        ?? workerSelect?.selectedOptions?.[0]?.textContent
+        ?? workerSearch?.value
+        ?? '',
+    ).trim()
+    const workerKeys = new Set(
+      [workerLoginValue, workerNameValue]
+        .map((value) => normalizeSearchText(value))
+        .filter(Boolean),
+    )
+    const workerMatches = (worker = {}) => [
+      worker.login,
+      worker.workerLogin,
+      worker.id,
+      worker.workerId,
+      worker.email,
+      worker.loginEmail,
+      worker.name,
+      worker.workerName,
+      worker.fullName,
+      worker.displayName,
+    ].some((value) => workerKeys.has(normalizeSearchText(value)))
+
+    let workers = Array.isArray(appState.workers) ? appState.workers : []
+    let worker = workers.find(workerMatches) ?? null
+    if (!worker && typeof getWorkers === 'function') {
+      const fetchedWorkers = await getWorkers(appState.session.orgId, { forceRefresh: false }).catch(() => [])
+      if (Array.isArray(fetchedWorkers)) {
+        workers = fetchedWorkers
+        appState.workers = fetchedWorkers
+        worker = workers.find(workerMatches) ?? null
+      }
+    }
+
+    if (!worker) {
+      alert('Nie udało się znaleźć pracownika dla wybranego dnia.')
+      return
+    }
+
+    const workdayId = String(
+      source?.linkedWorkdayId
+        ?? source?.workdayId
+        ?? row?.linkedWorkdayId
+        ?? row?.workdayId
+        ?? '',
+    ).trim()
+    appState.workerAccountCurrent = worker
+    appState.workerAccountActiveTab = 'time'
+    appState.workerAccountTargetKey = String(
+      worker.login ?? worker.workerLogin ?? worker.id ?? worker.workerId ?? '',
+    ).trim()
+    appState.selectedWorkerLogin = String(worker.login ?? worker.workerLogin ?? workerLoginValue).trim()
+    appState.selectedWorkerName = String(worker.name ?? worker.workerName ?? workerNameValue).trim()
+    appState.workerAccountPendingTimeEditor = {
       dayKey: normalizedDayKey,
-      dayLabel,
-      workerName,
-    })
-    if (!selectedEndIso) {
-      return
+      workdayId,
+      source: 'reports-workday-reconciliation',
     }
 
-    const selectedEndTs = new Date(selectedEndIso).getTime()
-    const latestStartTs = closeTargets.reduce((maxTs, detail) => {
-      const startIso = toIso(detail?.sourceItem?.startAt ?? detail?.sourceItem?.dayStartAt ?? row?.dayStartIso)
-      const startTs = startIso ? new Date(startIso).getTime() : 0
-      return Number.isFinite(startTs) && startTs > maxTs ? startTs : maxTs
-    }, 0)
-    if (Number.isFinite(selectedEndTs) && Number.isFinite(latestStartTs) && latestStartTs > 0 && selectedEndTs < latestStartTs) {
-      alert('Podana godzina STOP jest wcześniejsza niż start aktywnego wpisu. Wybierz późniejszą godzinę.')
-      return
+    if (typeof window !== 'undefined' && typeof window.go === 'function') {
+      window.go('workerAccount')
     }
-
-    appState.reportHistoryClosingDayKey = normalizedDayKey
-    reportHistoryRenderTable()
-    reportHistorySetStatus('Zamykanie dnia...')
-
-    try {
-      const nowIso = selectedEndIso
-      let updatedCount = 0
-      const closedTargets = []
-
-      for (const detail of closeTargets) {
-        const source = detail.sourceItem ?? {}
-        const eventId = String(source?.eventId ?? source?.workdayId ?? source?.id ?? '').trim()
-        if (!eventId) {
-          continue
-        }
-
-        const sourceWorkerLogin = String(source?.workerLogin ?? source?.workerId ?? workerLogin).trim()
-        if (!sourceWorkerLogin) {
-          continue
-        }
-
-        const sourceWorkerName = String(source?.workerName ?? source?.name ?? workerName).trim() || workerName
-        const sourceStartAt = toIso(source?.startAt ?? source?.dayStartAt ?? row?.dayStartIso) || nowIso
-        const startMs = new Date(sourceStartAt).getTime()
-        const nowMs = new Date(nowIso).getTime()
-        const safeEndAt = Number.isFinite(startMs) && Number.isFinite(nowMs) && nowMs < startMs ? sourceStartAt : nowIso
-        const endMs = new Date(safeEndAt).getTime()
-        const durationSec =
-          Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs ? Math.floor((endMs - startMs) / 1000) : 0
-
-        const zoneId = String(source?.roomId ?? source?.utilityRoomId ?? source?.zoneId ?? '').trim()
-        const clientId = String(source?.clientId ?? '').trim()
-
-        await updateEvent(appState.session.orgId, eventId, {
-          ...source,
-          correlationIdentityBaseline: source,
-          eventId,
-          workdayId: String(source?.workdayId ?? eventId).trim() || eventId,
-          workerLogin: sourceWorkerLogin,
-          workerName: sourceWorkerName,
-          zoneId: zoneId || null,
-          roomId: zoneId || null,
-          utilityRoomId: zoneId || null,
-          clientId: clientId || null,
-          startAt: sourceStartAt,
-          endAt: safeEndAt,
-          durationSec,
-          status: 'CLOSED',
-          closeMarkedAt: safeEndAt,
-          endReason: 'WORKDAY_STOP',
-          comment: String(source?.comment ?? '').trim(),
-          updatedBy: appState.session?.name ?? null,
-        })
-        closedTargets.push({
-          eventId,
-          workdayId: String(source?.workdayId ?? eventId).trim() || eventId,
-          sourceItem: source,
-          startAt: sourceStartAt,
-          endAt: safeEndAt,
-          durationSec,
-        })
-        updatedCount += 1
-      }
-
-      if (!updatedCount) {
-        throw new Error('Nie udało się zamknąć żadnego aktywnego wpisu.')
-      }
-
-      reportHistoryApplyClosedWorkerDay(normalizedDayKey, nowIso, closedTargets)
-      reportHistoryRenderTable()
-      await runReportHistory()
-      reportHistoryApplyClosedWorkerDay(normalizedDayKey, nowIso, closedTargets)
-      await fetchEventsForCurrentSession({ resetPage: false })
-      await refreshDashboardWidgets({ syncWorktimeToken: true })
-      showTransientNotice(
-        runningDetails.length
-          ? `Dzień zakończony. Zamknięto ${updatedCount} aktywne wpisy.`
-          : 'Dzień pracy został zamknięty.',
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('worker-account-select', {
+          detail: {
+            worker,
+            tab: 'time',
+            timeEditorIntent: appState.workerAccountPendingTimeEditor,
+          },
+        }),
       )
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Nie udało się zakończyć dnia.'
-      alert(message)
-    } finally {
-      appState.reportHistoryClosingDayKey = ''
-      reportHistoryRenderTable()
     }
   }
 
@@ -1544,7 +1257,6 @@ export function createReportsFeature(ctx) {
     appState.reportHistoryRows = []
     appState.reportHistoryExpanded = {}
     appState.reportHistoryEditableMap = {}
-    appState.reportHistoryClosingDayKey = ''
     reportHistorySetSummaryRows([])
     reportHistoryRenderTable()
 
@@ -1557,8 +1269,16 @@ export function createReportsFeature(ctx) {
     const normalized = String(item?.status ?? '')
       .trim()
       .toUpperCase()
+    const sourceKind = String(item?.historySourceKind ?? '').trim().toLowerCase()
+    const isExplicitEvent = item?.hasExplicitEventId === true || sourceKind === 'event'
+    const hasEventStart = Boolean(toIso(item?.startAt))
+    const hasEventStop = Boolean(toIso(item?.endAt))
 
-    if (normalized === 'CLOSED' || item?.endAt) {
+    if (isExplicitEvent && hasEventStart && !hasEventStop) {
+      return 'RUNNING'
+    }
+
+    if (normalized === 'CLOSED' || hasEventStop) {
       return 'CLOSED'
     }
 
@@ -1569,86 +1289,23 @@ export function createReportsFeature(ctx) {
     return normalized || 'RUNNING'
   }
 
-  function reportHistoryClosedDurationSec(item) {
-    if (reportHistoryResolveStatus(item) !== 'CLOSED') {
-      return 0
-    }
-
-    const direct = Number(item?.durationSec ?? 0)
-    if (Number.isFinite(direct) && direct > 0) {
-      return Math.floor(direct)
-    }
-
-    const startAt = toIso(item?.startAt)
-    const endAt = toIso(item?.endAt)
-    if (!startAt || !endAt) {
-      return 0
-    }
-
-    const diff = Math.floor((new Date(endAt).getTime() - new Date(startAt).getTime()) / 1000)
-    return Number.isFinite(diff) && diff > 0 ? diff : 0
+  function reportHistoryClosedDurationSec(item, tab = '') {
+    return reportHistoryNormalizeTab(tab) === 'workers'
+      ? reportAttendanceSessionDurationSec(item)
+      : reportClosedSessionDurationSec(item)
   }
 
-  function reportHistoryRangeSecondsFromTimestamps(startTs, endTs) {
-    const start = Number(startTs ?? 0)
-    const end = Number(endTs ?? 0)
-    if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= start) {
-      return 0
-    }
-
-    return Math.floor((end - start) / 1000)
-  }
-
-  function reportHistoryDurationLabel(item) {
+  function reportHistoryDurationLabel(item, tab = '') {
     const status = reportHistoryResolveStatus(item)
     if (status !== 'CLOSED') {
       return 'W toku'
     }
 
-    return durationSecondsToHms(reportHistoryClosedDurationSec(item))
-  }
-
-  function reportHistoryLocalDayKey(value) {
-    const iso = toIso(value)
-    if (!iso) {
-      return ''
-    }
-
-    const date = new Date(iso)
-    if (!Number.isFinite(date.getTime())) {
-      return ''
-    }
-
-    return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+    return durationSecondsToHms(reportHistoryClosedDurationSec(item, tab))
   }
 
   function reportHistoryDayKey(item) {
-    const fromStart = reportHistoryLocalDayKey(item?.startAt)
-    if (fromStart) {
-      return fromStart
-    }
-
-    const fromEnd = reportHistoryLocalDayKey(item?.endAt)
-    if (fromEnd) {
-      return fromEnd
-    }
-
-    const fromDayStart = reportHistoryLocalDayKey(item?.dayStartAt)
-    if (fromDayStart) {
-      return fromDayStart
-    }
-
-    const fromDayEnd = reportHistoryLocalDayKey(item?.dayEndAt)
-    if (fromDayEnd) {
-      return fromDayEnd
-    }
-
-    const dayKey = String(item?.dayKey ?? '').trim()
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
-      return dayKey
-    }
-
-    return ''
+    return reportBusinessDateYmd(item)
   }
 
   function reportHistoryToTimestamp(value) {
@@ -2162,7 +1819,6 @@ export function createReportsFeature(ctx) {
           dayEndIso: '',
           dayStartTs: 0,
           dayEndTs: 0,
-          latestRunningStartTs: 0,
           dayStartClientLabel: '-',
           dayEndClientLabel: '-',
           dayStartZoneCode: '-',
@@ -2184,7 +1840,7 @@ export function createReportsFeature(ctx) {
 
       const bucket = groups.get(dayKey)
       const status = reportHistoryResolveStatus(item)
-      const closedSec = reportHistoryClosedDurationSec(item)
+      const closedSec = reportHistoryClosedDurationSec(item, normalizedTab)
       const isMarkerOnly = item?.historyMarkerOnly
       const startIso = toIso(item?.startAt)
       const endIso = toIso(item?.endAt)
@@ -2216,16 +1872,13 @@ export function createReportsFeature(ctx) {
         bucket.countAll += 1
         bucket.closedSec += closedSec
         if (normalizedTab === 'workers') {
-          const closedInterval = workStatusIntervalFromTimes(startIso, endIso, closedSec)
+          const closedInterval = closedSec > 0 ? workStatusIntervalFromTimes(startIso, endIso, closedSec) : null
           if (closedInterval) {
             bucket.closedIntervals.push(closedInterval)
           }
         }
         if (status === 'RUNNING') {
           bucket.runningCount += 1
-          if (sortStartTs > bucket.latestRunningStartTs) {
-            bucket.latestRunningStartTs = sortStartTs
-          }
         }
       }
       const shouldReplaceDayStart =
@@ -2311,7 +1964,7 @@ export function createReportsFeature(ctx) {
           locationLabel: String(item.lokalizacja ?? item.location ?? '-').trim() || '-',
           startLabel: formatTime(startIso),
           stopLabel: status === 'RUNNING' ? '-' : formatTime(endIso),
-          durationLabel: reportHistoryDurationLabel(item),
+          durationLabel: reportHistoryDurationLabel(item, normalizedTab),
           statusLabel: status,
           sortStartTs,
           sortEndTs,
@@ -2327,7 +1980,7 @@ export function createReportsFeature(ctx) {
         workerLabel: String(item.workerName ?? item.workerLogin ?? '-').trim() || '-',
         startLabel: formatTime(startIso),
         stopLabel: status === 'RUNNING' ? '-' : formatTime(endIso),
-        durationLabel: reportHistoryDurationLabel(item),
+        durationLabel: reportHistoryDurationLabel(item, normalizedTab),
         statusLabel: status,
         sortStartTs,
         sortEndTs,
@@ -2337,41 +1990,13 @@ export function createReportsFeature(ctx) {
 
     return [...groups.values()]
       .map((bucket) => {
-        const hasRunning = Number(bucket.runningCount ?? 0) > 0
-        const todayKey = todayYmd()
-        const isTodayBucket = String(bucket.dayKey ?? '').trim() === todayKey
-        const detailedClosedSec = Math.max(0, Number(bucket.closedSec ?? 0))
         const uniqueClosedSec =
           normalizedTab === 'workers' && Array.isArray(bucket.closedIntervals) && bucket.closedIntervals.length
-            ? workStatusIntervalsTotalSeconds(bucket.closedIntervals)
+            ? workIntervalsTotalSeconds(bucket.closedIntervals)
             : 0
-        const activeRunningSec =
-          hasRunning &&
-          isTodayBucket &&
-          Number(bucket.latestRunningStartTs ?? 0) > 0 &&
-          Number(bucket.latestRunningStartTs ?? 0) > Number(bucket.dayEndTs ?? 0)
-            ? Math.max(0, Math.floor((Date.now() - Number(bucket.latestRunningStartTs ?? 0)) / 1000))
-            : 0
-        const daySpanSec =
-          normalizedTab === 'workers' && bucket.dayStartIsBoundary && bucket.dayEndIsBoundary
-            ? reportHistoryRangeSecondsFromTimestamps(bucket.dayStartTs, bucket.dayEndTs)
-            : 0
-        const activeDaySpanSec =
-          normalizedTab === 'workers' &&
-          bucket.dayStartIsBoundary &&
-          !bucket.dayEndIsBoundary &&
-          isTodayBucket &&
-          Number(bucket.dayStartTs ?? 0) > 0
-            ? Math.max(0, Math.floor((Date.now() - Number(bucket.dayStartTs ?? 0)) / 1000))
-            : 0
-        let totalWorkSec = detailedClosedSec
-        if (normalizedTab === 'workers') {
-          const closedBaseSec = uniqueClosedSec || daySpanSec || detailedClosedSec
-          totalWorkSec = closedBaseSec > 0 ? closedBaseSec + activeRunningSec : activeDaySpanSec || activeRunningSec
-        }
         return {
           ...bucket,
-          closedSec: normalizedTab === 'workers' ? totalWorkSec : bucket.closedSec,
+          closedSec: normalizedTab === 'workers' ? uniqueClosedSec : bucket.closedSec,
           qrStartLabel: formatTime(bucket.dayStartIso),
           qrStopLabel: formatTime(bucket.dayEndIso),
           qrStartClientLabel: bucket.dayStartClientLabel || '-',
@@ -2738,22 +2363,7 @@ export function createReportsFeature(ctx) {
   }
 
   function eventHistoryDayKey(row) {
-    const fromRow = String(row?.dayKey ?? '').trim()
-    if (/^\d{4}-\d{2}-\d{2}$/.test(fromRow)) {
-      return fromRow
-    }
-
-    const fromStart = toIso(row?.startAt)
-    if (fromStart) {
-      return fromStart.slice(0, 10)
-    }
-
-    const fromEnd = toIso(row?.endAt)
-    if (fromEnd) {
-      return fromEnd.slice(0, 10)
-    }
-
-    return todayYmd()
+    return reportBusinessDateYmd(row) || todayYmd()
   }
 
   function eventHistoryMonthRange(dayKey) {
@@ -3070,24 +2680,7 @@ export function createReportsFeature(ctx) {
   }
 
   function reportEventDurationSec(item) {
-    const direct = Number(item?.durationSec ?? 0)
-    if (Number.isFinite(direct) && direct > 0) {
-      return Math.floor(direct)
-    }
-
-    const startIso = toIso(item?.startAt)
-    const endIso = toIso(item?.endAt)
-    if (!startIso || !endIso) {
-      return 0
-    }
-
-    const startMs = new Date(startIso).getTime()
-    const endMs = new Date(endIso).getTime()
-    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
-      return 0
-    }
-
-    return Math.floor((endMs - startMs) / 1000)
+    return reportClosedSessionDurationSec(item)
   }
 
   function reportEventMatchesStatus(item, status) {
@@ -3158,7 +2751,7 @@ export function createReportsFeature(ctx) {
       return reportEventTypeLabel(item)
     }
     if (mode === 'day') {
-      const key = String(item?.dayKey ?? item?.startAt ?? item?.endAt ?? '').slice(0, 10)
+      const key = reportBusinessDateYmd(item)
       return key ? formatDatePl(`${key}T12:00:00.000Z`) : 'Bez daty'
     }
     return reportEventClientLabel(item) || 'Bez klienta'
@@ -3216,7 +2809,7 @@ export function createReportsFeature(ctx) {
         workerCount: bucket.workers.size,
         clientCount: bucket.clients.size,
         zoneCount: bucket.zones.size,
-        avgSec: bucket.count ? Math.floor(bucket.totalSec / bucket.count) : 0,
+        avgSec: bucket.closed ? Math.floor(bucket.totalSec / bucket.closed) : 0,
       }))
       .sort((left, right) => {
         if (right.totalSec !== left.totalSec) return right.totalSec - left.totalSec
@@ -3253,10 +2846,12 @@ export function createReportsFeature(ctx) {
       .sort((left, right) => String(right.startAt ?? right.endAt ?? '').localeCompare(String(left.startAt ?? left.endAt ?? '')))
       .slice(0, 300)
       .map((item) => ({
-        date: item.date || formatDatePl(item.startAt || item.endAt),
+        date: reportBusinessDateYmd(item)
+          ? formatDatePl(`${reportBusinessDateYmd(item)}T12:00:00.000Z`)
+          : item.date || '-',
         start: dashboardClockLabelToHm(item.start, '-'),
         stop: dashboardClockLabelToHm(item.stop, '-'),
-        duration: durationSecondsToHms(reportEventDurationSec(item)),
+        duration: reportClosedEvent(item) ? durationSecondsToHms(reportEventDurationSec(item)) : 'Brak STOP',
         worker: reportEventWorkerLabel(item),
         client: reportEventClientLabel(item),
         zone: zoneNameWithQrHtml(reportEventZoneLabel(item), item),
@@ -3488,25 +3083,26 @@ export function createReportsFeature(ctx) {
   }
 
   function reportClosedEvent(item) {
-    const status = String(item.status ?? '').trim().toUpperCase()
-    return status === 'CLOSED' || Boolean(item.endAt)
+    return reportHasClosedSession(item)
   }
 
   function reportGroupByDay(items) {
     const grouped = new Map()
 
     items.forEach((item) => {
-      const dayKey = String(item.dayKey ?? '').trim() || String(item.startAt ?? '').slice(0, 10)
+      const dayKey = reportBusinessDateYmd(item)
       if (!dayKey) {
         return
       }
 
-      const duration = Number(item.durationSec ?? 0)
-      const durationSec = Number.isFinite(duration) && duration > 0 ? Math.floor(duration) : 0
+      const durationSec = reportEventDurationSec(item)
+      const isClosed = reportClosedEvent(item)
       if (!grouped.has(dayKey)) {
         grouped.set(dayKey, {
           date: dayKey,
           count: 0,
+          closedCount: 0,
+          runningCount: 0,
           totalSec: 0,
           minSec: Number.POSITIVE_INFINITY,
           maxSec: 0,
@@ -3515,27 +3111,38 @@ export function createReportsFeature(ctx) {
 
       const bucket = grouped.get(dayKey)
       bucket.count += 1
-      bucket.totalSec += durationSec
-      bucket.minSec = Math.min(bucket.minSec, durationSec)
-      bucket.maxSec = Math.max(bucket.maxSec, durationSec)
+      if (isClosed) {
+        bucket.closedCount += 1
+        bucket.totalSec += durationSec
+        bucket.minSec = Math.min(bucket.minSec, durationSec)
+        bucket.maxSec = Math.max(bucket.maxSec, durationSec)
+      } else {
+        bucket.runningCount += 1
+      }
     })
 
     return [...grouped.values()]
       .map((bucket) => ({
         ...bucket,
         minSec: Number.isFinite(bucket.minSec) ? bucket.minSec : 0,
-        avgSec: bucket.count > 0 ? Math.floor(bucket.totalSec / bucket.count) : 0,
+        avgSec: bucket.closedCount > 0 ? Math.floor(bucket.totalSec / bucket.closedCount) : 0,
       }))
       .sort((left, right) => left.date.localeCompare(right.date))
   }
 
   function reportStats(items) {
     const count = items.length
-    const durations = items.map((item) => Number(item.durationSec ?? item.totalSec ?? 0)).filter((value) => Number.isFinite(value) && value >= 0)
+    const aggregatedRows = items.every((item) =>
+      Object.prototype.hasOwnProperty.call(item ?? {}, 'totalSec') &&
+      !Object.prototype.hasOwnProperty.call(item ?? {}, 'startAt') &&
+      !Object.prototype.hasOwnProperty.call(item ?? {}, 'endAt'))
+    const durations = aggregatedRows
+      ? items.map((item) => Number(item.totalSec ?? 0)).filter((value) => Number.isFinite(value) && value >= 0)
+      : items.filter(reportClosedEvent).map(reportEventDurationSec)
     const totalSec = durations.reduce((sum, value) => sum + value, 0)
     const minSec = durations.length ? Math.min(...durations) : 0
     const maxSec = durations.length ? Math.max(...durations) : 0
-    const avgSec = count > 0 ? Math.floor(totalSec / count) : 0
+    const avgSec = durations.length > 0 ? Math.floor(totalSec / durations.length) : 0
 
     return {
       count,
@@ -3785,24 +3392,28 @@ export function createReportsFeature(ctx) {
         ]
 
         const mappedA = rowsA.map((row) => ({
-          date: row.date || formatDatePl(row.startAt),
+          date: reportBusinessDateYmd(row)
+            ? formatDatePl(`${reportBusinessDateYmd(row)}T12:00:00.000Z`)
+            : row.date || '-',
           worker: row.workerName || row.workerLogin || '-',
           client: resolveClientLabelWithQrFallback(
             String(row.clientName || row.klient || '-'),
             row.zoneId || row.roomId || row.utilityRoomId || row.strefa || row.zoneName || '-',
           ),
           zone: row.zoneName || row.strefa || '-',
-          duration: durationSecondsToHms(Number(row.durationSec ?? 0)),
+          duration: durationSecondsToHms(reportEventDurationSec(row)),
         }))
         const mappedB = rowsB.map((row) => ({
-          date: row.date || formatDatePl(row.startAt),
+          date: reportBusinessDateYmd(row)
+            ? formatDatePl(`${reportBusinessDateYmd(row)}T12:00:00.000Z`)
+            : row.date || '-',
           worker: row.workerName || row.workerLogin || '-',
           client: resolveClientLabelWithQrFallback(
             String(row.clientName || row.klient || '-'),
             row.zoneId || row.roomId || row.utilityRoomId || row.strefa || row.zoneName || '-',
           ),
           zone: row.zoneName || row.strefa || '-',
-          duration: durationSecondsToHms(Number(row.durationSec ?? 0)),
+          duration: durationSecondsToHms(reportEventDurationSec(row)),
         }))
         const diffRows = [
           {
@@ -3913,11 +3524,11 @@ export function createReportsFeature(ctx) {
         return
       }
 
-      const historyStopDayButton = event.target.closest('[data-rep-history-stop-day]')
-      if (historyStopDayButton) {
-        const dayKey = String(historyStopDayButton.getAttribute('data-rep-history-stop-day') ?? '').trim()
+      const historyReconciliationButton = event.target.closest('[data-rep-history-reconcile-day]')
+      if (historyReconciliationButton) {
+        const dayKey = String(historyReconciliationButton.getAttribute('data-rep-history-reconcile-day') ?? '').trim()
         if (dayKey) {
-          void reportHistoryCloseWorkerDay(dayKey)
+          void reportHistoryOpenWorkerDayReconciliation(dayKey)
         }
         return
       }

@@ -60,12 +60,14 @@ test('ADMIN oznaczony przez backend jako finansowy może czytać i edytować', (
 test('ENTERPRISE jest aktywnym planem portalu i ma tę samą capability co PRO', () => {
   const enterprise = row({ plan_code: 'ENTERPRISE' })
   assert.deepEqual(evaluateOrganizationAccess(enterprise), { allowed: true, code: 'ACCESS_ALLOWED' })
+  assert.equal(buildSessionContext('UID-1', enterprise).planCode, 'PRO')
   assert.equal(buildSessionContext('UID-1', enterprise).capabilities.profitabilityModule.canRead, true)
 })
 
 test('START pozostaje dostępny w portalu, ale bez capability rentowności', () => {
   const start = row({ plan_code: 'START' })
   assert.deepEqual(evaluateOrganizationAccess(start), { allowed: true, code: 'ACCESS_ALLOWED' })
+  assert.equal(buildSessionContext('UID-1', start).planCode, 'PLUS')
   assert.equal(buildSessionContext('UID-1', start).capabilities.profitabilityModule.enabled, false)
   assert.equal(buildSessionContext('UID-1', start).capabilities.profitabilityModule.canRead, false)
 })

@@ -344,9 +344,8 @@ Najważniejsze serwisy:
 - `scheduleService.js` - board grafiku.
 - `portalTaskService.js` - `/api/portal/tasks`.
 - `scheduleTaskDataConnectService.js` - taski grafiku przez Data Connect.
-- `backupService.js` - backup/restore/download/automatyzacja.
-- `styleService.js` - style UI organizacji i użytkowników.
 - `orgService.js` - organizacje.
+- `registrationOnboardingService.js` - portalowe wznowienie próby Registration API: bezpieczny bind Firebase, zgody, weryfikacja, lookup polskiego NIP, `complete-company`, idempotencja oraz walidacja Stripe Checkout.
 - `platformDataConnectService.js` - bezpośrednia komunikacja sesji PLATFORM_OWNER z backendowym gatewayem; bez fallbacku do klientowego Data Connect.
 
 Zasada: jeśli kilka feature potrzebuje tej samej operacji danych, dodaj/zmień serwis zamiast kopiować fetch/logikę w widokach.
@@ -371,7 +370,6 @@ Wygenerowany SDK:
 Główne encje w schemacie:
 - `Organization`, `OrganizationMember`
 - `OrganizationSubscription`
-- `OrgUiStyle`, `UserUiStylePreference`
 - `Worker`, `WorkerIdReservation`
 - `Client`, `ClientInd`, `IndividualClientJob`
 - `Zone`
@@ -451,6 +449,7 @@ Przykłady konfiguracji są w:
 
 Produkcja/App Hosting:
 - `apphosting.yaml` ustawia m.in. `NODE_ENV=production`, `APP_TARGET=portal`, Cloud SQL i sekrety DB.
+- `VITE_REGISTRATION_API_BASE_URL` jest publicznym bazowym adresem osobnego Registration API; produkcja używa `https://registration-cleanzi.web.app`, a lokalny Vite może wskazać emulator. `VITE_REGISTRATION_PAGE_URL` wskazuje stronę rozpoczęcia/wznowienia rejestracji.
 - Produkcja powinna używać konta serwisowego runtime. Nie należy kopiować lokalnego pliku ADC ani uruchamiać `gcloud auth application-default login` na serwerze.
 
 Lokalne Google Cloud/ADC:
@@ -4487,6 +4486,83 @@ Weryfikacja:
 Rollback:
 - Poprzedni zatwierdzony build to `build-2026-07-29-003`, commit `14f7a955869bb60d6cb69483c4942d1450d21ba0`.
 
+Data: 2026-07-31 CEST
+Autor: AI Codex
+Temat: Lokalna implementacja planów, logowania tenantowego i onboardingu organizacji
+Zakres:
+- Dodano centralną politykę kanonicznych planów `TRIAL`, `GO_PLUS`, `PLUS`, `PRO` z aliasami tylko do odczytu; Trial ma dokładnie funkcje GO+ przez 14 dni.
+- Backend sesji zwraca znormalizowany plan, możliwości, limity i użycie ponad pakiet oraz blokuje nieaktywne subskrypcje i organizacje.
+- Dodano Google Auth dla tenantów, wymóg zweryfikowanego emaila, bezpieczny reset hasła, wybór wielu organizacji i transakcyjne utworzenie własnej firmy.
+- Dodano profil organizacji, backendowy adapter GUS BIR1 i edycję profilu dla OWNER/ADMIN.
+- Dodano `PENDING_PAYMENT` i podpisany, idempotentny webhook Stripe; ręczna aktywacja płatnego planu jest zabroniona.
+- Dodano addytywną migrację `20260731_portal_plans_onboarding.sql`, testy kontraktów oraz dokument `docs/portal-plans-onboarding.md`.
+Weryfikacja:
+- `npm test` - 423/423 OK.
+- `npm --prefix web-app run lint` - OK.
+- `npm run build` - OK; pozostały wyłącznie zastane ostrzeżenia Vite o dużych chunkach i Node DEP0190.
+- `git diff --check` - bez błędów; tylko ostrzeżenia o przyszłej normalizacji LF/CRLF.
+- Read-only `npm run migrate:cleanzi-admin:audit` nie połączył się z Google OAuth: `invalid_grant / invalid_rapt`; przed audytem trzeba odświeżyć ADC.
+Granice:
+- Migracja nie została zastosowana, a aplikacja nie została wdrożona.
+- Sekrety GUS, Stripe, Firebase i Cloud SQL pozostają do skonfigurowania w Secret Manager.
+
+Data: 2026-07-31 CEST
+Autor: AI Codex
+Temat: Odświeżenie lokalnej sesji ADC i wygląd przycisku logowania Google
+Zakres:
+- Odświeżono Application Default Credentials poleceniem `gcloud auth application-default login` dla projektu `iclean-room`.
+- Ponowiono read-only audyt bazy; uwierzytelnienie działa, a raport wskazuje brakujące elementy schematu wymagające osobnej migracji.
+- Zrestartowano lokalne `npm run dev`; backend i portal ponownie odpowiadają.
+- Przycisk `Zaloguj się przez Google` otrzymał białą, zaokrągloną formę z cienką ramką, prawdziwym logo Google oraz stanami hover, focus, active i disabled.
+- Zachowano istniejącą logikę logowania Google; zmiana dotyczy warstwy prezentacji.
+Weryfikacja:
+- `GET http://localhost:8080/healthz` - HTTP 200.
+- `GET http://localhost:5174/` - HTTP 200.
+- `npm --prefix web-app run lint` - OK.
+- `npm run build` - OK; pozostały zastane ostrzeżenia Vite o dużych chunkach i Node DEP0190.
+- `node --test test/portal-auth-onboarding-contract.test.js` - 3/3 OK.
+
+Data: 2026-07-31 CEST
+Autor: AI Codex
+Temat: Portalowa kontynuacja Registration API i polityka Trial v7
+Zakres:
+- Portal przejmuje probe z `registrationId` i jednorazowym `registrationToken`, przechowuje token wyłącznie we fragmencie URL oraz `sessionStorage`, a dane autoryzacyjne natychmiast usuwa z adresu.
+- Rozdzielono bind konta od zapisu zgód i weryfikacji emaila; wznowienie `AUTH_CREATED` z zapisanymi zgodami przechodzi bezpośrednio do verify/company i nie wymaga ponownego zaznaczania zgód.
+- Zachowano wybór istniejącej organizacji. Nowa organizacja jest finalizowana wyłącznie przez Registration API, z danymi ownera, firmy, adresu i billing oraz opcjonalnym lookupem polskiego NIP.
+- Dla planu Trial portal otwiera utworzoną organizację, a dla planów płatnych akceptuje wyłącznie bezpieczny URL Stripe Checkout i blokuje wejście przy `PAYMENT_PENDING` do czasu potwierdzenia webhookiem.
+- Ustawiono publiczny produkcyjny base URL `https://registration-cleanzi.web.app` oraz jawny URL strony rejestracji; lokalny emulator pozostaje konfigurowalny przez zmienne Vite.
+- Trial dla nowych rejestracji trwa 7 dni (168 godzin). Polityka planów v7 zastępuje wcześniejszy okres 14 dni dla nowych Triali; test polityki chroni wartość `trialDays: 7`.
+- Uzupełniono dokument `docs/portal-plans-onboarding.md`, konfigurację przykładową, kontrakty portalu i historię zmian.
+Weryfikacja:
+- `node --check` dla serwisu Registration, auth i warstwy UI portalu - OK.
+- `node --test test/portal-auth-onboarding-contract.test.js test/plan-policy.test.js` - 11/11 OK.
+- `npm.cmd --prefix web-app run lint` - OK.
+- `npm.cmd run build` - OK; pozostały zastane ostrzeżenia Vite o dużych chunkach i Node DEP0190.
+- `git diff --check` - bez błędów; możliwe są wyłącznie ostrzeżenia o przyszłej normalizacji LF/CRLF.
+Granice:
+- Nie wykonano migracji, wdrożenia, commita ani publikacji zmian.
+
+Data: 2026-07-31 CEST
+Autor: AI Codex
+Temat: Usunięcie dodatkowej informacji z resetu hasła
+Zakres:
+- Usunięto tekst `Link dotyczy tylko kont logowanych hasłem. Hasłem konta Google zarządzasz w Google.` z panelu resetowania hasła.
+- Mechanizm resetowania hasła pozostał bez zmian.
+- Design QA dla widoku desktopowego i mobilnego - passed; konsola przeglądarki bez błędów.
+Granice:
+- Migracja nie została zastosowana, a aplikacja nie została wdrożona.
+
+Data: 2026-07-31 CEST
+Autor: AI Codex
+Temat: Uproszczenie treści ekranu logowania
+Zakres:
+- Usunięto tekst o zarządzaniu hasłem konta Google.
+- Usunięto tekst `Bezpieczne logowanie do chronionego środowiska Cleanzi.`.
+- Zachowano warunkowy link `Zresetuj hasło`, który pozostaje ukryty do czasu kwalifikującego się błędu logowania email/hasło.
+Weryfikacja:
+- `npm --prefix web-app run lint` - OK.
+- `node --test test/portal-auth-onboarding-contract.test.js` - 3/3 OK.
+
 Data: 2026-08-01
 Autor: AI Codex
 Temat: Lokalny fundament centralnej bramy rejestracji Cleanzi
@@ -4521,6 +4597,547 @@ Granice:
 - Nie wlaczono Identity Platform, Blaze, App Check ani zadnych API i sekretow.
 - Nie wykonano migracji, commita, pusha, wdrozenia ani zmiany produkcji.
 
+Data: 2026-07-29 22:44 CEST
+Autor: AI Codex
+Temat: Lokalny kandydat niezawodnej i uporzadkowanej mapy operacyjnej oraz prostszego przekazu logowania
+Zakres:
+- Leaflet 1.9.4 jest teraz wersjonowana zaleznoscia lokalnego builda zamiast skryptu pobieranego w runtime z jsDelivr.
+- CSP dopuszcza kafelki OpenStreetMap jako obrazy, ale nie rozszerza `script-src` o zewnetrzny CDN.
+- Mapa w spoczynku pokazuje tylko markery; etykiety obiektow, osoby i szczegoly nie otwieraja sie automatycznie.
+- Alarm pozostaje widoczny jako czerwony pierscien i licznik, bez samoczynnego otwierania duzego dymka pracownika.
+- Klikniecie obiektu pokazuje jedna karte danych live i ukrywa orbite osob, a klikniecie pustej mapy zamyka aktywne szczegoly.
+- Przekaz logowania wskazuje wprost, ze Cleanzi jest systemem do zarzadzania firma sprzatajaca i upraszcza zarzadzanie pracownikami, obiektami, zleceniami oraz jakoscia.
+Pliki:
+- `index.js`
+- `web-app/package.json`
+- `web-app/package-lock.json`
+- `web-app/apps/portal-web/src/features/dashboard/index.js`
+- `web-app/apps/portal-web/src/ui/styles/commandCenter.css`
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `web-app/apps/portal-web/src/ui/portalApp.js`
+- `test/operational-map-delivery.test.js`
+- `ReadMe.txt`
+Weryfikacja:
+- `npm test`: 821/821 OK.
+- `npm --prefix web-app run lint`: OK.
+- `npm --prefix web-app run build`: OK.
+- Lokalna mapa: 33/37 osob, 17 markerow i 7 grup obiektow wyrenderowanych z danych firmy.
+- Stan spoczynkowy: 0 rozwinietych grup, 0 widocznych etykiet obiektow, 0 automatycznie pokazanych osob.
+- Klikniecie obiektu: dokladnie 1 aktywna karta danych live, 0 dodatkowych orbit i etykiet.
+- Klikniecie pustej mapy: 0 aktywnych kart, grup i zaznaczonych osob.
+- Widok logowania sprawdzono wizualnie na desktopie oraz przy 592 x 816 px; brak poziomego przewijania.
+Granice:
+- Zmiany sa lokalnym kandydatem i nie zostaly wdrozone na produkcje.
+- Katalog `artifacts/` pozostaje poza zakresem i nie moze trafic do commita.
+- Produkcyjny rollout wymaga osobnej dokladnej zgody.
+
+Data: 2026-07-31 CEST
+Autor: AI Codex
+Temat: Domkniecie spojnego logo i hierarchii komunikatu logowania
+Zakres:
+- Wszystkie widoczne uzycia marki na ekranie logowania, w menu portalu i w eksporcie zdarzen korzystaja z jednego assetu `cleanzi-logo-primary.png`.
+- Glownym komunikatem banera jest `SYSTEM DO ZARZADZANIA FIRMA SPRZATAJACA`.
+- Haslo wspierajace brzmi `Zarzadzanie procesami. Proste i zautomatyzowane.`.
+- Uklad, typografia i rozmiar planszy sa responsywne; na telefonie zachowana jest pelna czytelnosc bez poziomego przewijania.
+- Tytul strony i favicon zostaly ujednolicone z marka Cleanzi.
+Pliki wydaniowe:
+- `web-app/public/cleanzi-logo-primary.png`
+- `web-app/apps/portal-web/src/ui/layoutTemplate.js`
+- `web-app/apps/portal-web/src/index.css`
+- `web-app/apps/portal-web/src/features/events/index.js`
+- `web-app/index.html`
+- `design-qa.md`
+Weryfikacja:
+- `git fetch --all --prune --tags`: brak nowych zdalnych referencji; branch `Poprawki-zdarzenia-czas-prac-2026-07-30` jest juz przodkiem aktualnego HEAD.
+- `npm test`: 846/846 OK.
+- `npm --prefix web-app run lint`: OK.
+- `npm --prefix web-app run build`: OK; pozostaje informacyjne ostrzezenie Vite o duzych chunkach.
+- Lokalny ekran logowania: desktop i 390 x 844 px, oba logo zaladowane z poprawnym naturalnym rozmiarem, brak poziomego przewijania.
+- Konsola przegladarki: 0 bledow i 0 ostrzezen.
+- `git diff --check`: OK.
+Granice:
+- `artifacts/` i `design-qa-assets/` sa materialami roboczymi i nie moga trafic do commita wydaniowego.
+- Nie wykonano pusha, migracji, wdrozenia ani zmiany danych produkcyjnych.
+- Produkcyjny rollout wymaga osobnej dokladnej zgody.
+
+Data: 2026-07-31
+Autor: AI Codex
+Temat: Rozszerzenie backendowego canary korelacji CLEAN na W005
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-MOBILE-SABINA-W005-20260731`.
+Dodano:
+- Nic.
+Zmieniono:
+- W `apphosting.yaml` pozostawiono `MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED=true` i rozszerzono `MOBILE_SERVICE_EXECUTION_CORRELATION_CANARY_WORKER_IDS` z `W001` do `W001,W005`.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- Potwierdzono przed zmiana, ze 100% ruchu backendu `cleanzi-01` obsluguje dokladny commit `fddc25dc9a844565f62494e63c40c624c980cb07`.
+- Testy polityki korelacji i guardow mobile: 12/12 OK.
+- Jawna kontrola polityki: `W001` i `W005` otrzymuja `CANARY_MATCH`, a pracownik spoza listy `CANARY_RESTRICTED`.
+- `git diff --check`: OK; wylacznie standardowe ostrzezenie LF/CRLF.
+Uwagi dla nastepnej osoby:
+- Zmiana rozszerza wylacznie backendowa allowliste tworzenia nowego `CLEAN`. Nie zmienia Data Connect, bazy, Eventow, Workday ani dzialania START/STOP.
+- Osobny canary klienta `mobile-web` musi rowniez kierowac `W005` przez `/api/mobile/scan`; sama zmiana backendu nie stanowi pelnego E2E canary W005.
+- W chwili przygotowania wpisu nie wykonano jeszcze pushu ani wdrozenia produkcyjnego.
+- Rollback polega na przywroceniu wartosci `W001` albo skierowaniu ruchu na poprzedni build oparty na `fddc25dc9a844565f62494e63c40c624c980cb07`.
+
+Data: 2026-07-31
+Autor: AI Codex
+Temat: Produkcyjny rollout backendowego canary W005
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-MOBILE-SABINA-W005-20260731`.
+Wydanie:
+- Commit: `2d18462880c98ae2175c3c71987915eb72c7e1e4`.
+- App Hosting backend `cleanzi-01`: `build-2026-07-31-001`, stan `READY`.
+- Rollout `build-2026-07-31-001`: stan `SUCCEEDED`, 100% ruchu.
+- Efektywna konfiguracja builda potwierdza `MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED=true` oraz dokladna liste `W001,W005`.
+Weryfikacja:
+- `https://portal.cleanzi.pl/`: HTTP 200.
+- `https://cleanzi-01--iclean-room.europe-west4.hosted.app/`: HTTP 200.
+- `/api/mobile/scan` bez tokenu na obu domenach: kontrolowane HTTP 401 JSON.
+- Proxy `mobile-web` dopuszcza origin W005 dla skanu, statusu i planu dnia; obcy origin otrzymuje HTTP 403.
+- Nie wykonano logowania jako Sabina, skanu produkcyjnego ani zapisu testowego do bazy.
+Rollback:
+- Skierowac 100% ruchu na `build-2026-07-30-001` (`fddc25dc9a844565f62494e63c40c624c980cb07`) albo wdrozyc revert przywracajacy `W001`.
+- Nie usuwac ani nie modyfikowac historii Workday, Event ani `mobile_scan_command`.
+
+Data: 2026-08-01
+Autor: AI Codex
+Temat: Produkcyjna obsluga starego Workday i oczekujacego skanu W005
+Autoryzacja:
+- Uzytkownik podal dokladna zgode `OK PRODUKCJA CLZ-MOBILE-W005-WORKDAY-AND-PENDING-SCAN-20260801`.
+Wydanie:
+- Backend commit: `a4dfd9763bb52d84ee4112db247ed4679a884577`.
+- App Hosting `cleanzi-01`: `build-2026-08-01-001`, stan `SUCCEEDED`, `reconciling=false`, 100% ruchu.
+- Poprzedni build backendu: `build-2026-07-31-001`.
+- Frontend W005 commit: `66e55df560ae8f52a7efa9f110f7b8631f4d0c9b`.
+- Hosting: wylacznie `cleanzi-mobile-w005-20260731`; `mobile-web`, `app.cleanzi.pl` i ogolny pilot pozostaly bez zmian.
+Weryfikacja:
+- Backend: 344/344 testow; frontend: polityka 24/24 i klient API 14/14.
+- `GET /api/mobile/scan/status` przez `mobile-web`: kontrolowane HTTP 501 `MOBILE_SCAN_STATUS_UNAVAILABLE`.
+- `POST /api/mobile/scan` bez tokenu: kontrolowane HTTP 401 `UNAUTHENTICATED`.
+- Blad `UPSTREAM_FORBIDDEN_HOST` nie wystepuje po wdrozeniu.
+- Produkcyjny bundle W005: `assets/mobile-C8g3oJzH.js`, SHA-256 `DC2C11B8C059E8CB4ABC861D7A03E65D380AE72D523090998BD9C77B6D6129AF`.
+- Widok 390 x 844: brak poziomego przewijania; konsola: 0 bledow i 0 ostrzezen.
+- Trzy wpisy logow o poziomie ERROR byly celowymi probami statusu HTTP 501; brak innych bledow w oknie wydania.
+- Nie wykonano migracji, testowego skanu ani zapisu do bazy.
+Rollback:
+- Po utworzeniu nowego dnia pracy przy pozostawionym starym Workday nie wykonywac slepego rollbacku backendu, bo poprzednia regula moze ponownie zablokowac pracownika.
+- Preferowac roll-forward; jesli rollback jest konieczny, najpierw zamknac stary Workday przez autoryzowana korekte biurowa.
+- `npm.cmd run check` - PASS.
+- `node --test test/registration-contract.test.mjs` - 6/6 PASS.
+- Lokalny emulator Firestore - 4/4 PASS: jednokrotna konsumpcja, rownolegly wyscig,
+  fail-closed przy dwoch waznych grantach oraz idempotentny retry mimo pozniejszego
+  wydania grantu w drugim kanale.
+- `npm install --package-lock-only --offline` utworzyl powtarzalny lockfile.
+- Lokalny Node 20 zglosil oczekiwane ostrzezenie engine; docelowy codebase wymaga
+  Node 22 zgodnie z `registration-functions/package.json`.
+Granice:
+- Nie dodano adaptera CLEANING_COMPANY ani brokera Microsoft.
+- Nie istnieje eksport `beforeUserCreated`, a root `firebase.json` nie rejestruje
+  nowego codebase. Kod nie moze zostac wdrozony przez obecne polecenia projektu.
+- Nie wlaczono Identity Platform, Blaze, App Check ani zadnych API i sekretow.
+- Nie wykonano migracji, commita, pusha, wdrozenia ani zmiany produkcji.
+Data: 2026-08-01
+Autor: AI Codex
+Temat: Lokalny broker rejestracji firmy sprzatajacej e-mail/haslo
+Dodano lokalnie:
+- Kanoniczny kontrakt kanalu `CLEANING_COMPANY` z obowiazkowym prywatnym tokenem
+  proby, dokladna akcja Turnstile, planami GO+/PLUS/PRO, cyklem miesiecznym/rocznym
+  i wersjonowanymi zgodami.
+- Broker Firebase Admin tworzacy deterministyczny UID dopiero po walidacji hasla,
+  Turnstile oraz autorytatywnej proby i zgod. Haslo nie trafia do snapshotu proby,
+  Firestore, organizacji, logow ani telemetrii.
+- Natychmiastowe idempotentne zlecenie utworzenia organizacji `cleaning_provider`,
+  ownera i triala `TRIAL/TRIALING` na dokladnie 14 x 24 godziny, bez karty i bez
+  automatycznej konwersji.
+- Transakcyjny magazyn prywatnych operacji Firestore bez surowego e-maila, hasla,
+  tokenu Turnstile, IP i User-Agent.
+- Stany ponowien i awarii: bezpieczna kompensacja tylko dla potwierdzonego bledu
+  sprzed commita, `RECOVERY_REQUIRED` przy nieznanym wyniku oraz idempotentna
+  ponowna wysylka e-maila bez przedluzania triala.
+- Polityke dostepu: brak wejscia przed potwierdzeniem e-maila, po potwierdzeniu tylko
+  onboarding, a operacyjne API dopiero po ukonczeniu profilu i przy aktywnym trialu.
+- Dokument `docs/password-registration-broker-contract.md` i serwerowy przyklad
+  konfiguracji `registration-functions/.env.example` bez wartosci sekretow.
+Zmieniono:
+- Kontrakt integracyjny teraz jednoznacznie tworzy organizacje od razu po
+  zarejestrowaniu administratora, ze statusem `IN_PROGRESS`, zamiast dopiero po
+  potwierdzeniu e-maila.
+- Warunek centralnej bramy opisuje broker zamiast niewykonalnego grantu haslowego
+  `beforeCreate` oraz zachowuje twarda regule 14-dniowego triala.
+Usunieto:
+- Nic.
+Testy/sprawdzenia:
+- `npm.cmd run check` - PASS.
+- `npm.cmd run test:unit` - 28/28 PASS: trial 14 dni, idempotencja sekwencyjna i
+  rownolegla, polskie znaki, brak hasla/tokenu w zapisach, zgody, Turnstile, konflikt
+  payloadu, awarie bazy i poczty, rekonsyliacja Firebase oraz bramki dostepu.
+- `npm.cmd run test:emulator` - 8/8 PASS: granty i operacje Firestore, rownolegla
+  rezerwacja, prywatnosc, idempotencja i konflikty stanow.
+Granice:
+- Nie dodano publicznego endpointu, adaptera zrodlowej polskiej bazy, provisionera
+  Cloud SQL/Data Connect ani prawdziwej wysylki e-mail.
+- Nie zmieniono repozytorium publicznej rejestracji ani ustawienia self-signup w
+  Firebase Authentication.
+- Nie dodano eksportu Functions i nie wykonano migracji, commita, pusha, wdrozenia
+  ani jakiejkolwiek zmiany produkcji.
+- Nastepny etap to podlaczenie zrodlowej proby i transakcyjnego provisionera w tym
+  izolowanym kontrakcie, a potem test projektu testowego przed kontrolowanym cutoverem.
+
+Korekta architektoniczna 2026-08-01:
+- Oficjalna dokumentacja Identity Platform potwierdza, ze `beforeCreate` nie obejmuje
+  e-mail/haslo ani custom auth.
+- Docelowa granica to jedna centralna warstwa: funkcja blokujaca dla wspieranych
+  zdarzen oraz broker Firebase Admin dla hasla i custom auth.
+- Self-signup uzytkownikow koncowych musi zostac wylaczony przed uruchomieniem
+  brokera; istniejace logowanie pozostaje dostepne.
+
+Data: 2026-08-01
+Autor: AI Codex
+Temat: Lokalny adapter centralnej bramy dla firmy sprzatajacej
+Dodano lokalnie:
+- Adapter `CLEANING_COMPANY` z zarezerwowana akcja Turnstile
+  `registration_cleaning_company`, osobnym HMAC i privacy-minimalnym kandydatem grantu.
+- Kontrakt odrzuca klientowe zdarzenie haslowe kodem `PASSWORD_BROKER_REQUIRED`,
+  poniewaz Identity Platform nie uruchamia `beforeCreate` dla e-mail/haslo.
+- Nowe konta haslowe musza powstawac w centralnym brokerze po wylaczeniu self-signup;
+  istniejace logowanie pozostaje dostepne, a onboarding i API wymagaja potwierdzenia
+  e-maila.
+- Claimy pochodzenia rejestracji, ktore nie sa rola, membershipem ani uprawnieniem.
+- Testy rzeczywistego adaptera zamiast atrapy oraz test wyboru kanalu firmy
+  sprzatajacej przez centralny router.
+Ustalenia integracyjne:
+- Zatwierdzony trial firmy sprzatajacej trwa 14 dni i nie wymaga karty.
+- Publiczne plany to GO+, PLUS i PRO; cykl miesieczny lub roczny z rabatem 20%.
+- ENTERPRISE pozostaje poza publicznym wyborem i wymaga oferty indywidualnej.
+- Galaz `Rejestracja-31-07-2026` nie moze byc scalona bez zmian: zawiera trial
+  7-dniowy i nie pobiera centralnego grantu przed utworzeniem konta.
+- Dodano `docs/cleaning-company-registration-integration-handoff.md` z dokladna
+  kolejnoscia e-mail/haslo i Google oraz granica odpowiedzialnosci trzech repozytoriow.
+Granice:
+- Nie dodano eksportu `beforeUserCreated`, endpointu wydajacego grant ani konfiguracji
+  Firebase/Identity Platform.
+- Nie wykonano migracji, commita, pusha, wdrozenia ani zmiany produkcji.
+
+Data: 2026-08-02
+Autor: AI Codex
+Temat: Lokalna transakcja Cloud SQL i projekcja firmy sprzatajacej do Firestore
+Dodano lokalnie:
+- Adapter autorytatywnej proby PostgreSQL, ktory sprawdza hash jednorazowego tokenu,
+  kanoniczne dane wlasciciela, plan, cykl i wersjonowane zgody przed utworzeniem Auth.
+- Provisioner `SERIALIZABLE`, ktory w jednej transakcji tworzy organizacje
+  `CLEANING_PROVIDER`, ownera, membership, szkic profilu, zgody, audyt i subskrypcje
+  `TRIAL/TRIALING` na dokladnie 14 x 24 godziny.
+- Jednorazowe `trial_redemption`, idempotencje po `broker_operation_id`, bezpieczna
+  rekonsyliacje nieznanego wyniku COMMIT oraz transakcyjny outbox SQL.
+- Idempotentna projekcje do `organizations`, podkolekcji `members` i
+  `cleaningProviderProfiles` w Firestore.
+- Celowy stan `onboarding`, ktory nie spelnia kontraktu backendu zaproszen, oraz
+  osobne zdarzenie aktywacji dopiero po ukonczeniu profilu i podaniu nazwy prawnej.
+- Migracje lokalna `registration-functions/sql/20260802_cleaning_company_password_registration.sql`
+  i dokument `docs/cleaning-company-sql-firestore-projection-contract.md`.
+- Serwerowy adapter Siteverify Turnstile z bezpiecznym retry tego samego tokenu,
+  polityke hasla 15+ bez sztucznych regul skladu, k-anonimowa kontrole Pwned
+  Passwords oraz atomowy limit naduzyc Firestore.
+- Adapter Resend z prywatnym magazynem dostarczenia: ten sam klucz idempotencji
+  moze byc ponawiany tylko w bezpiecznym oknie, a starszy nieznany wynik wymaga
+  recznej rekonsyliacji zamiast ryzyka drugiej wiadomosci.
+- Dokument `docs/registration-execution-adapters.md` z kontraktem prywatnosci,
+  konfiguracji i warunkami podlaczenia.
+Testy/sprawdzenia:
+- `npm.cmd run check` - PASS.
+- `npm.cmd run test:unit` - 47/47 PASS, w tym zrodlo proby, polskie znaki,
+  transakcja, 14-dniowy trial, awarie przed i podczas COMMIT, outbox, retry,
+  projekcja Firestore, wiele organizacji, blokada zaproszen, Turnstile, polityka
+  hasla i trwala idempotencja wiadomosci.
+- `npm.cmd run test:emulator` - 10/10 PASS: granty, operacje brokera, atomowe limity
+  naduzyc i granica ponowien dostarczenia wiadomosci.
+- Rzeczywista lokalna transakcja na schemacie zgodnym z testowym schematem galezi
+  `origin/rejestracja-31-07-2026` przez `pg-mem` - PASS: po jednym rekordzie grafu,
+  trzy zgody, idempotentny retry, dwa etapowe zdarzenia outboxa i katalogowy trial
+  14 dni.
+Granice:
+- Nie zmieniono publicznego repozytorium rejestracji ani portalu klienta.
+- Nie podlaczono publicznego endpointu, prawdziwych dostawcow, Cloud SQL ani workera
+  outboxa; nie zmieniono Firebase Authentication ani App Check i nie wyslano e-maila.
+- Migracja nie zostala wykonana. Nie wykonano commita, pusha ani wdrozenia.
+
+Data: 2026-08-02
+Autor: AI Codex
+Temat: Wdrazalny lokalnie codebase Functions brokera firmy sprzatajacej
+Dodano lokalnie:
+- Osobny plik `firebase.registration.json` z codebase `cleanzi-registration`, bez
+  hostingu, Firestore rules, Storage i Data Connect.
+- Eksport `registerCleaningCompany` w regionie `europe-west3`, wymagajacy dokladnego
+  originu, App Check z allowlista App ID, Turnstile, limitu naduzyc, polityki hasla
+  i zrodlowego tokenu rejestracji.
+- Prywatny przez IAM eksport `reconcileCleaningCompanyProjections` oraz harmonogram
+  `drainCleaningCompanyProjectionOutbox` z ograniczona wspolbieznoscia.
+- Kompozycje runtime Firebase Admin, Firestore, PostgreSQL, Pwned Passwords,
+  Turnstile i Resend z sekretami odczytywanymi dopiero podczas wykonania funkcji.
+- Ograniczony pool PostgreSQL oparty o istniejacy serwerowy sekret `DATABASE_URL`.
+- Dokumenty `docs/cleaning-company-public-registration-change-contract.md` oraz
+  `docs/cleaning-company-functions-deployment-runbook.md`.
+- Testy HTTP dla CORS, App Check, limitu body, bezpiecznych kodow bledow, prywatnej
+  rekonsyliacji i braku danych wrazliwych w diagnostyce.
+Zmieniono:
+- Turnstile i atomowy limit naduzyc sa sprawdzane przed zewnetrzna kontrola hasla;
+  awaria dostawcy Turnstile ma osobny, retryowalny kod serwerowy.
+- Opoznione zdarzenie rejestracji nie moze cofnac aktywnej projekcji providera ani
+  nadpisac jego nazwy; konflikt klucza idempotencji aktywacji konczy sie fail-closed.
+- Odrzucenie serwerowego sekretu Turnstile jest klasyfikowane jako niedostepnosc
+  konfiguracji/dostawcy, a nie jako blad uzytkownika.
+- `registration-functions` ma kompletny manifest Node.js 22, entrypoint Functions,
+  blokujacy predeploy oraz jawne peer dependencies wymagane przez izolowany
+  `firebase-admin`.
+Testy/sprawdzenia:
+- `node --check` na runtime Node 24 - PASS dla wszystkich plikow `src/*.js`.
+- Testy jednostkowe po finalnej korekcie kolejnosci zabezpieczen i projekcji -
+  67/67 PASS.
+- Emulator Firestore - 10/10 PASS.
+- Discovery Functions Emulator na projekcie `demo-cleanzi-registration` - PASS;
+  rozpoznano trzy eksporty, region, invokery, parametry i przypisanie sekretow.
+- `npm ls --depth=0` na runtime Node 24 - PASS; wszystkie bezposrednie zaleznosci
+  sa obecne bez bledow drzewa pakietow.
+- Po poprawnym odczytaniu manifestu wrapper `emulators:exec` nie zakonczyl procesu
+  samodzielnie; pozostawiony lokalny proces Firebase CLI zostal zatrzymany recznie.
+  Nie wywolano zadnego handlera ani uslugi chmurowej.
+Granice:
+- Repozytorium publicznego formularza pozostalo nietkniete; przygotowano tylko
+  kontrakt zmian dla jego opiekuna.
+- Nie ustawiono sekretow ani parametrow w Firebase, nie wlaczono App Check, nie
+  wykonano migracji, nie wywolano prawdziwych dostawcow i nie wyslano e-maila.
+- Nie wykonano commita, pusha ani wdrozenia.
+
+Data: 2026-08-03
+Autor: AI Codex
+Temat: Lokalne poprawki po review PR #4 - wspolbieznosc i idempotencja brokera
+Zmieniono lokalnie:
+- Kompensacja Firebase Auth najpierw atomowo nabywa prawo do rollbacku. Nie usuwa
+  konta, jezeli rownolegla operacja zdazyla juz utworzyc organizacje lub przejsc do
+  pozniejszego stanu.
+- Link weryfikacyjny powstaje pod pojedyncza dzierzawa i jest zapisywany przed
+  wysylka jako prywatna koperta AES-256-GCM zwiazana z `operationId`. Ponowienie po
+  awarii Resend uzywa dokladnie tego samego linku i fingerprintu payloadu.
+- Jawny link oraz kod OOB nie sa zapisywane w Firestore, a zaszyfrowana koperta jest
+  usuwana po potwierdzonym przejsciu operacji do `COMPLETED`.
+- Rownolegle ponowienia wysylki zbiegaja sie do jednego zakonczonego stanu zamiast
+  zwracac konflikt po udanej dostawie innego wywolania.
+- E-mail dluzszy niz 180 znakow jest odrzucany przed zrodlowa baza i Firebase Auth,
+  zgodnie z limitem autorytatywnego schematu rejestracji.
+Testy/sprawdzenia:
+- `npm run check` na runtime Node 24 - PASS dla wszystkich plikow `src/*.js`.
+- Pelny zestaw testow jednostkowych - 71/71 PASS.
+- Emulator Firestore - 12/12 PASS, w tym atomowa dzierzawa linku i bezpieczne
+  nabycie prawa do kompensacji Auth.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Nie ustawiono sekretow, nie wywolano Firebase, Cloud SQL, Resend ani innych
+  prawdziwych dostawcow.
+- Nie wykonano migracji, commita, pusha, odpowiedzi w review, scalenia ani wdrozenia.
+
+Data: 2026-08-03
+Autor: AI Codex
+Temat: Druga lokalna runda poprawek po review PR #4
+Zmieniono lokalnie:
+- Przejsciowy blad `auth.getUser` podczas retry nie ustawia juz trwale
+  `RECOVERY_REQUIRED`; stan operacji pozostaje niezmieniony i wywolanie mozna
+  bezpiecznie ponowic. Definitywny brak UID lub niezgodnosc e-maila nadal wymaga
+  rekonsyliacji.
+- Fingerprint operacji zawiera domenowo rozdzielony HMAC znormalizowanego hasla.
+  Retry z innym haslem konczy sie `IDEMPOTENCY_CONFLICT`, bez zapisywania hasla lub
+  jego jawnego hasha w Firestore, bazie zrodlowej, organizacji ani logach.
+- Zlozone `displayName` przekraczajace limit 200 znakow jest odrzucane przed
+  wywolaniem bazy zrodlowej, Firebase Auth i mailera.
+Testy regresji:
+- Przejsciowa awaria Auth nie zatruwa zakonczonej operacji.
+- Brak oczekiwanego UID nadal przechodzi do `RECOVERY_REQUIRED`.
+- Zmiana hasla pod tym samym kluczem idempotencji jest odrzucana.
+- Zbyt dlugie `displayName` nie tworzy konta ani proby zrodlowej.
+- `npm run check` na runtime Node 24 - PASS.
+- Pelny zestaw testow jednostkowych - 75/75 PASS.
+- Emulator Firestore - 12/12 PASS.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Zmiany zostaly zapisane w commicie `dbe0706` i wypchniete do PR #4.
+- Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
+  prawdziwych dostawcow.
+
+Data: 2026-08-03
+Autor: AI Codex
+Temat: Trzecia lokalna runda poprawek po review PR #4
+Zmieniono lokalnie:
+- Wyjscie z Pwned Passwords jest sprawdzane tylko przy przyjeciu nowej operacji.
+  Retry istniejacej operacji potwierdza fingerprint, ale nie powtarza zmiennej
+  kontroli hasla, ktora moglaby pozniej zablokowac ponowna wysylke tego samego linku.
+- Prywatny magazyn operacji ma odczyt `find`, ktory nie tworzy dokumentu i wymaga
+  zgodnosci fingerprintu, registrationId, HMAC e-maila, UID oraz orgId.
+- Termin waznosci proby zrodlowej jest egzekwowany przed pierwszym zwiazaniem.
+  Dokladny retry proby juz zwiazanej z tym samym UID, orgId i operationId pozostaje
+  dozwolony bez ponownego uzycia wyczyszczonego tokenu.
+- Brak rekordu `MARKETING` nie jest juz traktowany jak odmowa. Wymagany jest jawny
+  rekord decyzji negatywnej z wersja, locale, czasem utworzenia i bez accepted_at.
+Testy regresji:
+- Retry po awarii maila przechodzi mimo pozniejszego wyniku `PASSWORD_COMPROMISED`.
+- Zwiazana proba po terminie przechodzi tylko dla tych samych identyfikatorow;
+  niezwiazana wygasla proba nadal jest odrzucana.
+- Brak lub bledne locale odmownego rekordu `MARKETING` blokuje autoryzacje.
+- Emulator sprawdza prywatny odczyt istniejacej operacji i konflikt fingerprintu.
+- `npm run check` na runtime Node 24 - PASS.
+- Pelny zestaw testow jednostkowych - 76/76 PASS.
+- Emulator Firestore - 12/12 PASS.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Zmiany zostaly zapisane w commicie `24bec9f` i wypchniete do PR #4.
+- Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
+  prawdziwych dostawcow.
+
+Data: 2026-08-03
+Autor: AI Codex
+Temat: Czwarta lokalna runda poprawek po review PR #4
+Zmieniono lokalnie:
+- Nowy owner i jego rekord `organization_member` maja stan `ONBOARDING`, a owner
+  w `worker` pozostaje nieaktywny. Istniejace operacyjne zapytania Data Connect,
+  ktore wymagaja membershipu `ACTIVE`, nie przepuszczaja konta przed aktywacja.
+- Poczatkowa projekcja Firestore zachowuje membership `onboarding`; dopiero
+  zdarzenie `CLEANING_PROVIDER_ACTIVATED` przechodzi do `active`.
+- Zaufana transakcja konczaca onboarding wymaga zgodnego UID oraz
+  `email_verified=true`, sprawdza ukonczony profil, a nastepnie atomowo aktywuje
+  organizacje, membership i ownera przed zapisaniem zdarzenia projekcji.
+- Aktywacja wymaga aktywnej transakcji PostgreSQL i zaklada savepoint. Blad
+  dowolnego UPDATE lub outboxa cofa wszystkie zmiany tej aktywacji.
+- Organizacja zawieszona, zablokowana, zarchiwizowana albo soft-deleted nie moze
+  zostac przywrocona do `ACTIVE` przez ponowne wywolanie aktywacji.
+- `joined_at` pozostaje pusty podczas `ONBOARDING` i jest ustawiany dopiero przy
+  skutecznej aktywacji membershipu.
+- Deterministyczny `INVALID_DISPLAY_NAME` jest zwracany jako blad klienta HTTP 400,
+  a nie maskowany jako awaria serwera 500.
+Testy regresji:
+- Niezweryfikowany e-mail i obcy UID sa odrzucane przed pierwszym zapytaniem SQL.
+- Membership `ONBOARDING` nie spelnia kontraktu operacyjnego ani zaproszen.
+- Aktywacja po weryfikacji i ukonczeniu onboardingu przechodzi do `ACTIVE`, a
+  opozniona projekcja rejestracji nie cofa aktywnego stanu.
+- `npm run check` na runtime Node 24 - PASS.
+- Pelny zestaw testow jednostkowych - 80/80 PASS.
+- Emulator Firestore - 12/12 PASS.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Glowna poprawka zostala zapisana w `7096b0b`; zabezpieczenia fail-closed zostaly
+  zapisane w `a33bce7` i wypchniete do PR #4.
+- Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
+  prawdziwych dostawcow.
+
+Data: 2026-08-04
+Autor: AI Codex
+Temat: Piata lokalna runda poprawek po review PR #4
+Zmieniono lokalnie:
+- Po trwalym stanie `AUTH_CREATED` blad provisionera SQL nie uruchamia juz
+  automatycznego usuniecia Firebase UID. Konto pozostaje nieoperacyjne, a retry
+  idempotentnie dokancza organizacje, co wyklucza osierocenie rownoleglego commita.
+- Wygasla, jeszcze niezwiazana proba moze zostac wznowiona tylko dla istniejacej
+  operacji `AUTH_CREATED` oraz nadal zgodnego tokenu, payloadu i kompletu zgod.
+- Siteverify Turnstile otrzymuje losowy UUID dla kazdego osobnego wywolania;
+  wewnetrzne retry jednego wywolania zachowuje ten sam klucz idempotencji.
+- `DATABASE_TRANSACTION_ROLLED_BACK` jest publicznie klasyfikowany jako retryowalne
+  HTTP 503, bez ujawniania szczegolow bazy.
+Testy regresji:
+- Rownolegly sukces SQL i potwierdzony rollback drugiego wywolania nie usuwaja UID.
+- Retry po bledzie sprzed commita zachowuje jedno konto i konczy organizacje bez
+  duplikacji, rowniez po wygasnieciu zrodlowej proby.
+- Ten sam token Turnstile ma wspolny klucz tylko w ramach wewnetrznych ponowien;
+  kolejne wywolanie otrzymuje inny UUID.
+- `npm run check` na runtime Node 24 - PASS.
+- Pelny zestaw testow jednostkowych - 82/82 PASS.
+- Emulator Firestore - 12/12 PASS.
+- `npm ls --depth=0` na runtime Node 24 - PASS.
+Granice:
+- Piata runda pozostaje lokalna i nie jest jeszcze zapisana w commicie ani wyslana
+  do PR #4.
+- Nie wykonano migracji, scalenia, wdrozenia, konfiguracji ani wywolania
+  prawdziwych dostawcow.
+Data: 2026-08-11
+Autor: AI Codex
+Temat: Lokalny runner brakujacej migracji Task lifecycle
+Powod:
+- Produkcyjny `POST /api/portal/schedule-orders` zwracal 500, poniewaz kod zapisywal
+  `task.lifecycle_status`, a produkcyjna tabela nie miala jeszcze tej kolumny.
+- Addytywna migracja `20260727_task_lifecycle_additive.sql` byla juz w kanonicznym
+  zrodle, ale brakowalo kontrolowanego runnera i jednoznacznej kolejnosci wdrozenia.
+Dodano lokalnie:
+- Domyslnie tylko audytujacy runner `scripts/migrate-task-lifecycle.js`.
+- Dokladna bramke produkcyjna, sprawdzenie projektu i nazwy bazy oraz postflight.
+- Odporny audyt brakujacej tabeli, typu i dlugosci kolumny, domyslnego `ACTIVE`,
+  zwalidowanego constraintu, indeksu oraz backfillu wszystkich rekordow.
+- Test kontraktu laczacy endpoint `POST /api/portal/schedule-orders` z migracja.
+Weryfikacja:
+- Zdalny `cleanzi01/main` i lokalny punkt bazowy wskazuja commit `f57cb3e`.
+- Testy celowane runnera, lifecycle i kontraktu endpointu: PASS.
+- Pelny `npm test`: 338/341 PASS; trzy testy spoza zakresu nie uruchomily sie przez
+  brak lokalnych pakietow `firebase-admin`, `google-auth-library` i `nodemailer`.
+Granice:
+- Nie polaczono sie z produkcyjna baza i nie wykonano migracji.
+- Nie wykonano pusha ani wdrozenia. Zapis wymaga osobnej dokladnej zgody
+  `OK PRODUKCJA CLZ-DB-20260811-TASK-LIFECYCLE-01`.
+- Rownolegle zmiany kalendarza w tym worktree pozostaly nietkniete.
+
+Data: 2026-08-03 CEST
+Autor: AI Codex
+Temat: Dostęp starych kont bez historycznej weryfikacji email
+Zakres:
+- Dodano kontrolowany wyjątek dla tenantowych kont utworzonych przed `2026-08-01T00:00:00.000Z`.
+- Backend preferuje datę utworzenia konta Firebase; datę członkostwa i pracownika wykorzystuje tylko jako fallback zgodności.
+- Wyjątek wymaga istniejącego członkostwa powiązanego po Firebase UID. Nowe konta, konta bez członkostwa i konta bez wiarygodnej daty nadal wymagają `email_verified=true`.
+- Wymóg administratorów platformy pozostał bez zmian.
+- Datę graniczną można ustawić przez `TENANT_EMAIL_VERIFICATION_REQUIRED_FROM`.
+Weryfikacja:
+- Testy polityki i kontraktów logowania - 26/26 OK.
+- Pełne `npm test` - 430/430 OK.
+- `npm run build` - OK; pozostały zastane ostrzeżenia Vite o dużych chunkach i Node DEP0190.
+- `node --check` i `git diff --check` - OK.
+Granice:
+- Zmiana jest lokalna; nie wykonano wdrożenia ani migracji.
+
+Data: 2026-08-03 CEST
+Autor: AI Codex
+Temat: Integracja branchy centralnej rejestracji, portalu i W005
+Zakres:
+- Do `Rejestracja-31-07-2026` włączono bezpośrednio branche `codex/central-registration-gate-2026-08-01`, `codex/portal-integration-20260730` oraz `codex/w005-stale-workday-backend-20260801`.
+- Branch `codex/pilot-sabina-w005-backend-20260731` nie był scalany drugi raz, ponieważ jest w całości zawarty w branchu W005.
+- Nie scalono ani nie rebazowano `main`; zachowano lokalną poprawkę logowania starych kont bez historycznej weryfikacji email.
+- Zainstalowano lokalną zależność Leaflet wymaganą przez mapę portalu oraz ograniczono główny `npm test` do `test/*.test.js`, aby izolowany test Firestore działał wyłącznie przez własny skrypt emulatorowy.
+Weryfikacja:
+- Główne testy repozytorium: 384/384 OK.
+- Centralna rejestracja: check składni oraz testy jednostkowe 8/8 OK.
+- `npm --prefix web-app run lint` - OK.
+- `npm run build` - OK; pozostały informacyjne ostrzeżenia o dużych chunkach i Node DEP0190.
+- `GET http://localhost:5174/` i `GET http://localhost:8080/healthz` - HTTP 200 po restarcie.
+Granice:
+- Nie uruchomiono testu Firestore wymagającego emulatora, migracji, wdrożenia ani pusha.
+
+Data: 2026-08-03 CEST
+Autor: AI Codex
+Temat: Naprawa rozliczania sesji i zamykania dnia pracy
+Zakres:
+- Oficjalny czas jest liczony wyłącznie jako unia poprawnych, zamkniętych sesji Event. Otwarta sesja nie jest domykana przez Date.now.
+- Dashboard, raporty, ewidencja, profil pracownika oraz eksporty PDF/CSV korzystają ze wspólnego kontraktu sekund i daty biznesowej Europe/Warsaw.
+- Czas zatwierdzony, czas roboczy niepełnych dni oraz licznik aktywnej sesji są prezentowane oddzielnie.
+- Dodano wspólny dialog „Przegląd i naprawa dnia”, transakcyjne API reconciliation, optimistic lock Workday i sesji, idempotencję oraz niezmienny audyt korekt.
+- Zamknięty Workday z otwartym Eventem nadal jest problemem. Nakładanie, duplikaty, błędne daty, sesje przyszłe i ponad 24 godziny blokują finalizację.
+- Stary edytor i publiczne mutacje Data Connect nie mogą omijać reconciliation dla powiązanych Event/Workday.
+- Przygotowano addytywną, idempotentną migrację oraz raport historyczny READ ONLY; żaden rekord historyczny nie jest poprawiany automatycznie.
+Regresje:
+- 23.07 przed korektą: 03:51 roboczo i jedna otwarta sesja; po STOP 21:36: 05:45 i możliwość finalizacji.
+- 31.07: tabela, dialog, PDF i CSV korzystają z tych samych sekund i formatu HH:MM:SS.
+Weryfikacja:
+- Pełne `npm test`: 482/482 OK.
+- `npm --prefix web-app run lint`: OK.
+- `npm run build`: OK; pozostały informacyjne ostrzeżenia Vite o dużych chunkach i Node DEP0190.
+- `node --check` dla backendu oraz `git diff --check`: OK.
+Granice:
+- Nie uruchomiono migracji, raportu na rzeczywistej bazie, generowania SDK Data Connect, wdrożenia, automatycznej korekty danych, commita ani pusha.
+- Migrację i każdą historyczną korektę musi osobno zatwierdzić administrator po backupie/PITR i audycie read-only.
 Data: 2026-08-23
 Autor: AI Codex
 Temat: Lokalny kandydat przywrócenia „Godzin do weryfikacji” w portalu

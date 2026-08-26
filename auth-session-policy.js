@@ -1,6 +1,15 @@
 'use strict'
 
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
+const {
+  evaluateSubscriptionAccess,
+  normalizePlanCode,
+  resolvePlanEntitlements,
+} = require('./plan-policy')
+
+const TENANT_EMAIL_VERIFICATION_POLICY = Object.freeze({
+  requiredFrom: '2026-08-01T00:00:00.000Z',
+})
 
 function toText(value) {
   return String(value ?? '').trim()
@@ -8,6 +17,52 @@ function toText(value) {
 
 function toStatus(value) {
   return toText(value).toUpperCase()
+}
+
+function toTimestamp(value) {
+  if (!value) return null
+  const date = value instanceof Date ? value : new Date(value)
+  const timestamp = date.getTime()
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+/**
+ * Keeps pre-rollout tenant accounts usable while requiring verified email for
+ * every new account. Firebase account creation time is authoritative; database
+ * timestamps are a compatibility fallback for legacy tokens without metadata.
+ */
+function evaluateTenantEmailVerification(decodedToken, row = {}, requiredFromValue = '') {
+  const email = toText(decodedToken?.email).toLowerCase()
+  if (!email) {
+    return { allowed: false, code: 'EMAIL_VERIFICATION_REQUIRED', exempt: false }
+  }
+  if (decodedToken?.email_verified === true) {
+    return { allowed: true, code: 'EMAIL_VERIFIED', exempt: false }
+  }
+
+  const requiredFrom = toTimestamp(requiredFromValue)
+    ?? toTimestamp(TENANT_EMAIL_VERIFICATION_POLICY.requiredFrom)
+  const accountCreatedAt = toTimestamp(
+    decodedToken?.account_created_at ?? decodedToken?.accountCreatedAt,
+  )
+  const fallbackCreatedAt = [
+    toTimestamp(row?.membership_created_at),
+    toTimestamp(row?.worker_created_at),
+  ].filter((value) => value !== null)
+  const createdAt = accountCreatedAt ?? (
+    fallbackCreatedAt.length ? Math.min(...fallbackCreatedAt) : null
+  )
+
+  if (createdAt !== null && requiredFrom !== null && createdAt < requiredFrom) {
+    return {
+      allowed: true,
+      code: 'LEGACY_EMAIL_VERIFICATION_EXEMPT',
+      exempt: true,
+      accountCreatedAt: new Date(createdAt).toISOString(),
+    }
+  }
+
+  return { allowed: false, code: 'EMAIL_VERIFICATION_REQUIRED', exempt: false }
 }
 
 function normalizeOrganizationId(value) {
@@ -69,7 +124,7 @@ function evaluateOrganizationAccess(row, now = new Date()) {
     return deny('WORKER_DELETED')
   }
 
-  if (toStatus(row.organization_status) === 'SUSPENDED' || row.organization_deleted_at) {
+  if (!['ACTIVE', 'TRIAL'].includes(toStatus(row.organization_status)) || row.organization_deleted_at) {
     return deny('ORGANIZATION_UNAVAILABLE')
   }
 
@@ -85,30 +140,14 @@ function evaluateOrganizationAccess(row, now = new Date()) {
     return deny('PORTAL_ROLE_MISSING')
   }
 
-  const planCode = toStatus(row.plan_code)
-  const subscriptionStatus = toStatus(row.subscription_status)
-
-  if (planCode === 'TRIAL') {
-    const trialEndsAt = row.trial_ends_at ? new Date(row.trial_ends_at) : null
-    const nowDate = now instanceof Date ? now : new Date(now)
-    if (
-      subscriptionStatus !== 'TRIALING' ||
-      !trialEndsAt ||
-      !Number.isFinite(trialEndsAt.getTime()) ||
-      !Number.isFinite(nowDate.getTime()) ||
-      trialEndsAt.getTime() <= nowDate.getTime()
-    ) {
-      return deny('TRIAL_INACTIVE')
-    }
-  } else if (planCode === 'START' || planCode === 'PRO' || planCode === 'ENTERPRISE') {
-    if (subscriptionStatus !== 'ACTIVE') {
-      return deny('SUBSCRIPTION_INACTIVE')
-    }
-  } else {
-    return deny('SUBSCRIPTION_MISSING')
-  }
-
-  return { allowed: true, code: 'ACCESS_ALLOWED' }
+  const subscriptionAccess = evaluateSubscriptionAccess({
+    planCode: row.plan_code,
+    status: row.subscription_status,
+    trialEndsAt: row.trial_ends_at,
+  }, now)
+  return subscriptionAccess.allowed
+    ? { allowed: true, code: 'ACCESS_ALLOWED' }
+    : deny(subscriptionAccess.code)
 }
 
 function buildOrganizationSummary(row) {
@@ -116,6 +155,8 @@ function buildOrganizationSummary(row) {
     orgId: toText(row.org_id),
     organizationName: toText(row.organization_name),
     role: toStatus(row.role),
+    onboardingStatus: toStatus(row.onboarding_status),
+    planCode: normalizePlanCode(row.plan_code),
   }
 }
 
@@ -129,7 +170,9 @@ function toIsoTimestamp(value) {
 }
 
 function buildSessionContext(uid, row) {
-  const planCode = toStatus(row.plan_code)
+  const rawPlanCode = toStatus(row.plan_code)
+  const planCode = normalizePlanCode(rawPlanCode)
+  const entitlements = resolvePlanEntitlements(planCode)
   const subscriptionEndsAt =
     planCode === 'TRIAL'
       ? toIsoTimestamp(row.trial_ends_at)
@@ -151,19 +194,28 @@ function buildSessionContext(uid, row) {
   }
   const profitabilityRead = resolveProfitabilityAccess({ ...profitabilityInput, action: 'read' })
   const profitabilityEdit = resolveProfitabilityAccess({ ...profitabilityInput, action: 'edit' })
+  const role = toStatus(row.role)
+  const onboardingStatus = toStatus(row.onboarding_status) || 'IN_PROGRESS'
 
   return {
     uid: toText(uid),
     activeOrgId: toText(row.org_id),
     organizationName: toText(row.organization_name),
     workerId: toText(row.worker_record_id),
-    role: toStatus(row.role),
+    role,
+    organizationStatus: toStatus(row.organization_status),
+    onboardingStatus,
+    onboardingRequired: role === 'OWNER' && onboardingStatus !== 'COMPLETED',
+    rawPlanCode,
     planCode,
+    planName: entitlements.planName,
     subscriptionStatus: toStatus(row.subscription_status),
     subscriptionEndsAt,
+    limits: entitlements.limits,
     capabilities: {
+      ...entitlements.capabilities,
       profitabilityModule: {
-        enabled: ['PRO', 'ENTERPRISE'].includes(planCode),
+        enabled: entitlements.capabilities.profitabilityModule === true,
         canRead: profitabilityRead.allowed,
         canEdit: profitabilityEdit.allowed,
         readCode: profitabilityRead.code,
@@ -199,8 +251,10 @@ function resolveAccessibleOrganizations(rows, now = new Date()) {
 }
 
 module.exports = {
+  TENANT_EMAIL_VERIFICATION_POLICY,
   buildOrganizationSummary,
   buildSessionContext,
+  evaluateTenantEmailVerification,
   evaluateOrganizationAccess,
   isPortalWorkerRole,
   normalizeOrganizationId,

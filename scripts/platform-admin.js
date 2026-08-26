@@ -20,7 +20,8 @@ function readOption(name) {
 }
 
 function firebaseOptions() {
-  const projectId = text(process.env.FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || 'iclean-room')
+  const projectId = text(process.env.FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT)
+  if (!projectId) throw new Error('FIREBASE_PROJECT_ID_MISSING')
   const rawJson = text(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)
   const serviceAccountPath = text(process.env.FIREBASE_SERVICE_ACCOUNT_FILE || process.env.FIREBASE_SERVICE_ACCOUNT_PATH)
   let serviceAccount = null

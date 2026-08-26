@@ -164,9 +164,7 @@
   .orders-map-filters,
   .orders-map-search-card,
   .cp-cooperation-card,
-  .cp-table,
-  .settings-style-status,
-  .settings-style-card
+  .cp-table
 ) {
   border-color: var(--portal-quality-border) !important;
   border-radius: var(--portal-quality-radius) !important;
@@ -414,29 +412,6 @@
   border-color: #cfd4ff !important;
   box-shadow: 0 14px 32px rgba(28, 46, 78, 0.09) !important;
   transform: translateY(-2px);
-}
-
-#portalRoot #view-settings .settings-tabs {
-  display: inline-flex !important;
-  gap: 3px !important;
-  padding: 4px !important;
-  border: 1px solid var(--portal-quality-border-soft) !important;
-  border-radius: 12px !important;
-  background: #eef1f6 !important;
-}
-
-#portalRoot #view-settings .settings-tab {
-  min-height: 36px !important;
-  padding: 0 13px !important;
-  border: 0 !important;
-  border-radius: 9px !important;
-  background: transparent !important;
-}
-
-#portalRoot #view-settings .settings-tab.active {
-  background: #fff !important;
-  color: #5255d4 !important;
-  box-shadow: 0 2px 7px rgba(26, 39, 65, 0.1) !important;
 }
 
 #portalRoot #view-calendar .fw-timeline-card {

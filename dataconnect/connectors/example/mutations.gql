@@ -4,115 +4,6 @@
 # In Firebase Console -> Authentication -> Claims:
 # { "sub": "<USER_UID>" }
 
-mutation UpsertOrgUiStyleForOrg(
-  $orgId: String!
-  $styleId: String!
-  $updatedBy: String
-) @auth(level: USER) @transaction {
-  query @redact {
-    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
-      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do zmiany stylu domyslnego organizacji.")
-      }
-  }
-
-  orgUiStyle_upsert(data: {
-    orgId: $orgId
-    defaultStyleId: $styleId
-    updatedBy: $updatedBy
-    updatedAt_expr: "request.time"
-  })
-}
-
-mutation DeleteOrgUiStyleForOrg(
-  $orgId: String!
-) @auth(level: USER) @transaction {
-  query @redact {
-    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
-      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do zmiany stylu domyslnego organizacji.")
-      }
-  }
-
-  orgUiStyle_delete(key: { orgId: $orgId })
-}
-
-mutation UpsertMyUiStylePreference(
-  $orgId: String!
-  $styleId: String!
-  $updatedBy: String
-) @auth(level: USER) @transaction {
-  query @redact {
-    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
-      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
-      }
-  }
-
-  userUiStylePreference_upsert(data: {
-    orgId: $orgId
-    uid_expr: "auth.uid"
-    styleId: $styleId
-    updatedBy: $updatedBy
-    updatedAt_expr: "request.time"
-  })
-}
-
-mutation DeleteMyUiStylePreference(
-  $orgId: String!
-) @auth(level: USER) @transaction {
-  query @redact {
-    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
-      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK','COORDINATOR','KOORDYNATOR','MEMBER','WORKER','PRACOWNIK','INTERN','STAZYSTA','STAŻYSTA']", message: "Brak roli w organizacji.")
-      }
-  }
-
-  userUiStylePreference_delete(key: { orgId: $orgId, uid_expr: "auth.uid" })
-}
-
-mutation UpsertUserUiStylePreferenceForOrg(
-  $orgId: String!
-  $uid: String!
-  $styleId: String!
-  $updatedBy: String
-) @auth(level: USER) @transaction {
-  query @redact {
-    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
-      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do zapisu preferencji stylow.")
-      }
-  }
-
-  userUiStylePreference_upsert(data: {
-    orgId: $orgId
-    uid: $uid
-    styleId: $styleId
-    updatedBy: $updatedBy
-    updatedAt_expr: "request.time"
-  })
-}
-
-mutation DeleteUserUiStylePreferenceForOrg(
-  $orgId: String!
-  $uid: String!
-) @auth(level: USER) @transaction {
-  query @redact {
-    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
-      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
-        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
-        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do usuwania preferencji stylow.")
-      }
-  }
-
-  userUiStylePreference_delete(key: { orgId: $orgId, uid: $uid })
-}
-
 mutation InsertClientForOrg(
   $orgId: String!
   $clientId: String!
@@ -737,6 +628,10 @@ mutation UpdateWorkdayForOrg(
     targetWorker: worker(key: { orgId: $orgId, login: $workerLogin }) {
       authUid
     }
+    targetWorkday: workday(key: { orgId: $orgId, workdayId: $workdayId })
+      @check(expr: "this == null", message: "Istniejacy Workday mozna zmienic tylko przez uzgadnianie dnia pracy.") {
+        workdayId
+      }
   }
 
   workday_update(
@@ -767,6 +662,10 @@ mutation DeleteWorkdayForOrg(
         status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
         role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do usuwania zdarzen.")
       }
+    targetWorkday: workday(key: { orgId: $orgId, workdayId: $workdayId })
+      @check(expr: "this == null", message: "Istniejacy Workday mozna usunac tylko przez kontrolowany proces uzgadniania.") {
+        workdayId
+      }
   }
 
   workday_delete(key: { orgId: $orgId, workdayId: $workdayId })
@@ -775,7 +674,7 @@ mutation DeleteWorkdayForOrg(
 mutation InsertEventForOrg(
   $orgId: String!
   $eventId: String!
-  $workdayId: String
+  $workdayId: String @retired
   $zoneId: String
   $eventType: String @retired
   $workerLogin: String
@@ -805,7 +704,7 @@ mutation InsertEventForOrg(
   event_insert(data: {
     orgId: $orgId
     eventId: $eventId
-    workdayId: $workdayId
+    workdayId: null
     zoneId: $zoneId
     eventType: "CLEAN"
     matchStatus: "UNMATCHED"
@@ -851,11 +750,17 @@ mutation UpdateEventForOrg(
         status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
         role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK'] || (this in ['WORKER','PRACOWNIK'] && response.query.targetEvent.worker.authUid == auth.uid)", message: "Brak uprawnien do edycji zdarzen stref.")
       }
-    targetEvent: event(key: { orgId: $orgId, eventId: $eventId }) {
+    targetEvent: event(key: { orgId: $orgId, eventId: $eventId })
+      @check(expr: "this != null", message: "Nie znaleziono Eventu w tej organizacji.") {
+      workdayId @check(expr: "this == null", message: "Powiazany Event mozna zmienic tylko przez uzgadnianie dnia pracy.")
       worker {
         authUid
       }
     }
+    mirroredWorkday: workday(key: { orgId: $orgId, workdayId: $eventId })
+      @check(expr: "this == null", message: "Event z lustrzanym Workday mozna zmienic tylko przez uzgadnianie dnia pracy.") {
+        workdayId
+      }
   }
 
   event_update(
@@ -879,7 +784,7 @@ mutation UpdateEventForOrg(
 mutation ReidentifyEventForOrg(
   $orgId: String!
   $eventId: String!
-  $workdayId: String
+  $workdayId: String @retired
   $zoneId: String
   $workerLogin: String
   $workerName: String
@@ -900,12 +805,23 @@ mutation ReidentifyEventForOrg(
         status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
         role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do zmiany tozsamosci zdarzenia.")
       }
+    targetEvent: event(key: { orgId: $orgId, eventId: $eventId })
+      @check(expr: "this != null", message: "Nie znaleziono Eventu w tej organizacji.") {
+        eventId
+        workdayId @check(expr: "this == null", message: "Powiazanego Eventu nie mozna ponownie identyfikowac poza uzgadnianiem dnia pracy.")
+      }
+    targetWorkday: workday(key: { orgId: $orgId, workdayId: $eventId })
+      @check(expr: "this != null", message: "Nie znaleziono docelowego Workday w tej organizacji.") {
+        workdayId @check(expr: "this == response.query.targetEvent.eventId", message: "Event mozna poczatkowo polaczyc tylko z Workday o tym samym identyfikatorze.")
+        endAt @check(expr: "this == null", message: "Nie mozna dolaczyc Eventu do zakonczonego Workday.")
+        status @check(expr: "this != 'CLOSED'", message: "Nie mozna dolaczyc Eventu do zamknietego Workday.")
+      }
   }
 
   event_update(
     key: { orgId: $orgId, eventId: $eventId }
     data: {
-      workdayId: $workdayId
+      workdayId: $eventId
       zoneId: $zoneId
       workerLogin: $workerLogin
       workerName: $workerName
@@ -947,6 +863,14 @@ mutation DeleteEventForOrg(
       @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
         status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
         role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN']", message: "Brak uprawnien do usuwania zdarzen stref.")
+      }
+    targetEvent: event(key: { orgId: $orgId, eventId: $eventId })
+      @check(expr: "this != null", message: "Nie znaleziono Eventu w tej organizacji.") {
+        workdayId @check(expr: "this == null", message: "Powiazany Event mozna usunac tylko przez uzgadnianie dnia pracy.")
+      }
+    mirroredWorkday: workday(key: { orgId: $orgId, workdayId: $eventId })
+      @check(expr: "this == null", message: "Event z lustrzanym Workday mozna usunac tylko przez uzgadnianie dnia pracy.") {
+        workdayId
       }
   }
 

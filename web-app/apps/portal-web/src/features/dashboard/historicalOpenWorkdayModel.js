@@ -66,3 +66,14 @@ export function isHistoricalOpenWorkday(row = {}, today = '', dayKey = '') {
   const rawStatus = String(row?.status ?? row?.state ?? '').trim().toUpperCase()
   return rawStatus === 'RUNNING' || rawStatus === 'OPEN'
 }
+
+export function isOpenWorkEvent(row = {}) {
+  const hasStart = hasValue(row?.startAt)
+  const hasEnd = hasValue(row?.endAt)
+  if (isExplicitServiceEvent(row)) {
+    return hasStart && !hasEnd
+  }
+
+  const rawStatus = String(row?.status ?? row?.state ?? '').trim().toUpperCase()
+  return hasStart && !hasEnd && (rawStatus === 'RUNNING' || rawStatus === 'OPEN')
+}

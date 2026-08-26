@@ -1,0 +1,15 @@
+{
+  "apphosting": [
+    {
+      "backendId": "clz-schedule-preview-260812",
+      "rootDir": ".",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "functions"
+      ]
+    }
+  ]
+}

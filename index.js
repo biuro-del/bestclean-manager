@@ -8,10 +8,12 @@ const admin = require('firebase-admin')
 const { getDataConnect: getAdminDataConnect } = require('firebase-admin/data-connect')
 const { Pool } = require('pg')
 const { AuthTypes, Connector, IpAddressTypes } = require('@google-cloud/cloud-sql-connector')
+const { resolvePgPassword } = require('./cloud-sql-pg-auth')
 const { Compute, GoogleAuth, OAuth2Client } = require('google-auth-library')
 const {
   buildOrganizationSummary,
   buildSessionContext,
+  evaluateTenantEmailVerification,
   normalizeOrganizationId,
   resolveAccessibleOrganizations,
 } = require('./auth-session-policy')
@@ -41,7 +43,10 @@ const {
   hasPlatformOwnerClaim,
   resolvePlatformDataConnectConnector,
 } = require('./platform-policy')
-const { buildFirebaseRestDecodedToken } = require('./firebase-rest-token-policy')
+const {
+  buildFirebaseRestDecodedToken,
+  normalizeFirebaseAccountCreatedAt,
+} = require('./firebase-rest-token-policy')
 const { getAppCheck } = require('firebase-admin/app-check')
 const {
   CLEANING_COMPANY_ONBOARDING_REQUIRED,
@@ -54,9 +59,26 @@ const {
   requiresCleaningCompanyAppCheck,
 } = require('./cleaning-company-onboarding-service')
 const { createProfitabilityApi } = require('./profitability-api')
+const { createWorkdayReconciliationApi } = require('./workday-reconciliation-api')
 const { createWorkdayStopProposalApi } = require('./workday-stop-proposal-api')
+const { createWorkTimeDaysApi } = require('./work-time-days-api')
+const { mapProposal } = require('./workday-stop-proposal-repository')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
+const {
+  createOrganizationWithTrial,
+  readOrganizationProfile,
+  updateOrganizationProfile,
+} = require('./organization-onboarding')
+const { lookupCompanyByNip } = require('./gus-company-registry')
+const { processStripeEvent, verifyStripeSignature } = require('./stripe-webhook')
+const {
+  calculateMeteredOverage,
+  evaluateSubscriptionAccess,
+  hasPlanCapability,
+  normalizePlanCode,
+  resolvePlanEntitlements,
+} = require('./plan-policy')
 const {
   eventCorrelationSchema,
   insertMobileCleanEvent,
@@ -71,9 +93,9 @@ const {
 } = require('./mobile-workflow-security-policy')
 const {
   assertNoUnresolvedOpenEvents,
-  resolveSingleOpenCycle,
+  resolveOpenCycleState,
 } = require('./mobile-open-cycle-policy')
-const { resolveSingleOpenWorkday } = require('./mobile-open-workday-policy')
+const { resolveOpenWorkdayState } = require('./mobile-open-workday-policy')
 const { mobileCorrelationRolloutDecision } = require('./mobile-correlation-rollout-policy')
 const {
   assertNoWorkerScheduleLocationConflicts,
@@ -129,18 +151,22 @@ const ADMIN_WORKER_ID_NEXT_PATH = '/api/admin/worker-id/next'
 const ADMIN_WORKERS_PATH = '/api/admin/workers'
 const ADMIN_WORKERS_RESTORE_PATH = '/api/admin/workers/restore'
 const AUTH_SESSION_CONTEXT_PATH = '/api/auth/session-context'
+const PORTAL_ORGANIZATIONS_PATH = '/api/portal/organizations'
+const PORTAL_ORGANIZATION_PROFILE_PATH = '/api/portal/organization-profile'
+const PORTAL_COMPANY_REGISTRY_PATH = '/api/portal/company-registry/lookup'
+const STRIPE_WEBHOOK_PATH = '/api/billing/stripe/webhook'
 const CLEANING_COMPANY_ONBOARDING_LEGAL_DOCUMENTS_PATH = '/api/registration/cleaning-company/legal-documents'
 const CLEANING_COMPANY_ONBOARDING_PROVISION_PATH = '/api/registration/cleaning-company/provision'
 const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
 const PORTAL_JOB_CARDS_PATH = '/api/portal/job-cards'
 const PORTAL_EVENTS_PATH = '/api/portal/events'
-const PORTAL_UI_STYLE_PATH = '/api/portal/ui-style'
 const PORTAL_ZONE_QR_CODES_PATH = '/api/portal/zones/qr-codes'
 const PORTAL_PROFITABILITY_PATH = '/api/portal/profitability'
 const PORTAL_WORKDAY_STOP_PROPOSALS_PATH = '/api/portal/workday-stop-proposals'
 const MOBILE_STATE_PATH = '/api/mobile/state'
 const MOBILE_SCAN_PATH = '/api/mobile/scan'
+const MOBILE_SCAN_STATUS_PATH = '/api/mobile/scan/status'
 const MOBILE_JOB_CARDS_PATH = '/api/mobile/job-cards'
 const MOBILE_WORKDAY_STOP_PROPOSALS_PATH = '/api/mobile/workday-stop-proposals'
 const DATACONNECT_LOCATION = String(process.env.FIREBASE_DATACONNECT_LOCATION || process.env.DATACONNECT_LOCATION || '').trim()
@@ -305,7 +331,12 @@ function sendFile(res, filePath) {
 }
 
 function sendJson(res, statusCode, payload) {
-  res.writeHead(statusCode, withSecurityHeaders({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }))
+  const requestId = normalizeText(getPlatformRequestContext()?.requestId)
+  res.writeHead(statusCode, withSecurityHeaders({
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    ...(requestId ? { 'X-Request-ID': requestId } : {}),
+  }))
   res.end(JSON.stringify(payload))
 }
 
@@ -372,7 +403,8 @@ function logPortalStorageError(context, error) {
   const message = normalizeText(
     error?.publicMessage || error?.message || error?.response?.data?.error_description || 'Unknown portal storage error',
   ).slice(0, 800)
-  console.error(`[${context}] ${code}: ${message}`)
+  const requestId = normalizeText(getPlatformRequestContext()?.requestId)
+  console.error(`[${context}]${requestId ? ` request=${requestId}` : ''} ${code}: ${message}`)
 }
 
 function isDatabaseSslBadCertificateError(error) {
@@ -1227,9 +1259,27 @@ async function callPlatformFirebaseIdentityToolkit(method, payload) {
   return body
 }
 
+async function withFirebaseAccountCreatedAt(decodedToken, firebaseAuth) {
+  if (decodedToken?.email_verified === true || !normalizeText(decodedToken?.uid)) {
+    return decodedToken
+  }
+  try {
+    const user = await firebaseAuth.getUser(decodedToken.uid)
+    const accountCreatedAt = normalizeFirebaseAccountCreatedAt(user?.metadata?.creationTime)
+    return accountCreatedAt
+      ? { ...decodedToken, account_created_at: accountCreatedAt }
+      : decodedToken
+  } catch {
+    // Membership timestamps remain the fail-closed legacy fallback.
+    return decodedToken
+  }
+}
+
 async function verifyFirebaseIdToken(token) {
   try {
-    const decodedToken = await ensureFirebaseAdmin().auth().verifyIdToken(token)
+    const firebaseAuth = ensureFirebaseAdmin().auth()
+    const verifiedToken = await firebaseAuth.verifyIdToken(token)
+    const decodedToken = await withFirebaseAccountCreatedAt(verifiedToken, firebaseAuth)
     setVerifiedFirebaseToken(decodedToken)
     return decodedToken
   } catch (adminError) {
@@ -2076,7 +2126,7 @@ async function getDbPool() {
       ...connectorOptions,
       database,
       user,
-      ...(useIamDatabaseAuth ? {} : { password }),
+      password: resolvePgPassword({ useIamDatabaseAuth, password }),
       max: Number(process.env.DB_POOL_MAX || 5),
       connectionTimeoutMillis: getDbConnectTimeoutMillis(),
     })
@@ -2447,6 +2497,23 @@ function mapMobileWorkdayRow(row) {
   }
 }
 
+function mapMobileWorkdayStopProposal(row) {
+  const proposal = mapProposal(row)
+  if (!proposal?.proposalId || !proposal?.workdayId) return null
+  return {
+    proposalId: proposal.proposalId,
+    status: proposal.status,
+    proposedStopAt: proposal.proposedStopAt,
+    proposedStopLocal: proposal.proposedStopLocal,
+    timeZone: proposal.timeZone,
+    employeeNote: proposal.employeeNote,
+    decisionNote: proposal.decisionNote,
+    officialStopAt: proposal.officialStopAt,
+    submittedAt: proposal.submittedAt,
+    reviewedAt: proposal.reviewedAt,
+  }
+}
+
 function mapMobileEventRow(row) {
   if (!row) return null
   const classified = classifyMobileZone(row.function_name)
@@ -2782,7 +2849,35 @@ async function findMobileZoneByQr(client, orgId, qrCode) {
   return mapMobileZoneRow(resolveMobileZoneQrRows(result.rows, code))
 }
 
-async function fetchActiveMobileWorkday(client, orgId, workerLogin) {
+async function fetchMobileOpenWorkdayState(client, orgId, workerLogin) {
+  const result = await client.query(
+    `select w.*,
+            case
+              when (w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date then 'TODAY'
+              when (w.start_at at time zone 'Europe/Warsaw')::date < (now() at time zone 'Europe/Warsaw')::date then 'PRIOR'
+              else 'FUTURE'
+            end as business_day_relation,
+            ((w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date) as is_today_warsaw
+       from public.workday w
+      where org_id = $1
+       and lower(btrim(worker_login)) = lower(btrim($2))
+       and upper(btrim(coalesce(status, 'RUNNING'))) <> 'CLOSED'
+       and end_at is null
+        and (
+          ((w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date)
+          or w.start_at is null
+        )
+      order by start_at desc nulls last, updated_at desc nulls last
+      limit 2
+      for update`,
+    [orgId, workerLogin],
+  )
+  return resolveOpenWorkdayState(result.rows)
+}
+
+// A state read must never reuse the QR guard: historical open records belong
+// in the worker's history and are not a reason to reject the whole snapshot.
+async function fetchMobileStateActiveWorkday(client, orgId, workerLogin) {
   const result = await client.query(
     `select w.*,
             ((w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date) as is_today_warsaw
@@ -2796,11 +2891,11 @@ async function fetchActiveMobileWorkday(client, orgId, workerLogin) {
           or w.start_at is null
         )
       order by start_at desc nulls last, updated_at desc nulls last
-      limit 2
-      for update`,
+      limit 2`,
     [orgId, workerLogin],
   )
-  return resolveSingleOpenWorkday(result.rows)
+  const currentRows = (Array.isArray(result.rows) ? result.rows : []).filter((row) => row?.is_today_warsaw === true)
+  return currentRows.length === 1 ? currentRows[0] : null
 }
 
 async function fetchMobileWorkdays(client, orgId, workerLogin) {
@@ -2814,6 +2909,28 @@ async function fetchMobileWorkdays(client, orgId, workerLogin) {
     [orgId, workerLogin],
   )
   return result.rows.map(mapMobileWorkdayRow).filter(Boolean)
+}
+
+async function fetchMobileWorkdayStopProposals(client, orgId, workerId, workdays) {
+  const workdayIds = [...new Set((Array.isArray(workdays) ? workdays : []).map((workday) => normalizeText(workday?.workdayId)).filter(Boolean))]
+  if (!normalizeText(workerId) || !workdayIds.length || !(await databaseRelationExists(client, 'public.workday_stop_proposal'))) {
+    return new Map()
+  }
+  const result = await client.query(
+    `select distinct on (p.workday_id) p.*
+       from public.workday_stop_proposal p
+      where p.org_id = $1::text
+        and p.worker_id = $2::text
+        and p.workday_id = any($3::text[])
+      order by p.workday_id, p.submitted_at desc nulls last, p.proposal_id desc`,
+    [orgId, workerId, workdayIds],
+  )
+  const proposals = new Map()
+  for (const row of Array.isArray(result.rows) ? result.rows : []) {
+    const proposal = mapMobileWorkdayStopProposal(row)
+    if (proposal) proposals.set(normalizeText(row.workday_id), proposal)
+  }
+  return proposals
 }
 
 async function fetchOpenMobileCycles(client, orgId, workerLogin) {
@@ -2861,6 +2978,23 @@ async function fetchUnresolvedMobileCycles(client, orgId, workerLogin) {
     [orgId, workerLogin],
   )
   return Array.isArray(result.rows) ? result.rows : []
+}
+
+function partitionMobileUnresolvedCycles(rows = [], activeWorkdayId = '') {
+  const normalizedActiveWorkdayId = normalizeText(activeWorkdayId)
+  const blocking = []
+  const prior = []
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const rowWorkdayId = normalizeText(row?.workday_id ?? row?.workdayId)
+    if (!rowWorkdayId || (normalizedActiveWorkdayId && rowWorkdayId === normalizedActiveWorkdayId)) {
+      blocking.push(row)
+    } else {
+      prior.push(row)
+    }
+  }
+
+  return { blocking, prior }
 }
 
 async function fetchMobileCycleHistory(client, orgId, workerLogin) {
@@ -3001,10 +3135,28 @@ async function upsertMobileRuntimeState(client, orgId, worker, activeWorkday, ac
   }
 }
 
-async function buildMobileSnapshotFromDb(client, orgId, worker) {
+async function buildMobileSnapshotFromDb(client, orgId, worker, { persistRuntimeState = false } = {}) {
   const zones = await fetchMobileZones(client, orgId)
-  const activeWorkdayRaw = await fetchActiveMobileWorkday(client, orgId, worker.login)
-  const workdays = await fetchMobileWorkdays(client, orgId, worker.login)
+  const openWorkdayState = persistRuntimeState
+    ? await fetchMobileOpenWorkdayState(client, orgId, worker.login)
+    : {
+        activeWorkday: await fetchMobileStateActiveWorkday(client, orgId, worker.login),
+        staleWorkdays: [],
+      }
+  const activeWorkdayRaw = openWorkdayState.activeWorkday
+  const mobileWorkdays = await fetchMobileWorkdays(client, orgId, worker.login)
+  const workdays = persistRuntimeState
+    ? mobileWorkdays
+    : mobileWorkdays.map((workday) => ({
+        ...workday,
+        stopProposal: null,
+      }))
+  if (!persistRuntimeState) {
+    const stopProposalsByWorkdayId = await fetchMobileWorkdayStopProposals(client, orgId, worker.workerId, mobileWorkdays)
+    for (const workday of workdays) {
+      workday.stopProposal = stopProposalsByWorkdayId.get(workday.workdayId) || null
+    }
+  }
   const cycleHistory = await fetchMobileCycleHistory(client, orgId, worker.login)
   const availableEventColumns = await readPublicEventColumns(client)
   const eventTypeReadable = availableEventColumns.has('event_type')
@@ -3015,6 +3167,8 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
     ? await fetchUnresolvedMobileCycles(client, orgId, worker.login)
     : []
   let activeCycleRaw = null
+  let priorOpenCycleRows = []
+  let priorUnresolvedCycleRows = []
   let openCycleIntegrity = eventTypeReadable
     ? null
     : {
@@ -3023,8 +3177,15 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
       }
   if (eventTypeReadable) {
     try {
-      assertNoUnresolvedOpenEvents(unresolvedCycleRows)
-      activeCycleRaw = resolveSingleOpenCycle(openCycleRows, activeWorkdayRaw?.workday_id)
+      const unresolvedState = partitionMobileUnresolvedCycles(
+        unresolvedCycleRows,
+        activeWorkdayRaw?.workday_id,
+      )
+      priorUnresolvedCycleRows = unresolvedState.prior
+      assertNoUnresolvedOpenEvents(unresolvedState.blocking)
+      const openCycleState = resolveOpenCycleState(openCycleRows, activeWorkdayRaw?.workday_id)
+      activeCycleRaw = openCycleState.activeCycle
+      priorOpenCycleRows = openCycleState.staleCycles
     } catch (error) {
       if (Number(error?.statusCode) !== 409) {
         throw error
@@ -3037,10 +3198,31 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
     }
   }
   const activePause = await fetchActiveMobilePause(client, orgId, worker.login, activeWorkdayRaw?.workday_id)
-  await upsertMobileRuntimeState(client, orgId, worker, activeWorkdayRaw, activeCycleRaw)
+  if (persistRuntimeState) {
+    await upsertMobileRuntimeState(client, orgId, worker, activeWorkdayRaw, activeCycleRaw)
+  }
 
   const activeWorkday = mapMobileWorkdayRow(activeWorkdayRaw)
   const activeCycle = mapMobileEventRow(activeCycleRaw)
+  const staleOpenWorkdays = openWorkdayState.staleWorkdays.map(mapMobileWorkdayRow).filter(Boolean)
+  const staleOpenCycles = priorOpenCycleRows.map(mapMobileEventRow).filter(Boolean)
+  const unresolvedPriorCycles = priorUnresolvedCycleRows.map(mapMobileEventRow).filter(Boolean)
+  const repairRequired = {
+    required: Boolean(
+      staleOpenWorkdays.length ||
+      staleOpenCycles.length ||
+      unresolvedPriorCycles.length ||
+      openCycleIntegrity
+    ),
+    blockStart: false,
+    workdayCount: staleOpenWorkdays.length,
+    cleanEventCount: staleOpenCycles.length,
+    unresolvedEventCount: unresolvedPriorCycles.length,
+    workdays: staleOpenWorkdays,
+    cleanEvents: staleOpenCycles,
+    unresolvedEvents: unresolvedPriorCycles,
+    integrity: openCycleIntegrity,
+  }
   return {
     orgId,
     worker,
@@ -3052,6 +3234,8 @@ async function buildMobileSnapshotFromDb(client, orgId, worker) {
     })),
     startZone: zones.find((zone) => zone.kind === 'START') || null,
     activeWorkday,
+    staleOpenWorkday: staleOpenWorkdays[0] || null,
+    repairRequired,
     activePause,
     pauseTotalSec: Number(activeWorkday?.pauseTotalSec || 0),
     activeCycle,
@@ -3324,11 +3508,11 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
     throw error
   }
 
-  let activeWorkday = await fetchActiveMobileWorkday(client, orgId, worker.login)
+  const openWorkdayState = await fetchMobileOpenWorkdayState(client, orgId, worker.login)
+  let activeWorkday = openWorkdayState.activeWorkday
   let activeCycle = null
   let action = 'NOOP'
   let message = 'Brak zmian.'
-  const zoneIsSpecial = isMobileSpecialZone(zone)
   const scanGpsData = normalizeMobileGpsData(body?.gpsData ?? body?.clientGps ?? body?.gps ?? body?.location)
   const scanGpsNote = (actionLabel, allowed = true) => (allowed ? mobileGpsColumnValue(scanGpsData, actionLabel) : '')
   const requireScanGps = (actionLabel, required = true) => {
@@ -3356,7 +3540,6 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
       error.publicMessage = 'Brak aktywnego dnia pracy. Najpierw zeskanuj START.'
       throw error
     }
-    requireScanGps('STOP')
     await closeMobileOpenCycles(
       client,
       orgId,
@@ -3365,12 +3548,11 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
       'STOP_END_DAY',
       scannedAt,
       comment,
-      scanGpsNote('CLEAN_STOP'),
-      { gpsSpecialOnly: true },
+      '',
     )
     const graceMs = Math.max(0, Number(zone.stopGraceMin || 0)) * 60 * 1000
     const endAt = new Date(scannedAt.getTime() + graceMs)
-    await closeMobileWorkday(client, orgId, activeWorkday, zone, endAt, comment, scanGpsNote('STOP'))
+    await closeMobileWorkday(client, orgId, activeWorkday, zone, endAt, comment, '')
     action = 'STOP_WORKDAY'
     message = graceMs > 0
       ? `Zapisano na serwerze. Zakonczono dzien pracy. Doliczono ${zone.stopGraceMin} min.`
@@ -3385,21 +3567,30 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
         error.publicMessage = 'Brak aktywnego dnia pracy. Najpierw zeskanuj START.'
         throw error
       }
-      requireScanGps('CLEAN', zoneIsSpecial)
+      const startsIndividualOrder = zone.kind === 'INDIVIDUAL'
       assertMobileCorrelationEnabled(worker)
-      activeWorkday = await createMobileWorkday(client, orgId, worker, zone, scannedAt, '')
+      activeWorkday = await createMobileWorkday(
+        client,
+        orgId,
+        worker,
+        zone,
+        scannedAt,
+        scanGpsNote('CLEAN_START', startsIndividualOrder),
+      )
     }
 
     const unresolvedCycleRows = await fetchUnresolvedMobileCycles(client, orgId, worker.login)
-    assertNoUnresolvedOpenEvents(unresolvedCycleRows)
+    const unresolvedCycleState = partitionMobileUnresolvedCycles(
+      unresolvedCycleRows,
+      activeWorkday?.workday_id,
+    )
+    assertNoUnresolvedOpenEvents(unresolvedCycleState.blocking)
     const openCycleRows = await fetchOpenMobileCycles(client, orgId, worker.login)
-    activeCycle = resolveSingleOpenCycle(openCycleRows, activeWorkday?.workday_id)
+    activeCycle = resolveOpenCycleState(openCycleRows, activeWorkday?.workday_id).activeCycle
 
     if (activeCycle && isMobileEventOpen(activeCycle)) {
-      const activeCycleIsSpecial = isMobileSpecialEventRow(activeCycle)
       if (normalizeText(activeCycle.zone_id).toLowerCase() === normalizeText(zone.id).toLowerCase()) {
-        requireScanGps('CLEAN', activeCycleIsSpecial || zoneIsSpecial)
-        await closeMobileEvent(client, orgId, activeCycle, 'QR_SAME', scannedAt, comment, scanGpsNote('CLEAN_STOP', activeCycleIsSpecial || zoneIsSpecial))
+        await closeMobileEvent(client, orgId, activeCycle, 'QR_SAME', scannedAt, comment, '')
         action = 'CLOSE_ZONE'
         message = 'Zapisano na serwerze. Zakonczono sprzatanie tej strefy.'
         if (body?.closeWorkdayImmediately) {
@@ -3408,7 +3599,8 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
           message = 'Zapisano na serwerze. Zakonczono strefe i dzien pracy.'
         }
       } else {
-        requireScanGps('CLEAN', activeCycleIsSpecial || zoneIsSpecial)
+        const startsIndividualOrder = zone.kind === 'INDIVIDUAL'
+        requireScanGps('CLEAN_START', startsIndividualOrder)
         assertMobileCorrelationEnabled(worker)
         await closeMobileEvent(
           client,
@@ -3417,22 +3609,41 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
           'QR_SWITCH',
           scannedAt,
           comment,
-          scanGpsNote('CLEAN_STOP', activeCycleIsSpecial),
+          '',
         )
-        await createMobileCycle(client, orgId, worker, activeWorkday, zone, scannedAt, comment, scanGpsNote('CLEAN_START', zoneIsSpecial))
+        await createMobileCycle(
+          client,
+          orgId,
+          worker,
+          activeWorkday,
+          zone,
+          scannedAt,
+          comment,
+          scanGpsNote('CLEAN_START', startsIndividualOrder),
+        )
         action = 'SWITCH_ZONE'
         message = `Zapisano na serwerze. Zmiana strefy na: ${zone.name || zone.id}.`
       }
     } else {
-      requireScanGps('CLEAN', zoneIsSpecial)
+      const startsIndividualOrder = zone.kind === 'INDIVIDUAL'
+      requireScanGps('CLEAN_START', startsIndividualOrder)
       assertMobileCorrelationEnabled(worker)
-      await createMobileCycle(client, orgId, worker, activeWorkday, zone, scannedAt, comment, scanGpsNote('CLEAN_START', zoneIsSpecial))
+      await createMobileCycle(
+        client,
+        orgId,
+        worker,
+        activeWorkday,
+        zone,
+        scannedAt,
+        comment,
+        scanGpsNote('CLEAN_START', startsIndividualOrder),
+      )
       action = 'START_ZONE'
       message = `Zapisano na serwerze. Rozpoczeto sprzatanie: ${zone.name || zone.id}.`
     }
   }
 
-  const snapshot = await buildMobileSnapshotFromDb(client, orgId, worker)
+  const snapshot = await buildMobileSnapshotFromDb(client, orgId, worker, { persistRuntimeState: true })
   const resultPayload = {
     ok: true,
     action,
@@ -3451,7 +3662,11 @@ function mapMobileIntegrityDatabaseError(error) {
 
   if (
     dbCode === '23505' &&
-    (constraint === 'event_single_open_clean_per_worker' || message.includes('OPEN_CLEAN_EVENT_EXISTS'))
+    (
+      constraint === 'event_single_open_clean_per_worker' ||
+      constraint === 'event_single_open_clean_per_workday' ||
+      message.includes('OPEN_CLEAN_EVENT_EXISTS')
+    )
   ) {
     return {
       status: 409,
@@ -3462,7 +3677,11 @@ function mapMobileIntegrityDatabaseError(error) {
 
   if (
     dbCode === '23505' &&
-    (constraint === 'workday_single_open_per_worker' || message.includes('OPEN_WORKDAY_EXISTS'))
+    (
+      constraint === 'workday_single_open_per_worker' ||
+      constraint === 'workday_single_open_per_worker_day' ||
+      message.includes('OPEN_WORKDAY_EXISTS')
+    )
   ) {
     return {
       status: 409,
@@ -3496,6 +3715,46 @@ function mapMobileIntegrityDatabaseError(error) {
   }
 
   return null
+}
+
+function handleMobileScanStatusRequest(req, res) {
+  const headers = withSecurityHeaders({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  })
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, headers)
+    res.end()
+    return
+  }
+
+  if (req.method !== 'GET') {
+    res.writeHead(405, headers)
+    res.end(JSON.stringify({
+      ok: false,
+      error: {
+        code: 'METHOD_NOT_ALLOWED',
+        message: 'Dozwolona metoda to GET.',
+      },
+    }))
+    return
+  }
+
+  // The current mobile client treats 501 as an unavailable receipt endpoint
+  // and safely replays the exact idempotent POST with the same clientActionId.
+  // Owning this route prevents it from leaking into the generic /api proxy.
+  res.writeHead(501, headers)
+  res.end(JSON.stringify({
+    ok: false,
+    error: {
+      code: 'MOBILE_SCAN_STATUS_UNAVAILABLE',
+      message: 'Status skanu nie jest jeszcze udostepniony. Bezpiecznie ponow identyczny zapis.',
+    },
+  }))
 }
 
 async function handleMobileWorkflowRequest(req, res, requestUrl) {
@@ -3532,18 +3791,33 @@ async function handleMobileWorkflowRequest(req, res, requestUrl) {
     return
   }
 
-  const orgId = normalizeOrgId(body?.orgId)
-  if (!orgId) {
+  const isMobileStateRequest = requestUrl.pathname === MOBILE_STATE_PATH
+  const requestedOrgId = isMobileStateRequest ? '' : normalizeOrgId(body?.orgId)
+  if (!isMobileStateRequest && !requestedOrgId) {
     sendMobileApiError(res, 400, 'ORG_ID_MISSING', 'Brak poprawnego orgId.')
     return
   }
 
   const client = await connectDbClient()
+  let transactionStarted = false
   try {
-    await client.query('begin')
-    const membership = await assertMobileRequester(client, orgId, decodedToken)
+    const isMobileScanRequest = requestUrl.pathname === MOBILE_SCAN_PATH
+    if (isMobileScanRequest) {
+      await client.query('begin')
+      transactionStarted = true
+    }
+    const organization = isMobileStateRequest
+      ? await resolveMobileOrganizationFromToken(client, decodedToken, requestedOrgId)
+      : {
+          orgId: requestedOrgId,
+          membership: await assertMobileRequester(client, requestedOrgId, decodedToken),
+        }
+    const orgId = organization.orgId
+    const membership = organization.membership
     const worker = await resolveMobileWorker(client, orgId, body, decodedToken, membership)
-    await client.query('select pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))', [orgId, worker.login])
+    if (isMobileScanRequest) {
+      await client.query('select pg_advisory_xact_lock(hashtext($1::text), hashtext($2::text))', [orgId, worker.login])
+    }
 
     let payload
     if (requestUrl.pathname === MOBILE_SCAN_PATH) {
@@ -3559,13 +3833,18 @@ async function handleMobileWorkflowRequest(req, res, requestUrl) {
       payload = { ok: true, snapshot, serverAt: new Date().toISOString() }
     }
 
-    await client.query('commit')
+    if (transactionStarted) {
+      await client.query('commit')
+      transactionStarted = false
+    }
     sendMobileJson(res, 200, payload)
   } catch (error) {
-    try {
-      await client.query('rollback')
-    } catch {
-      // Ignore rollback errors.
+    if (transactionStarted) {
+      try {
+        await client.query('rollback')
+      } catch {
+        // Ignore rollback errors.
+      }
     }
     const dbMapped = mapDatabaseConnectionError(error)
     const integrityMapped = mapMobileIntegrityDatabaseError(error)
@@ -3707,7 +3986,7 @@ async function reserveWorkerIdDirect(client, orgId, workerNumberOverride, create
   return { workerId, workerNumber }
 }
 
-async function getRequesterMembership(client, orgId, uid) {
+async function getRequesterMembership(client, orgId, uid, options = {}) {
   const platformMembership = await platformRepository.resolvePlatformMembership(client, orgId, uid)
   if (platformMembership) return platformMembership
   const result = await runWorkerProfileDbQuery(
@@ -3719,16 +3998,105 @@ async function getRequesterMembership(client, orgId, uid) {
               else m.role
             end as role,
             m.status,
-            m.worker_id
+            m.worker_id,
+            o.status as organization_status,
+            o.onboarding_status,
+            o.deleted_at as organization_deleted_at,
+            s.plan_code,
+            s.status as subscription_status,
+            s.trial_ends_at,
+            s.current_period_ends_at
        from public.organization_member m
        join public.organizations o on o.org_id = m.org_id
+       left join public.organization_subscription s on s.org_id = m.org_id
       where m.org_id = $1::text
         and m.uid = $2::text
         and m.status = 'ACTIVE'
       limit 1`,
     [orgId, uid],
   )
-  return result.rows[0] ?? null
+  const membership = result.rows[0] ?? null
+  if (!membership || options.allowOnboarding === true) return membership
+
+  const organizationStatus = normalizeText(membership.organization_status).toUpperCase()
+  const onboardingStatus = normalizeText(membership.onboarding_status).toUpperCase()
+  const subscriptionAccess = evaluateSubscriptionAccess({
+    planCode: membership.plan_code,
+    status: membership.subscription_status,
+    trialEndsAt: membership.trial_ends_at,
+  })
+  if (
+    !['ACTIVE', 'TRIAL'].includes(organizationStatus)
+    || onboardingStatus !== 'COMPLETED'
+    || membership.organization_deleted_at
+    || !subscriptionAccess.allowed
+  ) {
+    return null
+  }
+  return membership
+}
+
+async function authorizeWorkdayReconciliation(client, { orgId, uid, write = false }) {
+  const membership = await getRequesterMembership(client, orgId, uid)
+  assertMembershipPlanCapability(membership, 'timeTracking')
+  const role = normalizeRequesterRole(membership?.role)
+  if (['ADMIN', 'MANAGER'].includes(role)) {
+    return { role, scope: 'ALL', uid }
+  }
+  if (role === 'COORDINATOR' && write !== true) {
+    return { role, scope: 'ALL', uid }
+  }
+  if (role === 'WORKER' && write !== true) {
+    return { role, scope: 'OWN', uid }
+  }
+  const error = new Error('WORKDAY_RECONCILIATION_FORBIDDEN')
+  error.statusCode = membership ? 403 : 404
+  error.publicCode = membership ? 'WORKDAY_RECONCILIATION_FORBIDDEN' : 'ORG_ACCESS_MISSING'
+  error.publicMessage = membership
+    ? 'Brak uprawnien do przegladu lub korekty tego dnia pracy.'
+    : 'Brak dostepu do tej organizacji.'
+  throw error
+}
+
+function assertMembershipPlanCapability(membership, capability) {
+  if (!membership) {
+    const error = new Error('ORG_ACCESS_MISSING')
+    error.statusCode = 404
+    error.publicCode = 'ORG_ACCESS_MISSING'
+    error.publicMessage = 'Brak dostępu do tej organizacji.'
+    throw error
+  }
+  if (normalizeRoleCode(membership.role) === PLATFORM_ROLE) return membership
+  if (!['ACTIVE', 'TRIAL'].includes(normalizeText(membership.organization_status).toUpperCase()) || membership.organization_deleted_at) {
+    const error = new Error('ORGANIZATION_UNAVAILABLE')
+    error.statusCode = 403
+    error.publicCode = 'ORGANIZATION_UNAVAILABLE'
+    error.publicMessage = 'Organizacja jest nieaktywna.'
+    throw error
+  }
+  const subscriptionAccess = evaluateSubscriptionAccess({
+    planCode: membership.plan_code,
+    status: membership.subscription_status,
+    trialEndsAt: membership.trial_ends_at,
+  })
+  if (!subscriptionAccess.allowed) {
+    const error = new Error(subscriptionAccess.code)
+    error.statusCode = 403
+    error.publicCode = subscriptionAccess.code
+    error.publicMessage = subscriptionAccess.code === 'TRIAL_INACTIVE'
+      ? 'Okres próbny wygasł.'
+      : 'Subskrypcja organizacji nie jest aktywna.'
+    throw error
+  }
+  if (!hasPlanCapability(normalizePlanCode(membership.plan_code), capability)) {
+    const error = new Error('PLAN_CAPABILITY_REQUIRED')
+    error.statusCode = 403
+    error.publicCode = 'PLAN_CAPABILITY_REQUIRED'
+    error.publicMessage = `Ta funkcja nie jest dostępna w planie ${normalizePlanCode(membership.plan_code)}.`
+    error.details = { capability, planCode: normalizePlanCode(membership.plan_code) }
+    throw error
+  }
+  return membership
 }
 
 async function getRequesterMemberships(client, uid, orgId = '') {
@@ -3743,6 +4111,7 @@ async function getRequesterMemberships(client, uid, orgId = '') {
        end as role,
        m.worker_id as membership_worker_id,
        m.status as membership_status,
+       m.created_at as membership_created_at,
        o.name as organization_name,
        o.status as organization_status,
        o.onboarding_status,
@@ -3752,6 +4121,7 @@ async function getRequesterMemberships(client, uid, orgId = '') {
        w.full_name,
        w.active as worker_active,
        w.status as worker_status,
+       w.created_at as worker_created_at,
        s.plan_code,
        s.status as subscription_status,
        s.trial_ends_at,
@@ -3780,7 +4150,7 @@ function profitabilityCapabilities(input) {
   const edit = resolveProfitabilityAccess({ ...input, action: 'edit' })
   return {
     profitabilityModule: {
-      enabled: ['PRO', 'ENTERPRISE'].includes(read.planCode),
+      enabled: hasPlanCapability(read.planCode, 'profitabilityModule'),
       canRead: read.allowed,
       canEdit: edit.allowed,
       readCode: read.code,
@@ -3811,7 +4181,83 @@ async function buildOrganizationSessionContext(client, uid, row) {
       profitabilityModule: canRead || canEdit ? { read: canRead, edit: canEdit } : false,
     }
   }
-  return buildSessionContext(uid, enriched)
+  const context = buildSessionContext(uid, enriched)
+  context.usage = await buildPlanUsage(client, row?.org_id, context.planCode, context.limits)
+  return context
+}
+
+function numericCount(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : 0
+}
+
+async function buildPlanUsage(client, orgIdValue, planCodeValue, limitsValue = {}) {
+  const orgId = normalizeOrgId(orgIdValue)
+  const planCode = normalizePlanCode(planCodeValue)
+  const limits = limitsValue && typeof limitsValue === 'object' ? limitsValue : {}
+  const includedWorkerSlots = numericCount(limits.includedWorkerSlots)
+  const workerResult = await client.query(
+    `select count(*)::integer as used
+       from public.worker
+      where org_id = $1::text
+        and coalesce(active, true) is true
+        and upper(coalesce(status, 'ACTIVE')) <> 'DELETED'`,
+    [orgId],
+  )
+  const workerSlotsUsed = numericCount(workerResult.rows?.[0]?.used)
+  const usage = {
+    workerSlots: calculateMeteredOverage(workerSlotsUsed, includedWorkerSlots),
+    proObjects: {
+      applicable: planCode === 'PRO',
+      ...calculateMeteredOverage(0, limits.includedProObjects),
+    },
+    zonesPerProObject: {
+      applicable: planCode === 'PRO',
+      included: numericCount(limits.includedZonesPerProObject),
+      objects: [],
+    },
+  }
+
+  if (planCode !== 'PRO' || !(await databaseRelationExists(client, 'public.service_object'))) {
+    return usage
+  }
+
+  const objectResult = await client.query(
+    `select object_id
+       from public.service_object
+      where org_id = $1::text
+        and upper(coalesce(status, 'ACTIVE')) = 'ACTIVE'
+        and archived_at is null
+      order by object_id asc`,
+    [orgId],
+  )
+  const objectIds = objectResult.rows.map((row) => normalizeText(row.object_id)).filter(Boolean)
+  Object.assign(usage.proObjects, calculateMeteredOverage(objectIds.length, usage.proObjects.included))
+
+  if (!objectIds.length || !(await databaseColumnExists(client, 'public.zone', 'object_id'))) {
+    return usage
+  }
+
+  const zoneResult = await client.query(
+    `select object_id, count(*)::integer as used
+       from public.zone
+      where org_id = $1::text
+        and object_id = any($2::text[])
+      group by object_id
+      order by object_id asc`,
+    [orgId, objectIds],
+  )
+  const zonesByObject = new Map(
+    zoneResult.rows.map((row) => [normalizeText(row.object_id), numericCount(row.used)]),
+  )
+  usage.zonesPerProObject.objects = objectIds.map((objectId) => {
+    const used = zonesByObject.get(objectId) || 0
+    return {
+      objectId,
+      ...calculateMeteredOverage(used, usage.zonesPerProObject.included),
+    }
+  })
+  return usage
 }
 
 async function findExistingWorker(client, orgId, login, email) {
@@ -4004,6 +4450,7 @@ function workerProfileAccessError(membership, actionLabel) {
 
 async function requireWorkerProfileAccess(client, orgId, requesterUid, allowedRoles, actionLabel) {
   const membership = await getRequesterMembership(client, orgId, requesterUid)
+  assertMembershipPlanCapability(membership, 'timeTracking')
   const requesterRole = normalizeRequesterRole(membership?.role)
   if (!allowedRoles.includes(requesterRole)) {
     throw workerProfileAccessError(membership, actionLabel)
@@ -4089,6 +4536,7 @@ async function listWorkersDirect(orgId, requesterUid) {
     if (!membership) {
       throw workerProfileAccessError(null, 'odczytu pracownikow')
     }
+    assertMembershipPlanCapability(membership, 'timeTracking')
 
     const result = await runWorkerProfileDbQuery(
       client,
@@ -4950,6 +5398,7 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
   const client = await connectDbClient()
   let createdAuthUser = null
   let transactionStarted = false
+  let databaseCommitted = false
   let uploadedPhoto = null
 
   try {
@@ -5043,14 +5492,7 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
 
     await client.query('commit')
     transactionStarted = false
-    if (
-      normalizeText(currentWorker?.photo_url) &&
-      normalizeText(currentWorker.photo_url) !== normalizeText(updatedRow?.photo_url)
-    ) {
-      await deleteWorkerProfilePhotoObject(
-        workerProfilePhotoObjectFromUrl(currentWorker.photo_url, payload.orgId),
-      )
-    }
+    databaseCommitted = true
 
     return {
       uid: createdAuthUser.uid,
@@ -5080,10 +5522,12 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
         // Ignore rollback failure; the original error remains authoritative.
       }
     }
-    if (createdAuthUser?.uid) {
+    if (createdAuthUser?.uid && !databaseCommitted) {
       await deleteFirebaseUserQuietly(createdAuthUser)
     }
-    await deleteWorkerProfilePhotoObject(uploadedPhoto)
+    if (!databaseCommitted) {
+      await deleteWorkerProfilePhotoObject(uploadedPhoto)
+    }
     throw error
   } finally {
     client.release()
@@ -6631,6 +7075,179 @@ async function handleAdminUsersRequest(req, res) {
   }
 }
 
+function assertVerifiedTenantEmail(decodedToken) {
+  if (decodedToken?.email_verified !== true || !normalizeEmail(decodedToken?.email)) {
+    const error = new Error('EMAIL_VERIFICATION_REQUIRED')
+    error.statusCode = 403
+    error.publicCode = 'EMAIL_VERIFICATION_REQUIRED'
+    error.publicMessage = 'Potwierdź adres email przed wejściem do portalu Cleanzi.'
+    throw error
+  }
+  return decodedToken
+}
+
+function sendPortalServiceError(res, error, fallbackCode, fallbackMessage) {
+  const databaseError = mapDatabaseConnectionError(error)
+  if (databaseError) {
+    sendApiError(res, databaseError.status, databaseError.code, databaseError.message)
+    return
+  }
+  sendApiError(
+    res,
+    Number(error?.statusCode) || 500,
+    normalizeText(error?.publicCode) || fallbackCode,
+    normalizeText(error?.publicMessage) || fallbackMessage,
+    publicErrorDetails(error),
+  )
+}
+
+async function authenticateVerifiedTenantRequest(req) {
+  const token = parseBearerToken(req)
+  if (!token) {
+    const error = new Error('UNAUTHENTICATED')
+    error.statusCode = 401
+    error.publicCode = 'UNAUTHENTICATED'
+    error.publicMessage = 'Brak tokenu Firebase.'
+    throw error
+  }
+  return assertVerifiedTenantEmail(await verifyFirebaseIdToken(token))
+}
+
+async function handlePortalOrganizationsRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  let client = null
+  try {
+    const decodedToken = await authenticateVerifiedTenantRequest(req)
+    const body = await readJsonBody(req)
+    client = await connectDbClient()
+    const organization = await createOrganizationWithTrial(client, {
+      uid: decodedToken.uid,
+      email: decodedToken.email,
+      organizationName: body?.organizationName ?? body?.name,
+      ownerFullName: body?.ownerFullName ?? decodedToken.name,
+    })
+    sendJson(res, 201, { ok: true, data: { organization } })
+  } catch (error) {
+    sendPortalServiceError(res, error, 'ORGANIZATION_CREATE_FAILED', 'Nie udało się utworzyć organizacji.')
+  } finally {
+    client?.release?.()
+  }
+}
+
+async function handlePortalOrganizationProfileRequest(req, res, requestUrl) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+  const method = String(req.method || 'GET').toUpperCase()
+  if (!['GET', 'PUT'].includes(method)) {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolone metody to GET i PUT.')
+    return
+  }
+
+  let client = null
+  try {
+    const decodedToken = await authenticateVerifiedTenantRequest(req)
+    const body = method === 'PUT' ? await readJsonBody(req) : {}
+    const orgId = normalizeOrgId(method === 'GET' ? requestUrl.searchParams.get('orgId') : body?.orgId)
+    if (!orgId) throw Object.assign(new Error('INVALID_ORG_ID'), {
+      statusCode: 400,
+      publicCode: 'INVALID_ORG_ID',
+      publicMessage: 'Brak poprawnego orgId.',
+    })
+    client = await connectDbClient()
+    const membership = await getRequesterMembership(client, orgId, decodedToken.uid, { allowOnboarding: true })
+    const role = normalizeRoleCode(membership?.role)
+    if (!['OWNER', 'ADMIN', 'ADMINISTRATOR', 'SUPERADMIN'].includes(role)) {
+      throw Object.assign(new Error('FORBIDDEN'), {
+        statusCode: membership ? 403 : 404,
+        publicCode: membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING',
+        publicMessage: 'Profil firmy może odczytać i edytować tylko Owner lub administrator.',
+      })
+    }
+    if (normalizeText(membership.organization_status).toUpperCase() !== 'ACTIVE' || membership.organization_deleted_at) {
+      throw Object.assign(new Error('ORGANIZATION_UNAVAILABLE'), {
+        statusCode: 403,
+        publicCode: 'ORGANIZATION_UNAVAILABLE',
+        publicMessage: 'Organizacja jest nieaktywna.',
+      })
+    }
+    const data = method === 'GET'
+      ? await readOrganizationProfile(client, orgId)
+      : await updateOrganizationProfile(client, {
+          orgId,
+          uid: decodedToken.uid,
+          version: body?.version,
+          profile: body?.profile,
+        })
+    sendJson(res, 200, { ok: true, data })
+  } catch (error) {
+    sendPortalServiceError(res, error, 'ORGANIZATION_PROFILE_FAILED', 'Nie udało się obsłużyć profilu firmy.')
+  } finally {
+    client?.release?.()
+  }
+}
+
+async function handlePortalCompanyRegistryRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+  try {
+    const decodedToken = await authenticateVerifiedTenantRequest(req)
+    const body = await readJsonBody(req)
+    const company = await lookupCompanyByNip(body?.nip, {
+      apiKey: process.env.GUS_BIR1_API_KEY,
+      endpoint: process.env.GUS_BIR1_ENDPOINT,
+      rateLimitKey: decodedToken.uid,
+    })
+    sendJson(res, 200, { ok: true, data: { company } })
+  } catch (error) {
+    sendPortalServiceError(res, error, 'COMPANY_LOOKUP_FAILED', 'Nie udało się pobrać danych firmy.')
+  }
+}
+
+async function handleStripeWebhookRequest(req, res) {
+  if (req.method !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+  let client = null
+  try {
+    const rawBody = await readRequestBody(req, 512 * 1024)
+    const event = verifyStripeSignature(
+      rawBody,
+      req.headers['stripe-signature'],
+      process.env.STRIPE_WEBHOOK_SECRET,
+    )
+    client = await connectDbClient()
+    const result = await processStripeEvent(client, event, {
+      secretKey: process.env.STRIPE_SECRET_KEY,
+      env: process.env,
+    })
+    sendJson(res, 200, { ok: true, data: result })
+  } catch (error) {
+    sendPortalServiceError(res, error, 'STRIPE_WEBHOOK_FAILED', 'Nie udało się przetworzyć webhooka Stripe.')
+  } finally {
+    client?.release?.()
+  }
+}
+
 async function handleCleaningCompanyLegalDocumentsRequest(req, res) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
@@ -6883,7 +7500,9 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
           sendApiError(res, 403, 'PLATFORM_CONTEXT_INVALID', 'Kontekst organizacji jest zamknięty albo nie odpowiada żądaniu.')
           return
         }
-        const planCode = normalizeText(accessContext.plan_code) || 'PLATFORM'
+        const rawPlanCode = normalizeText(accessContext.plan_code).toUpperCase()
+        const planCode = normalizePlanCode(rawPlanCode)
+        const entitlements = resolvePlanEntitlements(planCode)
         const capabilities = profitabilityCapabilities({
           requestOrgId: normalizeText(accessContext.org_id),
           actor: {
@@ -6920,7 +7539,9 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
             role: PLATFORM_ROLE,
             roleCode: PLATFORM_ROLE,
             roleLevel: 4,
+            rawPlanCode,
             planCode,
+            planName: entitlements.planName,
             subscriptionStatus: normalizeText(accessContext.subscription_status),
             subscriptionEndsAt:
               planCode === 'TRIAL'
@@ -6929,7 +7550,11 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
             platformContextId: normalizeText(accessContext.context_id),
             platformReason: normalizeText(accessContext.reason),
             mfaMethod: principal.mfaMethod,
-            capabilities,
+            limits: entitlements.limits,
+            capabilities: {
+              ...entitlements.capabilities,
+              ...capabilities,
+            },
           },
         })
         return
@@ -6952,8 +7577,27 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
       return
     }
 
-    const rows = await getRequesterMemberships(client, requesterUid, requestedOrgId)
-    const accessibleOrganizations = resolveAccessibleOrganizations(rows, new Date())
+    const rows = await getRequesterMemberships(client, requesterUid)
+    const emailEligibleRows = rows.filter((row) => evaluateTenantEmailVerification(
+      decodedToken,
+      row,
+      process.env.TENANT_EMAIL_VERIFICATION_REQUIRED_FROM,
+    ).allowed)
+    if (decodedToken?.email_verified !== true && !emailEligibleRows.length) {
+      sendJson(res, 200, {
+        ok: true,
+        status: 'EMAIL_VERIFICATION_REQUIRED',
+        context: {
+          uid: requesterUid,
+          email: normalizeEmail(decodedToken?.email),
+          actorType: 'ORGANIZATION',
+        },
+      })
+      return
+    }
+
+    const accessibleOrganizations = resolveAccessibleOrganizations(emailEligibleRows, new Date())
+    const organizationSummaries = accessibleOrganizations.map(buildOrganizationSummary)
 
     if (requestedOrgId) {
       const selected = accessibleOrganizations.find((row) => normalizeOrgId(row.org_id) === requestedOrgId)
@@ -6962,10 +7606,12 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
         return
       }
 
+      const context = await buildOrganizationSessionContext(client, requesterUid, selected)
+      context.organizations = organizationSummaries
       sendJson(res, 200, {
         ok: true,
         status: 'READY',
-        context: await buildOrganizationSessionContext(client, requesterUid, selected),
+        context,
       })
       return
     }
@@ -6979,15 +7625,21 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
         })
         return
       }
-      sendApiError(res, 403, 'ORG_ACCESS_DENIED', 'Brak uprawnie\u0144 do portalu dla tego konta.')
+      sendJson(res, 200, {
+        ok: true,
+        status: 'ORGANIZATION_ONBOARDING_REQUIRED',
+        organizations: [],
+      })
       return
     }
 
     if (accessibleOrganizations.length === 1) {
+      const context = await buildOrganizationSessionContext(client, requesterUid, accessibleOrganizations[0])
+      context.organizations = organizationSummaries
       sendJson(res, 200, {
         ok: true,
         status: 'READY',
-        context: await buildOrganizationSessionContext(client, requesterUid, accessibleOrganizations[0]),
+        context,
       })
       return
     }
@@ -6995,7 +7647,7 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
     sendJson(res, 200, {
       ok: true,
       status: 'ORG_SELECTION_REQUIRED',
-      organizations: accessibleOrganizations.map(buildOrganizationSummary),
+      organizations: organizationSummaries,
     })
   } catch (error) {
     const mappedDb = mapDatabaseConnectionError(error)
@@ -7120,6 +7772,7 @@ function portalZoneQrNullableText(value, maxLength = 500) {
 
 async function requirePortalZoneQrAccess(client, orgId, uid) {
   const membership = await getRequesterMembership(client, orgId, uid)
+  assertMembershipPlanCapability(membership, 'timeQrNfc')
   const role = normalizeRequesterRole(membership?.role)
   if (!['ADMIN', 'MANAGER', 'OWNER', 'PLATFORM_OWNER'].includes(role)) {
     const error = new Error('FORBIDDEN')
@@ -7319,7 +7972,10 @@ async function handlePortalZoneQrCodesRequest(req, res) {
   let client = null
   try {
     client = await connectDbClient()
-    await requirePortalZoneQrAccess(client, orgId, requesterUid)
+    const access = await requirePortalZoneQrAccess(client, orgId, requesterUid)
+    if (items.some((item) => item.function === 'CLEAN' || item.function === 'STREFA_SPECJALNA')) {
+      assertMembershipPlanCapability(access.membership, 'zoneTasks')
+    }
     const codes = await insertPortalZoneQrCodes(client, {
       orgId,
       items,
@@ -7356,6 +8012,7 @@ async function handlePortalZoneQrCodesRequest(req, res) {
 
 async function requirePortalTaskAccess(client, orgId, uid, { write = false, remove = false } = {}) {
   const membership = await getRequesterMembership(client, orgId, uid)
+  assertMembershipPlanCapability(membership, 'zoneTasks')
   const role = normalizeRequesterRole(membership?.role)
   const allowed = remove
     ? ['ADMIN']
@@ -8059,69 +8716,118 @@ function portalScheduleOrderWithLifecycleStatus(order = {}, lifecycleStatus, cha
   }
 }
 
-async function ensurePortalScheduleOrderTable(client) {
-  await client.query(`
-    create table if not exists public.task (
-      org_id varchar(64) not null,
-      id_task varchar(180) not null,
-      client_id varchar(64),
-      zone_id varchar(64),
-      access_end_time varchar(5),
-      access_start_time varchar(5),
-      access_windows text,
-      address_label text,
-      allow_extended_work boolean,
-      city text,
-      client_label text,
-      client_name text,
-      created_at timestamptz,
-      created_by_uid varchar(128),
-      lifecycle_status varchar(20) not null default 'ACTIVE',
-      cancelled_at timestamptz,
-      archived_at timestamptz,
-      date_ymd varchar(10),
-      description text,
-      end_date_ymd varchar(10),
-      end_time varchar(5),
-      execution_address_label text,
-      lat double precision,
-      lng double precision,
-      nip text,
-      object_plan_tasks text,
-      post_code text,
-      price double precision,
-      repeat_every integer,
-      repeat_preset varchar(32),
-      repeat_unit varchar(16),
-      repeat_weekdays text,
-      required_people integer,
-      required_work_minutes integer,
-      schedule_mode varchar(32),
-      start_time varchar(5),
-      street text,
-      supplies text,
-      title text,
-      type varchar(40),
-      updated_at timestamptz,
-      updated_by_uid varchar(128),
-      weekly_schedule_rules text,
-      work_allocations text,
-      worker_comment text,
-      worker_id varchar(128),
-      worker_ids text,
-      worker_label text,
-      worker_login varchar(80),
-      worker_name text,
-      zone_label text,
-      constraint task_lifecycle_status_check
-        check (lifecycle_status in ('ACTIVE', 'CANCELLED', 'ARCHIVED')),
-      primary key (org_id, id_task)
-    )
-  `)
+async function assertPortalScheduleOrderSchemaReady(client) {
+  const result = await client.query(
+    `with target as (
+       select to_regclass('public.task') as task_oid
+     )
+     select
+       target.task_oid is not null as task_ready,
+       exists (
+         select 1
+           from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'task'
+            and column_name = 'lifecycle_status'
+            and data_type = 'character varying'
+            and character_maximum_length = 20
+            and is_nullable = 'NO'
+            and position('ACTIVE' in upper(coalesce(column_default, ''))) > 0
+       ) as lifecycle_status_ready,
+       exists (
+         select 1
+           from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'task'
+            and column_name = 'cancelled_at'
+            and data_type = 'timestamp with time zone'
+       ) as cancelled_at_ready,
+       exists (
+         select 1
+           from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'task'
+            and column_name = 'archived_at'
+            and data_type = 'timestamp with time zone'
+       ) as archived_at_ready,
+       exists (
+         select 1
+           from pg_constraint constraint_row
+          where constraint_row.conrelid = target.task_oid
+            and constraint_row.conname = 'task_lifecycle_status_check'
+            and constraint_row.convalidated
+       ) as lifecycle_constraint_ready,
+       exists (
+         select 1
+           from pg_indexes
+          where schemaname = 'public'
+            and tablename = 'task'
+            and indexname = 'task_org_lifecycle_date_idx'
+       ) as lifecycle_index_ready
+     from target`,
+  )
+  const schema = result.rows[0] || {}
+  const required = [
+    'task_ready',
+    'lifecycle_status_ready',
+    'cancelled_at_ready',
+    'archived_at_ready',
+    'lifecycle_constraint_ready',
+    'lifecycle_index_ready',
+  ]
+  const missing = required.filter((key) => schema[key] !== true)
+  if (!missing.length) return
+
+  const error = new Error('PORTAL_SCHEDULE_ORDERS_SCHEMA_UNAVAILABLE')
+  error.statusCode = 503
+  error.publicCode = 'PORTAL_SCHEDULE_ORDERS_SCHEMA_UNAVAILABLE'
+  error.publicMessage = 'Grafik zleceń jest chwilowo niedostępny. Skontaktuj się z administratorem.'
+  error.publicDetails = { missing, legacyCode: 'TASK_LIFECYCLE_SCHEMA_MISSING' }
+  throw error
+}
+
+function mapPortalScheduleOrdersError(error) {
+  const publicCode = normalizeText(error?.publicCode)
+  const publicMessage = normalizeText(error?.publicMessage)
+  const publicStatus = Number(error?.statusCode)
+  if (publicCode && publicMessage && Number.isFinite(publicStatus) && publicStatus >= 400 && publicStatus < 600) {
+    return {
+      status: publicStatus,
+      code: publicCode,
+      message: publicMessage,
+      details: error?.publicDetails,
+    }
+  }
+
+  const databaseCode = normalizeText(error?.code).toUpperCase()
+  const databaseMessage = normalizeText(error?.message).toLowerCase()
+  if (databaseCode === '42703' && databaseMessage.includes('lifecycle_status')) {
+    return {
+      status: 503,
+      code: 'TASK_LIFECYCLE_SCHEMA_MISSING',
+      message: 'Moduł cyklu życia zleceń wymaga migracji bazy danych przed zapisem.',
+    }
+  }
+  if (
+    ['42P08', '42P18'].includes(databaseCode) ||
+    databaseMessage.includes('inconsistent types deduced for parameter')
+  ) {
+    return {
+      status: 503,
+      code: 'SCHEDULE_ORDER_SQL_PARAMETER_MISMATCH',
+      message: 'Backend zleceń wymaga zgodnej wersji zapytania SQL. Zapis nie został wykonany.',
+    }
+  }
+  return {
+    status: 500,
+    code: 'PORTAL_SCHEDULE_ORDERS_FAILED',
+    message: 'Nie udało się bezpiecznie obsłużyć zlecenia. Spróbuj ponownie później.',
+  }
 }
 
 async function requirePortalScheduleOrderAccess(client, orgId, uid, { write = false, remove = false } = {}) {
   const membership = await getRequesterMembership(client, orgId, uid)
+  assertMembershipPlanCapability(membership, 'scheduling')
   const role = normalizeRequesterRole(membership?.role)
   const allowed = remove
     ? ['ADMIN']
@@ -8140,6 +8846,7 @@ async function requirePortalScheduleOrderAccess(client, orgId, uid, { write = fa
 
 async function requirePortalEventAccess(client, orgId, uid) {
   const membership = await getRequesterMembership(client, orgId, uid)
+  assertMembershipPlanCapability(membership, 'timeTracking')
   if (!isWorkerDeleteRole(membership?.role)) {
     const error = new Error('FORBIDDEN')
     error.statusCode = membership ? 403 : 404
@@ -8223,6 +8930,59 @@ async function deletePortalEventsFromTableByColumns(client, orgId, relationName,
   return result.rowCount || 0
 }
 
+async function assertPortalEventDeleteOutsideReconciliation(client, orgId, ids) {
+  if (!ids.length) return
+
+  // Share the organization-level reconciliation lock before taking row locks.
+  // This keeps the lock order compatible with the transactional repair API.
+  await client.query(
+    'select pg_advisory_xact_lock(hashtextextended($1::text, 0))',
+    [`workday-business-date:${orgId}`],
+  )
+  const lockedEventResult = await client.query(
+    `select event_id, workday_id, start_event_id, end_event_id
+       from public.event
+      where org_id = $1
+        and (
+          event_id = any($2::varchar[])
+          or workday_id = any($2::varchar[])
+          or start_event_id = any($2::varchar[])
+          or end_event_id = any($2::varchar[])
+        )
+      order by event_id asc
+      for update`,
+    [orgId, ids],
+  )
+  const lockedEvents = lockedEventResult.rows || []
+  const linkedWorkdayIds = lockedEvents
+    .map((row) => normalizeText(row?.workday_id))
+    .filter(Boolean)
+  const workdayLookupIds = [...new Set([...ids, ...linkedWorkdayIds])]
+  const lockedWorkdayResult = await client.query(
+    `select workday_id
+       from public.workday
+      where org_id = $1
+        and (
+          workday_id = any($2::varchar[])
+          or start_event_id = any($2::varchar[])
+          or end_event_id = any($2::varchar[])
+        )
+      order by workday_id asc
+      for update`,
+    [orgId, workdayLookupIds],
+  )
+  const hasLinkedEvent = lockedEvents.some((row) => normalizeText(row?.workday_id))
+  if (!hasLinkedEvent && !lockedWorkdayResult.rows?.[0]) return
+
+  const error = new Error(
+    'Sesja powiazana z dniem pracy nie moze zostac usunieta przez stary edytor. Uzyj dialogu „Przeglad i naprawa dnia”.',
+  )
+  error.statusCode = 409
+  error.publicCode = 'WORKDAY_RECONCILIATION_REQUIRED'
+  error.publicMessage = error.message
+  throw error
+}
+
 async function deletePortalEventsByIds(client, orgId, ids) {
   const counts = {
     workdayPause: 0,
@@ -8236,6 +8996,7 @@ async function deletePortalEventsByIds(client, orgId, ids) {
   }
 
   await client.query('begin')
+  await assertPortalEventDeleteOutsideReconciliation(client, orgId, ids)
   counts.workdayPause = await deletePortalEventsFromTableByColumns(
     client,
     orgId,
@@ -8358,255 +9119,15 @@ async function handlePortalEventsRequest(req, res) {
   }
 }
 
-async function ensurePortalUiStyleTables(client) {
-  await client.query(
-    `create table if not exists public.org_ui_style (
-       org_id varchar(64) primary key references public.organizations(org_id) on delete cascade,
-       default_style_id varchar(64) not null,
-       updated_at timestamptz not null default now(),
-       updated_by varchar(120)
-     )`,
-  )
-  await client.query(
-    `create table if not exists public.user_ui_style_preference (
-       org_id varchar(64) not null references public.organizations(org_id) on delete cascade,
-       uid varchar(128) not null,
-       style_id varchar(64) not null,
-       updated_at timestamptz not null default now(),
-       updated_by varchar(120),
-       primary key (org_id, uid)
-     )`,
-  )
-}
-
-function portalOrgUiStyleFromRow(row) {
-  if (!row) return null
-  return {
-    orgId: normalizeText(row.org_id),
-    defaultStyleId: normalizeText(row.default_style_id),
-    updatedAt: row.updated_at || null,
-    updatedBy: normalizeText(row.updated_by),
-  }
-}
-
-function portalUserUiStyleFromRow(row) {
-  if (!row) return null
-  return {
-    orgId: normalizeText(row.org_id),
-    uid: normalizeText(row.uid),
-    styleId: normalizeText(row.style_id),
-    updatedAt: row.updated_at || null,
-    updatedBy: normalizeText(row.updated_by),
-  }
-}
-
-function normalizePortalStyleScope(value) {
-  const scope = normalizeText(value).toLowerCase()
-  return scope === 'organization' || scope === 'org' ? 'organization' : 'user'
-}
-
-function normalizePortalStyleId(value) {
-  const styleId = normalizeText(value)
-  return /^[a-z0-9_-]{1,64}$/i.test(styleId) ? styleId : ''
-}
-
-async function readPortalUiStyleState(client, orgId, requesterUid, includeUsers) {
-  const [orgResult, userResult] = await Promise.all([
-    client.query(
-      `select org_id, default_style_id, updated_at, updated_by
-         from public.org_ui_style
-        where org_id = $1::text
-        limit 1`,
-      [orgId],
-    ),
-    client.query(
-      `select org_id, uid, style_id, updated_at, updated_by
-         from public.user_ui_style_preference
-        where org_id = $1::text
-          and uid = $2::text
-        limit 1`,
-      [orgId, requesterUid],
-    ),
-  ])
-
-  let userPreferences = []
-  if (includeUsers) {
-    const allUsersResult = await client.query(
-      `select org_id, uid, style_id, updated_at, updated_by
-         from public.user_ui_style_preference
-        where org_id = $1::text
-        order by uid asc`,
-      [orgId],
-    )
-    userPreferences = allUsersResult.rows.map(portalUserUiStyleFromRow).filter(Boolean)
-  }
-
-  return {
-    orgDefault: portalOrgUiStyleFromRow(orgResult.rows[0]),
-    userPreference: portalUserUiStyleFromRow(userResult.rows[0]),
-    userPreferences,
-    storage: 'database',
-  }
-}
-
-async function handlePortalUiStyleRequest(req, res, requestUrl) {
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204)
-    res.end()
-    return
-  }
-
-  const method = String(req.method || 'GET').toUpperCase()
-  if (!['GET', 'POST', 'DELETE'].includes(method)) {
-    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolone metody to GET, POST i DELETE.')
-    return
-  }
-
-  let body = {}
-  if (method !== 'GET') {
-    try {
-      body = await readJsonBody(req)
-    } catch (error) {
-      if (error?.message === 'REQUEST_BODY_TOO_LARGE') {
-        sendApiError(res, 413, 'REQUEST_TOO_LARGE', 'Zadanie jest zbyt duze.')
-        return
-      }
-      sendApiError(res, 400, 'INVALID_JSON', 'Niepoprawny JSON w zadaniu.')
-      return
-    }
-  }
-
-  const orgId = normalizeOrgId(method === 'GET' ? requestUrl.searchParams.get('orgId') : body?.orgId)
-  if (!orgId) {
-    sendApiError(res, 400, 'INVALID_ORG_ID', 'Brak poprawnego orgId.')
-    return
-  }
-
-  const token = parseBearerToken(req)
-  if (!token) {
-    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
-    return
-  }
-
-  let decodedToken
-  try {
-    decodedToken = await verifyFirebaseIdToken(token)
-  } catch (error) {
-    const mapped = mapFirebaseAdminError(error)
-    sendApiError(res, mapped.status, mapped.code, mapped.message)
-    return
-  }
-
-  const requesterUid = normalizeText(decodedToken?.uid)
-  let client = null
-  try {
-    client = await connectDbClient()
-    await ensurePortalUiStyleTables(client)
-
-    const membership = await getRequesterMembership(client, orgId, requesterUid)
-    if (!membership) {
-      throw workerProfileAccessError(null, 'ustawien wygladu organizacji')
-    }
-    const requesterRole = normalizeRequesterRole(membership.role)
-    const isAdmin = requesterRole === 'ADMIN'
-    const isPlatformActor = normalizeRoleCode(membership.role) === PLATFORM_ROLE
-
-    if (method === 'GET') {
-      const includeUsers = requestUrl.searchParams.get('includeUsers') === '1'
-      if (includeUsers && !isAdmin) {
-        throw workerProfileAccessError(membership, 'odczytu preferencji wygladu uzytkownikow')
-      }
-      const state = await readPortalUiStyleState(client, orgId, isPlatformActor ? '' : requesterUid, includeUsers)
-      sendJson(res, 200, { ok: true, data: state })
-      return
-    }
-
-    const scope = isPlatformActor ? 'organization' : normalizePortalStyleScope(body?.scope)
-    const requestedUid = normalizeText(body?.uid).slice(0, 128)
-    const targetUid = requestedUid || requesterUid
-    if (scope === 'organization' && !isAdmin) {
-      throw workerProfileAccessError(membership, 'zmiany domyslnego wygladu organizacji')
-    }
-    if (scope === 'user' && targetUid !== requesterUid && !isAdmin) {
-      throw workerProfileAccessError(membership, 'zmiany wygladu innego uzytkownika')
-    }
-
-    if (method === 'DELETE') {
-      if (scope === 'organization') {
-        await client.query('delete from public.org_ui_style where org_id = $1::text', [orgId])
-      } else {
-        await client.query(
-          'delete from public.user_ui_style_preference where org_id = $1::text and uid = $2::text',
-          [orgId, targetUid],
-        )
-      }
-      sendJson(res, 200, { ok: true, data: { deleted: true, orgId, scope, uid: targetUid } })
-      return
-    }
-
-    const styleId = normalizePortalStyleId(body?.styleId)
-    if (!styleId) {
-      sendApiError(res, 400, 'INVALID_STYLE_ID', 'Brak poprawnego identyfikatora stylu.')
-      return
-    }
-    const updatedBy = isPlatformActor
-      ? ''
-      : normalizeText(body?.updatedBy || decodedToken?.email || requesterUid).slice(0, 120)
-
-    if (scope === 'organization') {
-      await client.query(
-        `insert into public.org_ui_style (org_id, default_style_id, updated_at, updated_by)
-         values ($1::text, $2::text, now(), nullif($3::text, ''))
-         on conflict (org_id)
-         do update set
-           default_style_id = excluded.default_style_id,
-           updated_at = now(),
-           updated_by = coalesce(excluded.updated_by, org_ui_style.updated_by)`,
-        [orgId, styleId, updatedBy],
-      )
-    } else {
-      await client.query(
-        `insert into public.user_ui_style_preference (org_id, uid, style_id, updated_at, updated_by)
-         values ($1::text, $2::text, $3::text, now(), nullif($4::text, ''))
-         on conflict (org_id, uid)
-         do update set
-           style_id = excluded.style_id,
-           updated_at = now(),
-           updated_by = excluded.updated_by`,
-        [orgId, targetUid, styleId, updatedBy],
-      )
-    }
-
-    sendJson(res, 200, {
-      ok: true,
-      data: { saved: true, orgId, scope, uid: targetUid, styleId, storage: 'database' },
-    })
-  } catch (error) {
-    const mappedDb = mapDatabaseConnectionError(error)
-    if (mappedDb) {
-      sendApiError(res, mappedDb.status, mappedDb.code, mappedDb.message)
-      return
-    }
-    sendApiError(
-      res,
-      error?.statusCode || 500,
-      normalizeText(error?.publicCode) || 'PORTAL_UI_STYLE_ERROR',
-      normalizeText(error?.publicMessage) || error?.message || 'Nie udalo sie obsluzyc ustawien wygladu.',
-    )
-  } finally {
-    if (client) client.release()
-  }
-}
-
 async function readPortalScheduleOrders(client, orgId) {
   const result = await client.query(
     `select
         t.*,
-        c.name as joined_client_name,
-        c.nip as joined_client_nip,
-        c.city as joined_client_city,
-        c.postal_code as joined_client_post_code,
-        c.address as joined_client_street,
+        to_jsonb(c) ->> 'name' as joined_client_name,
+        to_jsonb(c) ->> 'nip' as joined_client_nip,
+        to_jsonb(c) ->> 'city' as joined_client_city,
+        to_jsonb(c) ->> 'postal_code' as joined_client_post_code,
+        to_jsonb(c) ->> 'address' as joined_client_street,
         w.full_name as joined_worker_name,
         w.login as joined_worker_login
        from public.task t
@@ -8874,7 +9395,7 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
     }
 
     client = await connectDbClient()
-    await ensurePortalScheduleOrderTable(client)
+    await assertPortalScheduleOrderSchemaReady(client)
     const requesterRole = await requirePortalScheduleOrderAccess(client, orgId, requesterUid, {
       write: method === 'POST' || method === 'PATCH',
       remove: method === 'DELETE',
@@ -9034,12 +9555,13 @@ async function handlePortalScheduleOrdersRequest(req, res, requestUrl) {
       sendApiError(res, mappedDb.status, mappedDb.code, mappedDb.message)
       return
     }
+    const mappedScheduleError = mapPortalScheduleOrdersError(error)
     sendApiError(
       res,
-      error?.statusCode || 500,
-      normalizeText(error?.publicCode) || 'PORTAL_SCHEDULE_ORDERS_ERROR',
-      normalizeText(error?.publicMessage) || error?.message || 'Nie udalo sie obsluzyc zlecen.',
-      error?.details,
+      mappedScheduleError.status,
+      mappedScheduleError.code,
+      mappedScheduleError.message,
+      mappedScheduleError.details,
     )
   } finally {
     if (client) client.release()
@@ -9109,6 +9631,8 @@ async function handlePortalJobCardsRequest(req, res, requestUrl) {
   try {
     const requesterUid = normalizeText(decodedToken?.uid)
     client = await connectDbClient()
+    const membership = await getRequesterMembership(client, orgId, requesterUid)
+    assertMembershipPlanCapability(membership, 'checklistProof')
     const repository = new JobCardRepository(client)
     await repository.assertActiveOrganizationMember({ orgId, uid: requesterUid })
 
@@ -9498,6 +10022,26 @@ const profitabilityApi = createProfitabilityApi({
   verifyFirebaseIdToken,
 })
 
+const workdayReconciliationApi = createWorkdayReconciliationApi({
+  authorize: authorizeWorkdayReconciliation,
+  connectDbClient,
+  parseBearerToken,
+  readJsonBody,
+  sendApiError,
+  sendJson,
+  verifyFirebaseIdToken,
+})
+
+const workTimeDaysApi = createWorkTimeDaysApi({
+  authorize: authorizeWorkdayReconciliation,
+  connectDbClient,
+  parseBearerToken,
+  readJsonBody,
+  sendApiError,
+  sendJson,
+  verifyFirebaseIdToken,
+})
+
 const workdayStopProposalApi = createWorkdayStopProposalApi({
   connectDbClient,
   getRequesterMembership,
@@ -9547,6 +10091,12 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
 
   const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
   setRequestPathname(requestUrl.pathname)
+  if (requestUrl.pathname === STRIPE_WEBHOOK_PATH) {
+    handleStripeWebhookRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'STRIPE_WEBHOOK_FAILED', error?.message || 'Unexpected Stripe webhook error.')
+    })
+    return
+  }
   if (requestUrl.pathname.startsWith('/api/platform/')) {
     platformApi.handle(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PLATFORM_API_ERROR', error?.message || 'Unexpected platform API error.')
@@ -9557,6 +10107,40 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
     profitabilityApi.handle(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PROFITABILITY_API_ERROR', error?.message || 'Unexpected profitability API error.')
     })
+    return
+  }
+  if (workdayReconciliationApi.matches(requestUrl.pathname)) {
+    workdayReconciliationApi.handle(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'WORKDAY_RECONCILIATION_ERROR', error?.message || 'Unexpected workday reconciliation error.')
+    })
+    return
+  }
+  if (workTimeDaysApi.matches(requestUrl.pathname)) {
+    workTimeDaysApi.handle(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'WORK_TIME_DAY_ERROR', error?.message || 'Unexpected work time day error.')
+    })
+    return
+  }
+  if (requestUrl.pathname === PORTAL_ORGANIZATIONS_PATH) {
+    handlePortalOrganizationsRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'ORGANIZATION_CREATE_FAILED', error?.message || 'Unexpected organization error.')
+    })
+    return
+  }
+  if (requestUrl.pathname === PORTAL_ORGANIZATION_PROFILE_PATH) {
+    handlePortalOrganizationProfileRequest(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'ORGANIZATION_PROFILE_FAILED', error?.message || 'Unexpected organization profile error.')
+    })
+    return
+  }
+  if (requestUrl.pathname === PORTAL_COMPANY_REGISTRY_PATH) {
+    handlePortalCompanyRegistryRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'COMPANY_LOOKUP_FAILED', error?.message || 'Unexpected company lookup error.')
+    })
+    return
+  }
+  if (requestUrl.pathname === MOBILE_SCAN_STATUS_PATH) {
+    handleMobileScanStatusRequest(req, res)
     return
   }
   if (requestUrl.pathname === PORTAL_WORKDAY_STOP_PROPOSALS_PATH) {
@@ -9578,13 +10162,6 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   ) {
     handleMobileWorkflowRequest(req, res, requestUrl).catch((error) => {
       sendMobileApiError(res, 500, 'MOBILE_WORKFLOW_ERROR', error?.message || 'Unexpected mobile workflow error.')
-    })
-    return
-  }
-
-  if (requestUrl.pathname === PORTAL_UI_STYLE_PATH) {
-    handlePortalUiStyleRequest(req, res, requestUrl).catch((error) => {
-      sendApiError(res, 500, 'PORTAL_UI_STYLE_ERROR', error?.message || 'Unexpected portal UI style error.')
     })
     return
   }
