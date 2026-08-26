@@ -1,6 +1,6 @@
 import template from './template.html?raw'
 import './style.css'
-import { SETTINGS_MODULES, SETTINGS_ROUTES, settingsModuleForRoute } from './catalog.js'
+import { SETTINGS_ROUTES, settingsModuleForRoute } from './catalog.js'
 
 export const section = 'settings'
 export const routes = SETTINGS_ROUTES
@@ -15,22 +15,30 @@ export function settingsCanEdit(session) {
 
 export function createSettingsFeature(ctx = {}) {
   let navigation = null
-  let selectElement = null
 
-  function updateModuleNavigation(route) {
-    document.querySelectorAll('[data-settings-route]').forEach((item) => {
-      const isCurrent = item.getAttribute('data-settings-route') === route
-      item.classList.toggle('is-active', isCurrent)
-      if (isCurrent) {
-        item.setAttribute('aria-current', 'page')
-      } else {
-        item.removeAttribute('aria-current')
-      }
+  function addOverviewBackButton(content, module) {
+    if (module.route === 'settings') return
+
+    const header = content.querySelector('.settings-module-header')
+    if (!(header instanceof HTMLElement)) return
+
+    const actions = document.createElement('div')
+    actions.className = 'settings-module-header-actions'
+
+    const backButton = document.createElement('button')
+    backButton.type = 'button'
+    backButton.className = 'settings-back-button'
+    backButton.dataset.settingsBack = 'true'
+    backButton.setAttribute('aria-label', 'Wróć do przeglądu ustawień')
+    backButton.innerHTML = '<i class="ph ph-arrow-left" aria-hidden="true"></i><span>Wróć</span>'
+    backButton.addEventListener('click', () => {
+      void navigation?.go?.('settings')
     })
+    actions.append(backButton)
 
-    if (selectElement instanceof HTMLSelectElement) {
-      selectElement.value = route
-    }
+    const status = Array.from(header.children).find((element) => element.classList.contains('settings-status'))
+    if (status) actions.append(status)
+    header.append(actions)
   }
 
   function updatePermissionState() {
@@ -57,27 +65,15 @@ export function createSettingsFeature(ctx = {}) {
 
     content.innerHTML = module.template
     content.dataset.settingsModuleRoute = module.route
-    updateModuleNavigation(module.route)
+    addOverviewBackButton(content, module)
     updatePermissionState()
     return module
   }
 
   function bind(nextNavigation) {
     navigation = nextNavigation
-    selectElement = document.getElementById('settingsModuleSelect')
-
-    const handleSelectChange = () => {
-      const route = String(selectElement?.value ?? '').trim()
-      if (route && SETTINGS_MODULES.some((module) => module.route === route)) {
-        void navigation?.go?.(route)
-      }
-    }
-
-    selectElement?.addEventListener('change', handleSelectChange)
 
     return () => {
-      selectElement?.removeEventListener('change', handleSelectChange)
-      selectElement = null
       navigation = null
     }
   }

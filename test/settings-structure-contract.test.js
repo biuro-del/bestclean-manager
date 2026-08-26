@@ -87,27 +87,32 @@ test('dziesięć tras korzysta z jednego widoku i jednego lazy-loaded szablonu',
   }
 })
 
-test('sidebar, wyszukiwarka i wewnętrzna nawigacja obejmują pełną strukturę', () => {
+test('centrum ustawień jest stroną domyślną, a podstrony wracają do przeglądu', () => {
   const layout = readPortalSource('ui', 'layoutTemplate.js')
   const portal = readPortalSource('ui', 'portalApp.js')
   const router = readPortalSource('ui', 'router.js')
   const template = readSettingsSource('template.html')
   const feature = readSettingsSource('index.js')
+  const overview = readSettingsSource('modules', 'overview', 'template.html')
 
   assert.equal(layout.match(/data-route="settings"/g)?.length, 1)
   assert.match(router, /return settingsRoutes\.has\(route\) \? 'settings' : route/)
-  assert.match(template, /<nav class="settings-navigation" aria-label="Nawigacja ustawień">/)
   assert.match(template, /role="region" aria-label="Zawartość ustawień"/)
   assert.doesNotMatch(template, /<main\b/)
-  assert.match(template, /<optgroup label="Moje konto">/)
-  assert.match(template, /<optgroup label="Organizacja">/)
-  assert.match(feature, /item\.setAttribute\('aria-current', 'page'\)/)
+  assert.doesNotMatch(template, /settings-hero|portal-page-hero/)
+  assert.doesNotMatch(template, /Zarządzaj kontem, organizacją i sposobem działania portalu/)
+  assert.doesNotMatch(template, /settings-navigation|settings-mobile-navigation|settingsModuleSelect/)
+  assert.match(feature, /backButton\.dataset\.settingsBack = 'true'/)
+  assert.match(feature, /navigation\?\.go\?\.\('settings'\)/)
   assert.match(feature, /content\.dataset\.settingsModuleRoute = module\.route/)
   assert.doesNotMatch(feature, /content\.dataset\.settingsRoute = module\.route/)
 
   for (const route of settingsRoutes) {
     assert.match(portal, new RegExp(`route: '${route}'`))
-    assert.match(template, new RegExp(`(?:value|data-settings-route)="${route}"`))
+  }
+
+  for (const route of settingsRoutes.slice(1)) {
+    assert.match(overview, new RegExp(`data-route="${route}"`))
   }
 })
 

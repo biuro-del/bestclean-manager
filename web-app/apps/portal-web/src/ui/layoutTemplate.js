@@ -29,10 +29,6 @@ export const portalLayoutTemplate = `
         <span>Admin Panel</span>
       </div>
       <form class="login-card" id="loginForm" role="dialog" aria-labelledby="loginTitle" novalidate>
-        <div class="login-card-brand" aria-hidden="true">
-          <img src="/cleanzi-logo-primary.png" alt="" width="309" height="120" />
-          <span>Portal operacyjny</span>
-        </div>
       <div class="login-brand">
         <span class="login-card-kicker">PANEL FIRMY SPRZ&#260;TAJ&#260;CEJ</span>
         <h1 class="login-title" id="loginTitle">Zaloguj si&#281;</h1>
@@ -40,13 +36,10 @@ export const portalLayoutTemplate = `
       </div>
 
       <div id="loginCredentialsPanel">
-        <div class="login-field" id="loginAuthScopeField">
-          <label for="loginAuthScope">Obszar logowania</label>
-          <select id="loginAuthScope" autocomplete="off">
-            <option value="organization">Portal organizacji</option>
-            <option value="platform">Panel admina</option>
-          </select>
-        </div>
+        <select id="loginAuthScope" autocomplete="off" hidden aria-hidden="true" tabindex="-1">
+          <option value="organization">Portal organizacji</option>
+          <option value="platform">Panel admina</option>
+        </select>
 
         <div class="login-field">
           <label for="loginLogin">Email</label>

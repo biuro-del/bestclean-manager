@@ -7448,7 +7448,6 @@ function bindPlatformLogin(router) {
   const loginInput = byId('loginLogin')
   const passwordInput = byId('loginPass')
   const authScope = byId('loginAuthScope')
-  const authScopeField = byId('loginAuthScopeField')
   const passwordToggle = byId('loginPasswordToggle')
   const resetPanel = byId('loginResetPanel')
   const resetEmail = byId('loginResetEmail')
@@ -7536,7 +7535,6 @@ function bindPlatformLogin(router) {
     const isPlatformLogin = selectedAuthScope() === 'platform'
     if (loginScreen) loginScreen.dataset.authScope = isPlatformLogin ? 'platform' : 'organization'
     if (platformHeading) platformHeading.setAttribute('aria-hidden', isPlatformLogin ? 'false' : 'true')
-    if (authScopeField) authScopeField.hidden = !isPlatformLogin
     if (googleButton) googleButton.hidden = isPlatformLogin
     if (googleDivider) googleDivider.hidden = isPlatformLogin
     if (loginCopy && !byId('loginCredentialsPanel')?.hidden) {

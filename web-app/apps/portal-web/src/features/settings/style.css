@@ -1,15 +1,7 @@
-#portalRoot #view-settings .settings-hero {
-  margin-bottom: 18px;
-}
-
 #portalRoot #view-settings .settings-shell {
-  display: grid;
-  grid-template-columns: minmax(220px, 268px) minmax(0, 1fr);
-  gap: 20px;
-  align-items: start;
+  display: block;
 }
 
-#portalRoot #view-settings .settings-sidebar,
 #portalRoot #view-settings .settings-content {
   border: 1px solid var(--portal-quality-border);
   border-radius: var(--portal-quality-radius);
@@ -17,79 +9,9 @@
   box-shadow: var(--portal-quality-shadow);
 }
 
-#portalRoot #view-settings .settings-sidebar {
-  position: sticky;
-  top: 18px;
-  padding: 12px;
-}
-
-#portalRoot #view-settings .settings-navigation,
-#portalRoot #view-settings .settings-nav-group {
-  display: grid;
-  gap: 4px;
-}
-
-#portalRoot #view-settings .settings-nav-group {
-  margin-top: 13px;
-}
-
-#portalRoot #view-settings .settings-nav-group h2 {
-  margin: 0;
-  padding: 6px 10px;
-  color: var(--portal-quality-muted);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.075em;
-  text-transform: uppercase;
-}
-
-#portalRoot #view-settings .settings-nav-item {
-  width: 100%;
-  min-height: 42px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid transparent;
-  border-radius: 11px;
-  padding: 9px 10px;
-  background: transparent;
-  color: var(--portal-quality-text);
-  font: inherit;
-  font-size: 0.88rem;
-  font-weight: 700;
-  text-align: left;
-  cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-}
-
-#portalRoot #view-settings .settings-nav-item > i {
-  width: 20px;
-  color: #7b8497;
-  font-size: 1.15rem;
-  text-align: center;
-}
-
-#portalRoot #view-settings .settings-nav-item:hover {
-  border-color: var(--portal-quality-border-soft);
-  background: var(--portal-quality-surface-soft);
-  color: var(--portal-quality-heading);
-}
-
-#portalRoot #view-settings .settings-nav-item:focus-visible,
-#portalRoot #view-settings .settings-module-card:focus-visible,
-#portalRoot #view-settings #settingsModuleSelect:focus-visible {
+#portalRoot #view-settings .settings-module-card:focus-visible {
   outline: 3px solid rgba(101, 103, 237, 0.24);
   outline-offset: 2px;
-}
-
-#portalRoot #view-settings .settings-nav-item.is-active {
-  border-color: #dcd9ff;
-  background: var(--portal-quality-primary-soft);
-  color: var(--portal-quality-primary-hover);
-}
-
-#portalRoot #view-settings .settings-nav-item.is-active > i {
-  color: var(--portal-quality-primary);
 }
 
 #portalRoot #view-settings .settings-content {
@@ -110,6 +32,43 @@
   gap: 18px;
   padding-bottom: 18px;
   border-bottom: 1px solid var(--portal-quality-border-soft);
+}
+
+#portalRoot #view-settings .settings-module-header-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+#portalRoot #view-settings .settings-back-button {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--portal-quality-border);
+  border-radius: 10px;
+  padding: 8px 13px;
+  background: #fff;
+  color: var(--portal-quality-heading);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+#portalRoot #view-settings .settings-back-button:hover {
+  border-color: #cbc9fa;
+  background: var(--portal-quality-primary-soft);
+  color: var(--portal-quality-primary-hover);
+}
+
+#portalRoot #view-settings .settings-back-button:focus-visible {
+  outline: 3px solid rgba(101, 103, 237, 0.24);
+  outline-offset: 2px;
 }
 
 #portalRoot #view-settings .settings-eyebrow {
@@ -212,8 +171,7 @@
 }
 
 #portalRoot #view-settings .settings-fieldset input,
-#portalRoot #view-settings .settings-fieldset select,
-#portalRoot #view-settings .settings-mobile-navigation select {
+#portalRoot #view-settings .settings-fieldset select {
   width: 100%;
   min-height: 42px;
   box-sizing: border-box;
@@ -618,73 +576,13 @@
   line-height: 1.35;
 }
 
-#portalRoot #view-settings .settings-mobile-navigation {
-  display: none;
-}
-
 @media (max-width: 1020px) {
-  #portalRoot #view-settings .settings-shell {
-    grid-template-columns: 220px minmax(0, 1fr);
-    gap: 14px;
-  }
-
   #portalRoot #view-settings .settings-integration-grid {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 820px) {
-  #portalRoot #view-settings .settings-mobile-navigation {
-    display: grid;
-    gap: 7px;
-    margin-bottom: 14px;
-  }
-
-  #portalRoot #view-settings .settings-mobile-navigation > label {
-    color: var(--portal-quality-text);
-    font-size: 0.78rem;
-    font-weight: 800;
-  }
-
-  #portalRoot #view-settings .settings-select-wrap {
-    position: relative;
-  }
-
-  #portalRoot #view-settings .settings-select-wrap > i:first-child,
-  #portalRoot #view-settings .settings-select-caret {
-    position: absolute;
-    top: 50%;
-    z-index: 1;
-    transform: translateY(-50%);
-    pointer-events: none;
-  }
-
-  #portalRoot #view-settings .settings-select-wrap > i:first-child {
-    left: 13px;
-    color: var(--portal-quality-primary);
-  }
-
-  #portalRoot #view-settings .settings-select-caret {
-    right: 13px;
-    color: var(--portal-quality-muted);
-  }
-
-  #portalRoot #view-settings .settings-mobile-navigation select {
-    appearance: none;
-    min-height: 48px;
-    padding: 10px 40px;
-    background: var(--portal-quality-surface);
-    font-weight: 750;
-  }
-
-  #portalRoot #view-settings .settings-shell {
-    display: block;
-  }
-
-  #portalRoot #view-settings .settings-sidebar {
-    display: none;
-  }
-
   #portalRoot #view-settings .settings-content {
     min-height: 0;
   }
@@ -695,7 +593,6 @@
     padding: 16px;
   }
 
-  #portalRoot #view-settings .settings-module-header,
   #portalRoot #view-settings .settings-action-row,
   #portalRoot #view-settings .settings-plan-card {
     align-items: flex-start;
@@ -703,7 +600,11 @@
   }
 
   #portalRoot #view-settings .settings-module-header {
-    gap: 11px;
+    gap: 12px;
+  }
+
+  #portalRoot #view-settings .settings-module-header-actions {
+    align-items: flex-end;
   }
 
   #portalRoot #view-settings .settings-status {
@@ -731,8 +632,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #portalRoot #view-settings .settings-nav-item,
-  #portalRoot #view-settings .settings-module-card {
+  #portalRoot #view-settings .settings-module-card,
+  #portalRoot #view-settings .settings-back-button {
     transition: none;
   }
 }

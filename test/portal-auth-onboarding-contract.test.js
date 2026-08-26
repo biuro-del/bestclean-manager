@@ -7,6 +7,17 @@ const test = require('node:test')
 
 const root = path.join(__dirname, '..')
 
+test('zwykły panel logowania nie pokazuje logo karty ani wyboru obszaru', () => {
+  const app = fs.readFileSync(path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'ui', 'portalApp.js'), 'utf8')
+  const template = fs.readFileSync(path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'ui', 'layoutTemplate.js'), 'utf8')
+
+  assert.doesNotMatch(template, /class="login-card-brand"/)
+  assert.doesNotMatch(template, /id="loginAuthScopeField"|>Obszar logowania</)
+  assert.match(template, /id="loginAuthScope"[^>]*\bhidden\b[^>]*aria-hidden="true"/)
+  assert.match(app, /requestedPanel === 'admin'/)
+  assert.doesNotMatch(app, /authScopeField\.hidden/)
+})
+
 test('frontend obsługuje Google, weryfikację email i bezpieczny reset hasła Firebase', () => {
   const auth = fs.readFileSync(path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'auth', 'authService.js'), 'utf8')
   assert.match(auth, /new GoogleAuthProvider\(\)/)
