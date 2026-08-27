@@ -14,6 +14,19 @@ function text(value) {
   return String(value ?? '').trim()
 }
 
+const WORKDAY_STOP_PROPOSAL_STATUS_LABELS = {
+  PENDING: 'Weryfikacja',
+  APPROVED: 'Zatwierdzone',
+  CORRECTED: 'Poprawione',
+  REJECTED: 'Odrzucone',
+  SUPERSEDED: 'Nieaktualne',
+}
+
+function workdayStopProposalStatusLabel(value) {
+  const status = text(value).toUpperCase()
+  return WORKDAY_STOP_PROPOSAL_STATUS_LABELS[status] || status || '—'
+}
+
 function dateTime(value) {
   if (!value) return '—'
   const date = new Date(value)
@@ -84,7 +97,7 @@ export function createWorkdayStopProposalsFeature(ctx) {
       <button type="button" data-wsp-proposal-id="${escapeHtml(row.proposalId || row.id)}" aria-current="${selected?.proposal?.proposalId === (row.proposalId || row.id) ? 'true' : 'false'}">
         <strong>${escapeHtml(row.workerName || row.workerLogin || row.workerId)}</strong>
         <small>START: ${escapeHtml(dateTime(row.startAt))} · propozycja: ${escapeHtml(row.proposedStopLocal || dateTime(row.proposedStopAt))}</small>
-        <small>Status: ${escapeHtml(row.status)}</small>
+        <small>Status: ${escapeHtml(workdayStopProposalStatusLabel(row.status))}</small>
       </button>
     `).join('')
   }
@@ -101,7 +114,7 @@ export function createWorkdayStopProposalsFeature(ctx) {
     root.innerHTML = `
       <div class="workday-stop-proposals__facts">
         <div><span>Pracownik</span><strong>${escapeHtml(proposal.workerName || proposal.workerLogin || proposal.workerId)}</strong></div>
-        <div><span>Status</span><strong>${escapeHtml(proposal.status)}</strong></div>
+        <div><span>Status</span><strong>${escapeHtml(workdayStopProposalStatusLabel(proposal.status))}</strong></div>
         <div><span>START</span><strong>${escapeHtml(dateTime(proposal.startAt))}</strong></div>
         <div><span>Proponowany STOP</span><strong>${escapeHtml(proposal.proposedStopLocal || dateTime(proposal.proposedStopAt))}</strong></div>
         <div><span>Wyliczony czas</span><strong>${escapeHtml(duration(proposal.proposedDurationSec))}</strong></div>
