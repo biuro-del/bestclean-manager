@@ -74,6 +74,11 @@ export const portalLayoutTemplate = `
           <span>Nie masz jeszcze konta?</span>
           <button class="login-company-start" id="loginCompanyStart" type="button">Rejestracja firmy</button>
         </div>
+
+        <div class="login-company-entry" id="loginFacilityManagerEntry">
+          <span>Zarządzasz obiektem?</span>
+          <button class="login-company-start" id="loginFacilityManagerStart" type="button">Zarejestruj panel zarządcy</button>
+        </div>
       </div>
 
       <div class="login-company-panel" id="loginCompanyPanel" hidden>
@@ -83,6 +88,19 @@ export const portalLayoutTemplate = `
         <button class="login-company-email-open" id="loginCompanyEmailOpen" type="button">Zarejestruj si&#281; e-mailem</button>
         <p class="login-company-note">Przy rejestracji e-mailem wy&#347;lemy link. Konto zostanie potwierdzone dopiero po jego otwarciu.</p>
         <button class="login-reset-back" id="loginCompanyBack" type="button">Mam ju&#380; konto &mdash; zaloguj si&#281;</button>
+      </div>
+
+      <div class="login-company-panel" id="loginFacilityManagerPanel" hidden>
+        <p class="login-company-lead">Utwórz panel zarządcy obiektu. Dostęp jest bezpłatny i nielimitowany.</p>
+        <div class="login-field">
+          <label for="loginFacilityManagerOrganizationName">Nazwa panelu / organizacji</label>
+          <input id="loginFacilityManagerOrganizationName" type="text" maxlength="120" autocomplete="organization" placeholder="np. Zarządca Osiedla Zielonego" required aria-describedby="loginFacilityManagerNote" />
+        </div>
+        <button class="login-company-google" id="loginFacilityManagerGoogle" type="submit"><i class="ph ph-google-logo" aria-hidden="true"></i><span>Zarejestruj z Google</span></button>
+        <div class="login-company-divider" aria-hidden="true"><span>lub</span></div>
+        <button class="login-company-email-open" id="loginFacilityManagerGoogleLogin" type="button"><i class="ph ph-google-logo" aria-hidden="true"></i><span>Mam już panel — zaloguj z Google</span></button>
+        <p class="login-company-note" id="loginFacilityManagerNote">Teraz utworzysz pusty panel. Pierwszy obiekt dodasz później.</p>
+        <button class="login-reset-back" id="loginFacilityManagerBack" type="button">Wróć do logowania</button>
       </div>
 
       <div class="login-company-email-panel" id="loginCompanyEmailPanel" hidden>

@@ -5124,3 +5124,49 @@ Granice:
 - Nie wykonano migracji bazy, pusha, wdrożenia ani zmiany produkcji.
 - Przed wdrożeniem wymagany jest preflight schematu i uprawnień bazy; bez tabel
   endpoint celowo pozostaje niedostępny zamiast zwracać niepełne dane.
+Data: 2026-08-24
+Autor: AI Codex
+Temat: Lokalny kandydat alertu „Godziny do weryfikacji” na pulpicie
+Powód:
+- Kolejka godzin zawierała zgłoszenia \`PENDING\`, ale karta „Wymaga reakcji” nie
+  informowała o nich ani nie prowadziła do podjęcia decyzji.
+Dodano lokalnie:
+- Alert \`Godziny do weryfikacji (N)\` z liczbą zwróconą przez istniejące API dla
+  \`status=PENDING\`; kliknięcie prowadzi do istniejącej kolejki decyzji.
+- Zawężony odczyt z \`limit=1\`, używający tylko pola \`total\`, bez prezentowania nazw,
+  komentarzy ani innych danych pracowników na pulpicie.
+- Widoczność alertu wyłącznie dla roli z \`capability.canApprove\`; licznik jest
+  odświeżany co minutę oraz natychmiast po podjęciu decyzji w kolejce.
+Weryfikacja:
+- \`node --test test/dashboard-stop-proposal-attention.test.js\` — 3/3 PASS.
+- \`npm --prefix web-app run lint\` — PASS.
+- \`npm run build\` (Node 22) — PASS.
+Granice:
+- Nie zmieniono backendu, API, Firebase/App Hosting configu, migracji ani marketingu.
+- Nie wykonano pusha, wdrożenia, migracji ani zapisu do bazy produkcyjnej.
+
+Data: 2026-08-27
+Autor: AI Codex
+Temat: Kandydat produkcyjny rejestracji panelu zarzadcy przez Google
+Dodano lokalnie:
+- Osobny, Google-only kanal rejestracji zarzadcy z widocznym CTA, nazwa pustego
+  panelu, grantem centralnej bramy przed Firebase Auth, App Check i retry
+  idempotencji.
+- Endpoint App Hosting `POST /api/registration/facility-manager`, ktory wyprowadza
+  tozsamosc wylacznie z Firebase ID tokenu i tworzy transakcyjnie pusty panel
+  `FACILITY_MANAGER`.
+- Polityke sesji `FREE/UNLIMITED` dla aktywnego zarzadcy bez subskrypcji;
+  modul rentownosci pozostaje wylaczony.
+- Addytywna migracje pseudonimowego rejestru Google identity, preflight przed i
+  po migracji oraz waskie uprawnienia `portal_app` bez DELETE.
+- Dokument `docs/facility-manager-google-registration.md` i konfiguracje
+  fail-closed w `.env.example` / App Hosting.
+Weryfikacja lokalna:
+- Testy API, App Check, rate limitera, kontraktu, provisionera i migracji: PASS.
+- Lint oraz build frontendu: PASS.
+- Odczytowy preflight produkcyjnej bazy `iclean-room-database`: PASS; tabela
+  rejestru Google jeszcze nie istniala w chwili sprawdzenia.
+Granice przed aktywacja:
+- Wymagane jest przywrocenie istniejacej wspolnej funkcji
+  `centralRegistrationBeforeUserCreated` jako Firebase Auth `beforeCreate`,
+  rejestracja App Check, sekret HMAC, migracja oraz rollout App Hosting.

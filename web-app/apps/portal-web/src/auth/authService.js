@@ -45,12 +45,16 @@ const CLEANING_COMPANY_EMAIL_LINK_EMAIL_KEY = 'iclean.portal.cleaningCompanyEmai
 const AUTH_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const AUTH_EMAIL_MAX_LENGTH = 160
 const CENTRAL_REGISTRATION_FUNCTIONS_REGION = 'europe-west1'
-const CENTRAL_REGISTRATION_ISSUER_NAME = 'issueCleaningCompanyRegistrationGrant'
+const CLEANING_COMPANY_REGISTRATION_ISSUER_NAME = 'issueCleaningCompanyRegistrationGrant'
+const FACILITY_MANAGER_REGISTRATION_ISSUER_NAME = 'issueFacilityManagerRegistrationGrant'
+const FACILITY_MANAGER_REGISTRATION_ENDPOINT = '/api/registration/facility-manager'
 const GOOGLE_IDENTITY_SCRIPT_URL = 'https://accounts.google.com/gsi/client'
 const CENTRAL_REGISTRATION_ISSUER_READY = String(import.meta.env.VITE_CENTRAL_REGISTRATION_ISSUER_READY ?? '')
   .trim()
   .toLowerCase() === 'true'
 const CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID = String(import.meta.env.VITE_CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID ?? '').trim()
+const FACILITY_MANAGER_ORGANIZATION_NAME_MAX_LENGTH = 120
+const FACILITY_MANAGER_IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,160}$/
 export const CLEANING_COMPANY_LEGAL_DOCUMENTS = Object.freeze({
   terms: Object.freeze({
     documentId: 'terms',
@@ -197,6 +201,48 @@ function normalizeApiBase(value) {
 
 function getAuthApiBase() {
   return normalizeApiBase(import.meta.env.VITE_ADMIN_API_BASE || '/api')
+}
+
+function normalizeFacilityManagerOrganizationName(value) {
+  const raw = typeof value === 'string' ? value : ''
+  const name = (typeof raw.normalize === 'function' ? raw.normalize('NFC') : raw).trim()
+  if (!name || name.length > FACILITY_MANAGER_ORGANIZATION_NAME_MAX_LENGTH) {
+    const error = createPublicAuthError(
+      'FACILITY_MANAGER_ORGANIZATION_NAME_REQUIRED',
+      `Podaj nazwę panelu (maks. ${FACILITY_MANAGER_ORGANIZATION_NAME_MAX_LENGTH} znaków).`,
+    )
+    error.facilityManagerRegistrationValidation = true
+    throw error
+  }
+  return name
+}
+
+function normalizeFacilityManagerIdempotencyKey(value) {
+  const idempotencyKey = toText(value)
+  if (!FACILITY_MANAGER_IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+    const error = createPublicAuthError(
+      'INVALID_FACILITY_MANAGER_IDEMPOTENCY_KEY',
+      'Nie udało się bezpiecznie przygotować rejestracji. Odśwież stronę i spróbuj ponownie.',
+    )
+    error.facilityManagerRegistrationValidation = true
+    throw error
+  }
+  return idempotencyKey
+}
+
+export function createFacilityManagerRegistrationIdempotencyKey() {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return `fm_${globalThis.crypto.randomUUID()}`
+  }
+  if (typeof globalThis.crypto?.getRandomValues !== 'function') {
+    throw createPublicAuthError(
+      'FACILITY_MANAGER_SECURE_RANDOM_UNAVAILABLE',
+      'Ta przeglądarka nie obsługuje bezpiecznej rejestracji. Zaktualizuj ją i spróbuj ponownie.',
+    )
+  }
+  const bytes = new Uint8Array(20)
+  globalThis.crypto.getRandomValues(bytes)
+  return `fm_${Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')}`
 }
 
 export function platformEmailMfaHeaders() {
@@ -600,7 +646,13 @@ function assertCentralRegistrationIssuerReady({ requiresGoogle = false } = {}) {
       'Bezpieczna rejestracja firmy nie jest jeszcze gotowa. Spróbuj ponownie później.',
     )
   }
-  if (requiresGoogle && !CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID) {
+  if (requiresGoogle) {
+    assertGoogleRegistrationIdentityReady()
+  }
+}
+
+function assertGoogleRegistrationIdentityReady() {
+  if (!CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID) {
     throw createPublicAuthError(
       'GOOGLE_REGISTRATION_NOT_READY',
       'Rejestracja przez Google nie jest jeszcze poprawnie skonfigurowana.',
@@ -608,7 +660,7 @@ function assertCentralRegistrationIssuerReady({ requiresGoogle = false } = {}) {
   }
 }
 
-async function requireCleaningCompanyAppCheckToken() {
+async function requireRegistrationAppCheckToken() {
   const appCheckToken = await getFirebaseAppCheckToken()
   if (!appCheckToken) {
     throw createPublicAuthError(
@@ -626,12 +678,14 @@ function issuerErrorText(error) {
     .join(' ')
 }
 
-function mapCentralRegistrationIssuerError(error) {
+function mapCentralRegistrationIssuerError(error, { google = false } = {}) {
   const code = issuerErrorText(error)
   if (code.includes('REGISTRATION_GRANT_ALREADY_ISSUED')) {
     return createPublicAuthError(
       'REGISTRATION_GRANT_ALREADY_ISSUED',
-      'Link rejestracyjny został już przygotowany. Użyj najnowszego linku z wiadomości e-mail albo spróbuj ponownie po jego wygaśnięciu.',
+      google
+        ? 'Rejestracja przez Google jest już przygotowana. Wybierz konto Google ponownie albo spróbuj za chwilę.'
+        : 'Link rejestracyjny został już przygotowany. Użyj najnowszego linku z wiadomości e-mail albo spróbuj ponownie po jego wygaśnięciu.',
     )
   }
   if (code.includes('APP_CHECK') || code.includes('UNAUTHENTICATED')) {
@@ -648,7 +702,7 @@ function mapCentralRegistrationIssuerError(error) {
 
 async function issueCleaningCompanyRegistrationGrant(firebase, payload) {
   assertCentralRegistrationIssuerReady()
-  await requireCleaningCompanyAppCheckToken()
+  await requireRegistrationAppCheckToken()
   if (!firebase?.app) {
     throw createPublicAuthError('FIREBASE_AUTH_UNAVAILABLE', 'Rejestracja firmy jest chwilowo niedostępna.')
   }
@@ -656,11 +710,29 @@ async function issueCleaningCompanyRegistrationGrant(firebase, payload) {
   try {
     const issuer = httpsCallable(
       getFunctions(firebase.app, CENTRAL_REGISTRATION_FUNCTIONS_REGION),
-      CENTRAL_REGISTRATION_ISSUER_NAME,
+      CLEANING_COMPANY_REGISTRATION_ISSUER_NAME,
     )
     await issuer(payload)
   } catch (error) {
     throw mapCentralRegistrationIssuerError(error)
+  }
+}
+
+async function issueFacilityManagerRegistrationGrant(firebase, payload) {
+  assertCentralRegistrationIssuerReady()
+  await requireRegistrationAppCheckToken()
+  if (!firebase?.app) {
+    throw createPublicAuthError('FIREBASE_AUTH_UNAVAILABLE', 'Rejestracja panelu zarządcy jest chwilowo niedostępna.')
+  }
+
+  try {
+    const issuer = httpsCallable(
+      getFunctions(firebase.app, CENTRAL_REGISTRATION_FUNCTIONS_REGION),
+      FACILITY_MANAGER_REGISTRATION_ISSUER_NAME,
+    )
+    await issuer(payload)
+  } catch (error) {
+    throw mapCentralRegistrationIssuerError(error, { google: true })
   }
 }
 
@@ -721,7 +793,19 @@ async function loadGoogleIdentityLibrary() {
 }
 
 async function requestGoogleRegistrationCredential() {
-  assertCentralRegistrationIssuerReady({ requiresGoogle: true })
+  return requestGoogleIdentityCredential({ requireRegistrationIssuer: true })
+}
+
+async function requestGoogleSignInCredential() {
+  return requestGoogleIdentityCredential()
+}
+
+async function requestGoogleIdentityCredential({ requireRegistrationIssuer = false } = {}) {
+  if (requireRegistrationIssuer) {
+    assertCentralRegistrationIssuerReady({ requiresGoogle: true })
+  } else {
+    assertGoogleRegistrationIdentityReady()
+  }
   const googleIdentity = await loadGoogleIdentityLibrary()
   const nonce = createGoogleRegistrationNonce()
 
@@ -842,6 +926,303 @@ export async function startCleaningCompanyGoogleSignIn() {
   })
   const credential = await signInWithCredential(firebase.auth, GoogleAuthProvider.credential(idToken))
   return resolveFreshAuthenticatedUser(credential.user)
+}
+
+function facilityManagerRegistrationError(response, body) {
+  const backendCode = toText(body?.error?.code).toUpperCase()
+  const status = Number(response?.status)
+  let message = 'Nie udało się utworzyć panelu zarządcy. Spróbuj ponownie.'
+
+  if (
+    backendCode === 'ORGANIZATION_NAME_REQUIRED' ||
+    backendCode === 'INVALID_ORGANIZATION_NAME' ||
+    backendCode === 'INVALID_FACILITY_MANAGER_REGISTRATION_PAYLOAD' ||
+    backendCode === 'INVALID_IDEMPOTENCY_KEY'
+  ) {
+    message = `Podaj nazwę panelu (maks. ${FACILITY_MANAGER_ORGANIZATION_NAME_MAX_LENGTH} znaków).`
+  } else if (
+    backendCode === 'FACILITY_MANAGER_GOOGLE_IDENTITY_REQUIRED' ||
+    backendCode === 'FACILITY_MANAGER_GOOGLE_EMAIL_UNVERIFIED'
+  ) {
+    message = 'Użyj konta Google z potwierdzonym adresem e-mail.'
+  } else if (status === 401) {
+    message = 'Sesja Google wygasła. Wybierz konto Google ponownie.'
+  } else if (status === 403) {
+    message = 'To konto Google nie może utworzyć panelu zarządcy.'
+  } else if (status === 404) {
+    message = 'Rejestracja panelu zarządcy nie jest jeszcze dostępna w tym środowisku.'
+  } else if (status === 429) {
+    message = 'Wysłano zbyt wiele prób rejestracji. Spróbuj ponownie później.'
+  } else if (status >= 500) {
+    message = 'Rejestracja panelu zarządcy jest chwilowo niedostępna. Spróbuj ponownie później.'
+  }
+
+  const error = createPublicAuthError(backendCode || 'FACILITY_MANAGER_REGISTRATION_FAILED', message)
+  error.status = status
+  error.facilityManagerRegistrationValidation = [
+    'ORGANIZATION_NAME_REQUIRED',
+    'INVALID_ORGANIZATION_NAME',
+    'INVALID_FACILITY_MANAGER_REGISTRATION_PAYLOAD',
+    'INVALID_IDEMPOTENCY_KEY',
+  ].includes(backendCode)
+  return error
+}
+
+function isFacilityManagerReplayResponse(response, body) {
+  if (Number(response?.status) !== 409) {
+    return false
+  }
+
+  const payload = body?.data && typeof body.data === 'object' ? body.data : body
+  const status = toText(payload?.status).toUpperCase()
+  const code = toText(payload?.code ?? body?.error?.code).toUpperCase()
+  return (
+    ['REPLAYED', 'IDEMPOTENT_REPLAY', 'ALREADY_PROVISIONED', 'ALREADY_REGISTERED', 'COMPLETED', 'READY'].includes(status) ||
+    ['REGISTRATION_REPLAYED', 'IDEMPOTENCY_REPLAY', 'FACILITY_MANAGER_ALREADY_PROVISIONED'].includes(code)
+  )
+}
+
+function mapFacilityManagerGoogleCredentialError(error) {
+  const code = toText(error?.code).toLowerCase()
+  if (
+    code === 'auth/operation-not-allowed' ||
+    code === 'auth/unauthorized-domain' ||
+    code === 'auth/app-not-authorized' ||
+    code === 'auth/invalid-api-key'
+  ) {
+    return createPublicAuthError(
+      'FACILITY_MANAGER_GOOGLE_NOT_CONFIGURED',
+      'Logowanie Google nie jest poprawnie skonfigurowane w tym środowisku.',
+    )
+  }
+  if (code === 'auth/network-request-failed') {
+    return createPublicAuthError(
+      'FACILITY_MANAGER_GOOGLE_NETWORK_ERROR',
+      'Nie udało się połączyć z Google. Sprawdź internet i spróbuj ponownie.',
+    )
+  }
+  if (code === 'auth/account-exists-with-different-credential') {
+    return createPublicAuthError(
+      'FACILITY_MANAGER_GOOGLE_ACCOUNT_CONFLICT',
+      'Ten adres e-mail jest już powiązany z innym sposobem logowania.',
+    )
+  }
+  if (code === 'auth/blocked-by-function') {
+    return createPublicAuthError(
+      'FACILITY_MANAGER_GOOGLE_ACCOUNT_NOT_REGISTERED',
+      'To konto Google nie ma jeszcze panelu zarządcy. Wybierz rejestrację panelu.',
+    )
+  }
+  return createPublicAuthError('FACILITY_MANAGER_GOOGLE_SIGN_IN_FAILED', 'Nie udało się zalogować przez Google. Spróbuj ponownie.')
+}
+
+function isFacilityManagerGoogleUser(user) {
+  if (!toText(user?.uid)) return false
+  return Array.isArray(user?.providerData) && user.providerData.some((provider) => toText(provider?.providerId) === 'google.com')
+}
+
+function markFacilityManagerProvisioningRetryable(error) {
+  const retryableError = error instanceof Error
+    ? error
+    : createPublicAuthError('FACILITY_MANAGER_REGISTRATION_RETRY_FAILED', 'Nie udało się dokończyć tworzenia panelu.')
+  retryableError.facilityManagerRegistrationRetryable = true
+  return retryableError
+}
+
+async function clearFacilityManagerRegistrationUser(firebase) {
+  if (firebase?.auth) {
+    await signOut(firebase.auth).catch(() => {})
+  }
+  localStorage.removeItem(AUTH_STORAGE_KEY)
+  localStorage.removeItem(LAST_ORG_STORAGE_KEY)
+}
+
+async function provisionFacilityManagerGooglePanel(firebase, user, { organizationName, idempotencyKey }) {
+  if (!isFacilityManagerGoogleUser(user)) {
+    throw createPublicAuthError(
+      'FACILITY_MANAGER_GOOGLE_SESSION_REQUIRED',
+      'Zaloguj się kontem Google, które ma zostać właścicielem panelu.',
+    )
+  }
+
+  let firebaseIdToken
+  let appCheckToken
+  try {
+    ;[firebaseIdToken, appCheckToken] = await Promise.all([
+      user.getIdToken(true),
+      requireRegistrationAppCheckToken(),
+    ])
+  } catch (error) {
+    // Firebase has already accepted the account. Keeping that session allows
+    // a transient App Check or token refresh failure to retry the same
+    // idempotent provisioning request without asking the issuer for a grant.
+    throw markFacilityManagerProvisioningRetryable(error)
+  }
+
+  let response
+  try {
+    response = await fetch(FACILITY_MANAGER_REGISTRATION_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${firebaseIdToken}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-Firebase-AppCheck': appCheckToken,
+      },
+      body: JSON.stringify({
+        idempotencyKey,
+        organizationName,
+      }),
+    })
+  } catch {
+    throw markFacilityManagerProvisioningRetryable(
+      createPublicAuthError(
+        'FACILITY_MANAGER_REGISTRATION_NETWORK_ERROR',
+        'Nie udało się połączyć z rejestracją panelu. Sprawdź internet i spróbuj ponownie.',
+      ),
+    )
+  }
+
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok && !isFacilityManagerReplayResponse(response, body)) {
+    const error = facilityManagerRegistrationError(response, body)
+    if (Number(response.status) >= 500) {
+      throw markFacilityManagerProvisioningRetryable(error)
+    }
+    throw error
+  }
+
+  try {
+    // The organization is authoritative on the server. Refresh the Firebase
+    // token once more before the existing session resolver selects its panel.
+    await user.getIdToken(true)
+    return await resolveAuthenticatedContext(user)
+  } catch (error) {
+    // The provisioner may have committed before a response/session refresh
+    // failed. Repeating the same key is safe and the server treats it as a
+    // replay rather than creating a second organization.
+    throw markFacilityManagerProvisioningRetryable(error)
+  }
+}
+
+/**
+ * Signs an already-created facility-manager account in with Google. This path
+ * intentionally never requests a registration grant: Firebase invokes
+ * beforeCreate only for a new account, where the central blocking gate still
+ * rejects any missing grant.
+ */
+export async function signInFacilityManagerWithGoogle() {
+  if (!isFirebaseConfigured()) {
+    throw createPublicAuthError('FIREBASE_NOT_CONFIGURED', 'Logowanie przez Google jest chwilowo niedostępne.')
+  }
+
+  const firebase = ensureFirebase()
+  if (!firebase?.auth) {
+    throw createPublicAuthError('FIREBASE_AUTH_UNAVAILABLE', 'Logowanie przez Google jest chwilowo niedostępne.')
+  }
+
+  await ensureFirebaseAuthPersistence()
+  const { idToken } = await requestGoogleSignInCredential()
+  let credential
+  try {
+    credential = await signInWithCredential(firebase.auth, GoogleAuthProvider.credential(idToken))
+  } catch (error) {
+    throw mapFacilityManagerGoogleCredentialError(error)
+  }
+
+  if (!credential?.user) {
+    throw createPublicAuthError('FACILITY_MANAGER_GOOGLE_USER_MISSING', 'Google nie zwróciło bezpiecznej sesji. Spróbuj ponownie.')
+  }
+  return resolveFreshAuthenticatedUser(credential.user)
+}
+
+/**
+ * Repeats only the idempotent backend provisioning after a prior Google
+ * registration successfully created the Firebase account. It never invokes
+ * the registration issuer and therefore cannot mint a grant for a new user.
+ */
+export async function retryFacilityManagerGoogleRegistration({ organizationName, idempotencyKey } = {}) {
+  const normalizedOrganizationName = normalizeFacilityManagerOrganizationName(organizationName)
+  const normalizedIdempotencyKey = normalizeFacilityManagerIdempotencyKey(idempotencyKey)
+
+  if (!isFirebaseConfigured()) {
+    throw createPublicAuthError('FIREBASE_NOT_CONFIGURED', 'Rejestracja przez Google jest chwilowo niedostępna.')
+  }
+
+  const firebase = ensureFirebase()
+  if (!firebase?.auth) {
+    throw createPublicAuthError('FIREBASE_AUTH_UNAVAILABLE', 'Rejestracja przez Google jest chwilowo niedostępna.')
+  }
+
+  await ensureFirebaseAuthPersistence()
+  const user = firebase.auth.currentUser || (await waitForFirebaseAuthReady())
+  try {
+    return await provisionFacilityManagerGooglePanel(firebase, user, {
+      organizationName: normalizedOrganizationName,
+      idempotencyKey: normalizedIdempotencyKey,
+    })
+  } catch (error) {
+    if (error?.facilityManagerRegistrationRetryable === true) {
+      throw error
+    }
+    await clearFacilityManagerRegistrationUser(firebase)
+    throw error
+  }
+}
+
+/**
+ * Creates a facility-manager panel after the user has selected an account in
+ * Google Identity Services. The API derives the owner identity exclusively
+ * from the Firebase ID token; the browser submits no uid, e-mail, plan or
+ * object data.
+ */
+export async function registerFacilityManagerWithGoogle({ organizationName, idempotencyKey } = {}) {
+  const normalizedOrganizationName = normalizeFacilityManagerOrganizationName(organizationName)
+  const normalizedIdempotencyKey = normalizeFacilityManagerIdempotencyKey(idempotencyKey)
+
+  if (!isFirebaseConfigured()) {
+    throw createPublicAuthError('FIREBASE_NOT_CONFIGURED', 'Rejestracja przez Google jest chwilowo niedostępna.')
+  }
+
+  const firebase = ensureFirebase()
+  if (!firebase?.auth) {
+    throw createPublicAuthError('FIREBASE_AUTH_UNAVAILABLE', 'Rejestracja przez Google jest chwilowo niedostępna.')
+  }
+
+  await ensureFirebaseAuthPersistence()
+  const { idToken: googleIdToken, nonce } = await requestGoogleRegistrationCredential()
+  // The central beforeCreate gate consumes this manager grant when Firebase
+  // creates the Google user. Do not move the sign-in before this call.
+  await issueFacilityManagerRegistrationGrant(firebase, {
+    providerId: 'google.com',
+    googleIdToken,
+    googleNonce: nonce,
+  })
+  let user = null
+
+  try {
+    let credential
+    try {
+      credential = await signInWithCredential(firebase.auth, GoogleAuthProvider.credential(googleIdToken))
+    } catch (error) {
+      throw mapFacilityManagerGoogleCredentialError(error)
+    }
+    user = credential?.user
+    if (!user) {
+      throw createPublicAuthError('FACILITY_MANAGER_GOOGLE_USER_MISSING', 'Google nie zwróciło bezpiecznej sesji. Spróbuj ponownie.')
+    }
+
+    return await provisionFacilityManagerGooglePanel(firebase, user, {
+      organizationName: normalizedOrganizationName,
+      idempotencyKey: normalizedIdempotencyKey,
+    })
+  } catch (error) {
+    if (user && error?.facilityManagerRegistrationRetryable === true) {
+      throw error
+    }
+    await clearFacilityManagerRegistrationUser(firebase)
+    throw error
+  }
 }
 
 export async function requestCleaningCompanyEmailLink(emailValue) {

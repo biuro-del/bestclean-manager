@@ -10,6 +10,7 @@ import {
   completeMfaSignIn,
   completePhoneMfaEnrollment,
   completeTotpEnrollment,
+  createFacilityManagerRegistrationIdempotencyKey,
   ensureSessionContext,
   getOrganizationProfile,
   getCleaningCompanyLegalDocuments,
@@ -25,11 +26,14 @@ import {
   requestPasswordReset,
   requestEmailVerification,
   requestPlatformEmailMfaCode,
+  registerFacilityManagerWithGoogle,
+  retryFacilityManagerGoogleRegistration,
   requireAuth,
   saveOrganizationProfile,
   saveSession,
   selectOrganization,
   setOrganizationAuthScope,
+  signInFacilityManagerWithGoogle,
   startCleaningCompanyGoogleSignIn,
   verifyPlatformEmailMfaCode,
 } from '../auth/authService'
@@ -118,6 +122,7 @@ let cleaningCompanyOnboardingCommandId = ''
 let cleaningCompanyRegistrationAvailable = false
 let cleaningCompanyRegistrationAvailabilityRequest = 0
 let loginControlsBusy = false
+let pendingFacilityManagerRegistration = null
 let calendarRemoteSaveTimer = 0
 let sidebarGlobalSearchResults = []
 let sidebarGlobalSearchActiveIndex = -1
@@ -3763,6 +3768,7 @@ function hideLoginCompanyPanels() {
     'loginCompanyPanel',
     'loginCompanyEmailPanel',
     'loginCompanyEmailLinkPanel',
+    'loginFacilityManagerPanel',
   ].forEach((id) => {
     const panel = document.getElementById(id)
     if (panel) panel.hidden = true
@@ -3792,6 +3798,35 @@ function showLoginCompanyStart() {
   setLoginResetActionVisible(false)
   if (title) title.textContent = 'Rejestracja firmy'
   if (copy) copy.textContent = 'Wybierz bezpieczny sposób rozpoczęcia rejestracji.'
+}
+
+function normalizedFacilityManagerRegistrationName(value) {
+  const source = String(value ?? '')
+  return (typeof source.normalize === 'function' ? source.normalize('NFC') : source).trim()
+}
+
+function clearFacilityManagerRegistrationAttempt() {
+  pendingFacilityManagerRegistration = null
+  if (!loginControlsBusy) {
+    const input = document.getElementById('loginFacilityManagerOrganizationName')
+    const button = document.getElementById('loginFacilityManagerGoogle')
+    if (input) input.disabled = false
+    if (button) button.innerHTML = '<i class="ph ph-google-logo" aria-hidden="true"></i><span>Zarejestruj z Google</span>'
+  }
+}
+
+function showLoginFacilityManagerRegistration() {
+  hideLoginStandardPanels()
+  hideLoginCompanyPanels()
+  const panel = document.getElementById('loginFacilityManagerPanel')
+  const input = document.getElementById('loginFacilityManagerOrganizationName')
+  const title = document.getElementById('loginTitle')
+  const copy = document.getElementById('loginCopy')
+  if (panel) panel.hidden = false
+  setLoginResetActionVisible(false)
+  if (title) title.textContent = 'Panel zarządcy obiektu'
+  if (copy) copy.textContent = 'Utwórz bezpłatny panel i zacznij zarządzać obiektami.'
+  window.setTimeout(() => input?.focus(), 0)
 }
 
 function showLoginCompanyEmailRegistration(email = '') {
@@ -4220,6 +4255,8 @@ function setLoginControlsBusy(isBusy, label = '') {
   const organizationButtons = document.querySelectorAll('.login-organization-option')
   const companyEmailSend = document.getElementById('loginCompanyEmailSend')
   const companyEmailLinkConfirm = document.getElementById('loginCompanyEmailLinkConfirm')
+  const facilityManagerGoogle = document.getElementById('loginFacilityManagerGoogle')
+  const facilityManagerGoogleLogin = document.getElementById('loginFacilityManagerGoogleLogin')
 
   if (loginButton) {
     loginButton.disabled = isBusy
@@ -4253,9 +4290,14 @@ function setLoginControlsBusy(isBusy, label = '') {
   ;[
     'loginCompanyStart', 'loginCompanyGoogle', 'loginCompanyEmailOpen', 'loginCompanyBack',
     'loginCompanyEmail', 'loginCompanyEmailBack', 'loginCompanyEmailLink',
+    'loginFacilityManagerStart', 'loginFacilityManagerBack', 'loginFacilityManagerOrganizationName', 'loginFacilityManagerGoogleLogin',
   ].forEach((id) => {
     const control = document.getElementById(id)
-    if (control) control.disabled = isBusy || (id === 'loginCompanyStart' && !cleaningCompanyRegistrationAvailable)
+    if (control) {
+      control.disabled = isBusy ||
+        (id === 'loginCompanyStart' && !cleaningCompanyRegistrationAvailable) ||
+        (id === 'loginFacilityManagerOrganizationName' && pendingFacilityManagerRegistration?.retryProvisioning === true)
+    }
   })
   if (companyEmailSend) {
     companyEmailSend.disabled = isBusy
@@ -4264,6 +4306,17 @@ function setLoginControlsBusy(isBusy, label = '') {
   if (companyEmailLinkConfirm) {
     companyEmailLinkConfirm.disabled = isBusy
     companyEmailLinkConfirm.textContent = isBusy ? label || 'Potwierdzanie...' : 'Potwierdź email'
+  }
+  if (facilityManagerGoogle) {
+    facilityManagerGoogle.disabled = isBusy
+    facilityManagerGoogle.innerHTML = isBusy
+      ? '<i class="ph ph-spinner-gap" aria-hidden="true"></i><span>Łączenie z Google...</span>'
+      : pendingFacilityManagerRegistration?.retryProvisioning === true
+        ? '<i class="ph ph-arrow-clockwise" aria-hidden="true"></i><span>Ponów utworzenie panelu</span>'
+        : '<i class="ph ph-google-logo" aria-hidden="true"></i><span>Zarejestruj z Google</span>'
+  }
+  if (facilityManagerGoogleLogin) {
+    facilityManagerGoogleLogin.disabled = isBusy
   }
   organizationButtons.forEach((button) => {
     button.disabled = isBusy
@@ -7516,6 +7569,11 @@ function bindPlatformLogin(router) {
   const companyEmailLink = byId('loginCompanyEmailLink')
   const companyEmailPanel = byId('loginCompanyEmailPanel')
   const companyEmailLinkPanel = byId('loginCompanyEmailLinkPanel')
+  const facilityManagerStart = byId('loginFacilityManagerStart')
+  const facilityManagerPanel = byId('loginFacilityManagerPanel')
+  const facilityManagerOrganizationName = byId('loginFacilityManagerOrganizationName')
+  const facilityManagerGoogleLogin = byId('loginFacilityManagerGoogleLogin')
+  const facilityManagerBack = byId('loginFacilityManagerBack')
   const companyBasicsForm = byId('companyBasicsForm')
   const companyBasicsSignOut = byId('companyBasicsSignOut')
   if (!loginButton || !loginInput || !passwordInput || !resetPanel || !resetEmail || !resetSend || !resetBack || !resetOpen) return () => {}
@@ -7591,6 +7649,33 @@ function bindPlatformLogin(router) {
     await activatePortalSession(result.session, router)
   }
 
+  const clearRegistrationAttemptWhenNameChanges = () => {
+    const currentName = normalizedFacilityManagerRegistrationName(facilityManagerOrganizationName?.value)
+    if (pendingFacilityManagerRegistration?.organizationName !== currentName) {
+      clearFacilityManagerRegistrationAttempt()
+    }
+    setLoginError('')
+  }
+
+  const prepareFacilityManagerRegistrationAttempt = () => {
+    const organizationName = normalizedFacilityManagerRegistrationName(facilityManagerOrganizationName?.value)
+    if (!organizationName || organizationName.length > 120) {
+      clearFacilityManagerRegistrationAttempt()
+      const error = new Error('Podaj nazwę panelu (maks. 120 znaków).')
+      error.facilityManagerRegistrationValidation = true
+      throw error
+    }
+
+    if (pendingFacilityManagerRegistration?.organizationName !== organizationName) {
+      pendingFacilityManagerRegistration = {
+        organizationName,
+        idempotencyKey: createFacilityManagerRegistrationIdempotencyKey(),
+      }
+    }
+
+    return pendingFacilityManagerRegistration
+  }
+
   const cancelFlow = () => {
     logout()
     pendingMfaChallenge = null
@@ -7660,6 +7745,71 @@ function bindPlatformLogin(router) {
       clearStoredCurrentRoute()
       showLoginScreen()
       showLoginCompanyStart()
+      setLoginError(formatLoginError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const handleFacilityManagerGoogle = async (event) => {
+    event?.preventDefault?.()
+
+    let attempt
+    try {
+      attempt = prepareFacilityManagerRegistrationAttempt()
+    } catch (error) {
+      setLoginError(formatLoginError(error))
+      return
+    }
+
+    setLoginControlsBusy(
+      true,
+      attempt.retryProvisioning === true ? 'Tworzenie panelu...' : 'Łączenie z Google...',
+    )
+    setLoginError('')
+    try {
+      const result = attempt.retryProvisioning === true
+        ? await retryFacilityManagerGoogleRegistration({
+          organizationName: attempt.organizationName,
+          idempotencyKey: attempt.idempotencyKey,
+        })
+        : await registerFacilityManagerWithGoogle({
+          organizationName: attempt.organizationName,
+          idempotencyKey: attempt.idempotencyKey,
+        })
+      clearFacilityManagerRegistrationAttempt()
+      await continueResult(result)
+    } catch (error) {
+      if (error?.facilityManagerRegistrationValidation === true) {
+        clearFacilityManagerRegistrationAttempt()
+      }
+      if (error?.facilityManagerRegistrationRetryable === true) {
+        pendingFacilityManagerRegistration = { ...attempt, retryProvisioning: true }
+        showLoginFacilityManagerRegistration()
+        setLoginError(formatLoginError(error))
+        return
+      }
+      logout()
+      resetPortalState()
+      clearStoredCurrentRoute()
+      showLoginScreen()
+      showLoginFacilityManagerRegistration()
+      setLoginError(formatLoginError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
+  }
+  const handleFacilityManagerGoogleLogin = async () => {
+    setLoginControlsBusy(true, 'Łączenie z Google...')
+    setLoginError('')
+    try {
+      clearFacilityManagerRegistrationAttempt()
+      await continueResult(await signInFacilityManagerWithGoogle())
+    } catch (error) {
+      logout()
+      resetPortalState()
+      clearStoredCurrentRoute()
+      showLoginScreen()
+      showLoginFacilityManagerRegistration()
       setLoginError(formatLoginError(error))
     } finally {
       setLoginControlsBusy(false)
@@ -8066,6 +8216,7 @@ function bindPlatformLogin(router) {
     }
   }
   const submit = (event) => {
+    if (facilityManagerPanel && !facilityManagerPanel.hidden) return void handleFacilityManagerGoogle(event)
     if (!resetPanel.hidden) return void handleReset(event)
     if (companyEmailLinkPanel && !companyEmailLinkPanel.hidden) return void handleCompanyEmailLinkConfirm(event)
     if (companyEmailPanel && !companyEmailPanel.hidden) return void handleCompanyEmailSend(event)
@@ -8088,6 +8239,10 @@ function bindPlatformLogin(router) {
     setLoginError('')
     showLoginCompanyStart()
   }
+  const openFacilityManagerRegistration = () => {
+    setLoginError('')
+    showLoginFacilityManagerRegistration()
+  }
   const openCompanyEmail = () => {
     setLoginError('')
     showLoginCompanyEmailRegistration(loginInput.value)
@@ -8098,6 +8253,13 @@ function bindPlatformLogin(router) {
     showLoginCompanyStart()
   }
   const returnToLogin = () => {
+    setLoginError('')
+    showLoginCredentials()
+    loginInput.focus()
+  }
+  const returnFacilityManagerToLogin = () => {
+    clearFacilityManagerRegistrationAttempt()
+    if (facilityManagerOrganizationName) facilityManagerOrganizationName.value = ''
     setLoginError('')
     showLoginCredentials()
     loginInput.focus()
@@ -8151,10 +8313,14 @@ function bindPlatformLogin(router) {
   confirmEnrollment?.addEventListener('click', finishEnrollment)
   cancelEnrollment?.addEventListener('click', cancelFlow)
   companyStart?.addEventListener('click', openCompanyStart)
+  facilityManagerStart?.addEventListener('click', openFacilityManagerRegistration)
   companyGoogle?.addEventListener('click', handleCompanyGoogle)
+  facilityManagerGoogleLogin?.addEventListener('click', handleFacilityManagerGoogleLogin)
   companyEmailOpen?.addEventListener('click', openCompanyEmail)
   companyBack?.addEventListener('click', returnToLogin)
   companyEmailBack?.addEventListener('click', returnToCompanyStart)
+  facilityManagerBack?.addEventListener('click', returnFacilityManagerToLogin)
+  facilityManagerOrganizationName?.addEventListener('input', clearRegistrationAttemptWhenNameChanges)
   companyBasicsForm?.addEventListener('submit', handleCompanyBasicsSubmit)
   companyBasicsSignOut?.addEventListener('click', handleCompanyBasicsSignOut)
   return () => {
@@ -8193,10 +8359,14 @@ function bindPlatformLogin(router) {
     confirmEnrollment?.removeEventListener('click', finishEnrollment)
     cancelEnrollment?.removeEventListener('click', cancelFlow)
     companyStart?.removeEventListener('click', openCompanyStart)
+    facilityManagerStart?.removeEventListener('click', openFacilityManagerRegistration)
     companyGoogle?.removeEventListener('click', handleCompanyGoogle)
+    facilityManagerGoogleLogin?.removeEventListener('click', handleFacilityManagerGoogleLogin)
     companyEmailOpen?.removeEventListener('click', openCompanyEmail)
     companyBack?.removeEventListener('click', returnToLogin)
     companyEmailBack?.removeEventListener('click', returnToCompanyStart)
+    facilityManagerBack?.removeEventListener('click', returnFacilityManagerToLogin)
+    facilityManagerOrganizationName?.removeEventListener('input', clearRegistrationAttemptWhenNameChanges)
     companyBasicsForm?.removeEventListener('submit', handleCompanyBasicsSubmit)
     companyBasicsSignOut?.removeEventListener('click', handleCompanyBasicsSignOut)
   }

@@ -71,3 +71,39 @@ test('START pozostaje dostępny w portalu, ale bez capability rentowności', () 
   assert.equal(buildSessionContext('UID-1', start).capabilities.profitabilityModule.enabled, false)
   assert.equal(buildSessionContext('UID-1', start).capabilities.profitabilityModule.canRead, false)
 })
+
+test('active facility-manager OWNER without subscription gets free unlimited access', () => {
+  const manager = row({
+    organization_kind: 'FACILITY_MANAGER',
+    plan_code: null,
+    subscription_status: null,
+    current_period_ends_at: null,
+  })
+
+  assert.deepEqual(evaluateOrganizationAccess(manager), { allowed: true, code: 'ACCESS_ALLOWED' })
+
+  const context = buildSessionContext('UID-1', manager)
+  assert.equal(context.planCode, 'FREE')
+  assert.equal(context.subscriptionStatus, 'UNLIMITED')
+  assert.equal(context.subscriptionEndsAt, '')
+  assert.deepEqual(context.capabilities.profitabilityModule, {
+    enabled: false,
+    canRead: false,
+    canEdit: false,
+    readCode: 'PROFITABILITY_PLAN_REQUIRED',
+    editCode: 'PROFITABILITY_PLAN_REQUIRED',
+  })
+})
+
+test('missing subscription does not extend cleaning-provider access', () => {
+  const provider = row({
+    organization_kind: 'CLEANING_PROVIDER',
+    plan_code: null,
+    subscription_status: null,
+  })
+
+  assert.deepEqual(evaluateOrganizationAccess(provider), {
+    allowed: false,
+    code: 'SUBSCRIPTION_MISSING',
+  })
+})

@@ -52,6 +52,38 @@ env:
     value: "true"
     availability:
       - RUNTIME
+  # Facility-manager self-registration is a separate, Google-only channel.
+  # The HMAC key remains server-side; App Check is required for every request.
+  - variable: FACILITY_MANAGER_REGISTRATION_ENABLED
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: FACILITY_MANAGER_REGISTRATION_HMAC_SECRET
+    secret: FACILITY_MANAGER_REGISTRATION_HMAC_SECRET
+    availability:
+      - RUNTIME
+  - variable: FACILITY_MANAGER_REGISTRATION_APP_CHECK_APP_IDS
+    value: "1:1080573912983:web:d64286e3776c009788c6d2"
+    availability:
+      - RUNTIME
+  # Abuse counters share the named production database used by the central
+  # registration gate. Never silently fall back to the default database.
+  - variable: PORTAL_FIRESTORE_DATABASE_ID
+    value: cleanzi-portal-eu
+    availability:
+      - RUNTIME
+  - variable: FACILITY_MANAGER_REGISTRATION_ABUSE_COLLECTION
+    value: "cleanziFacilityManagerRegistrationAbuseCounters"
+    availability:
+      - RUNTIME
+  - variable: FACILITY_MANAGER_REGISTRATION_RATE_WINDOW_MS
+    value: "900000"
+    availability:
+      - RUNTIME
+  - variable: FACILITY_MANAGER_REGISTRATION_RATE_MAX_ATTEMPTS
+    value: "5"
+    availability:
+      - RUNTIME
   - variable: API_PROXY_TARGET
     secret: CLEANZI_API_PROXY_TARGET
   - variable: VITE_FIREBASE_API_KEY

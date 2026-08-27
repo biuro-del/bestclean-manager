@@ -48,6 +48,12 @@ const {
   normalizeFirebaseAccountCreatedAt,
 } = require('./firebase-rest-token-policy')
 const { getAppCheck } = require('firebase-admin/app-check')
+const { getFirestore: getAdminFirestore } = require('firebase-admin/firestore')
+const { createFacilityManagerRegistrationService } = require('./facility-manager-registration-service')
+const { createFacilityManagerRegistrationApi } = require('./facility-manager-registration-api')
+const { createFacilityManagerRegistrationGate } = require('./facility-manager-registration-gate')
+const { createFacilityManagerFirebaseAppCheckGate } = require('./facility-manager-registration-app-check')
+const { createFacilityManagerFirestoreRateGate } = require('./facility-manager-registration-firestore-rate-gate')
 const {
   CLEANING_COMPANY_ONBOARDING_REQUIRED,
   CleaningCompanyOnboardingError,
@@ -157,6 +163,7 @@ const PORTAL_COMPANY_REGISTRY_PATH = '/api/portal/company-registry/lookup'
 const STRIPE_WEBHOOK_PATH = '/api/billing/stripe/webhook'
 const CLEANING_COMPANY_ONBOARDING_LEGAL_DOCUMENTS_PATH = '/api/registration/cleaning-company/legal-documents'
 const CLEANING_COMPANY_ONBOARDING_PROVISION_PATH = '/api/registration/cleaning-company/provision'
+const FACILITY_MANAGER_REGISTRATION_PATH = '/api/registration/facility-manager'
 const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
 const PORTAL_JOB_CARDS_PATH = '/api/portal/job-cards'
@@ -197,6 +204,30 @@ const FIREBASE_STORAGE_BUCKET = String(
 const PLATFORM_FIREBASE_PROJECT_ID = String(process.env.PLATFORM_FIREBASE_PROJECT_ID || '').trim()
 const PLATFORM_FIREBASE_WEB_API_KEY = String(process.env.PLATFORM_FIREBASE_WEB_API_KEY || '').trim()
 const PLATFORM_FIREBASE_ADMIN_APP_NAME = 'cleanzi-platform-admin'
+const FACILITY_MANAGER_REGISTRATION_HMAC_SECRET = String(
+  process.env.FACILITY_MANAGER_REGISTRATION_HMAC_SECRET || '',
+).trim()
+const FACILITY_MANAGER_REGISTRATION_ENABLED = isTrue(
+  process.env.FACILITY_MANAGER_REGISTRATION_ENABLED,
+)
+const FACILITY_MANAGER_REGISTRATION_APP_CHECK_APP_IDS = String(
+  process.env.FACILITY_MANAGER_REGISTRATION_APP_CHECK_APP_IDS || '',
+)
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean)
+const FACILITY_MANAGER_REGISTRATION_ABUSE_COLLECTION = String(
+  process.env.FACILITY_MANAGER_REGISTRATION_ABUSE_COLLECTION ||
+    'cleanziFacilityManagerRegistrationAbuseCounters',
+).trim()
+const FACILITY_MANAGER_REGISTRATION_RATE_WINDOW_MS = Number(
+  process.env.FACILITY_MANAGER_REGISTRATION_RATE_WINDOW_MS || 15 * 60 * 1000,
+)
+const FACILITY_MANAGER_REGISTRATION_RATE_MAX_ATTEMPTS = Number(
+  process.env.FACILITY_MANAGER_REGISTRATION_RATE_MAX_ATTEMPTS || 5,
+)
+const PORTAL_FIRESTORE_DATABASE_ID = String(process.env.PORTAL_FIRESTORE_DATABASE_ID || '').trim()
+const PORTAL_PRODUCTION_FIRESTORE_DATABASE_ID = 'cleanzi-portal-eu'
 const CLOUD_SQL_CONNECTION_NAME = String(
   process.env.CLOUD_SQL_CONNECTION_NAME ||
     process.env.INSTANCE_CONNECTION_NAME ||
@@ -209,6 +240,10 @@ let platformFirebaseAdminInitialized = false
 let dbPool = null
 let cloudSqlConnector = null
 let cloudSqlOptionsPromise = null
+let facilityManagerRegistrationServicePromise = null
+let facilityManagerFirestoreRateGatePromise = null
+let facilityManagerRegistrationFirestorePromise = null
+let facilityManagerFirebaseAppCheckGatePromise = null
 
 const MIME_BY_EXT = {
   '.css': 'text/css; charset=utf-8',
@@ -4113,6 +4148,7 @@ async function getRequesterMemberships(client, uid, orgId = '') {
        m.status as membership_status,
        m.created_at as membership_created_at,
        o.name as organization_name,
+       o.organization_kind,
        o.status as organization_status,
        o.onboarding_status,
        o.deleted_at as organization_deleted_at,
@@ -7411,6 +7447,107 @@ async function handleCleaningCompanyProvisionRequest(req, res) {
   }
 }
 
+async function getFacilityManagerRegistrationService() {
+  if (!facilityManagerRegistrationServicePromise) {
+    facilityManagerRegistrationServicePromise = Promise.all([
+      import('./registration-functions/src/facility-manager-google-registration-contract.js'),
+      import('./registration-functions/src/postgres-facility-manager-provisioner.js'),
+    ]).then(([
+      { createFacilityManagerGoogleRegistrationCommand },
+      { createPostgresFacilityManagerProvisioner },
+    ]) => createFacilityManagerRegistrationService({
+      hmacKey: FACILITY_MANAGER_REGISTRATION_HMAC_SECRET,
+      createCommand: createFacilityManagerGoogleRegistrationCommand,
+      createProvisioner: createPostgresFacilityManagerProvisioner,
+    }))
+  }
+  return facilityManagerRegistrationServicePromise
+}
+
+async function getFacilityManagerFirestoreRateGate() {
+  if (!facilityManagerFirestoreRateGatePromise) {
+    facilityManagerFirestoreRateGatePromise = import(
+      './registration-functions/src/facility-manager-firestore-abuse-guard.js',
+    ).then(({ createFacilityManagerFirestoreAbuseGuard }) => createFacilityManagerFirestoreRateGate({
+      createAbuseGuard: createFacilityManagerFirestoreAbuseGuard,
+      getFirestore: () => getFacilityManagerRegistrationFirestore(),
+      hmacKey: FACILITY_MANAGER_REGISTRATION_HMAC_SECRET,
+      collectionName: FACILITY_MANAGER_REGISTRATION_ABUSE_COLLECTION,
+      windowMs: FACILITY_MANAGER_REGISTRATION_RATE_WINDOW_MS,
+      maxAttemptsPerSubject: FACILITY_MANAGER_REGISTRATION_RATE_MAX_ATTEMPTS,
+    }))
+  }
+  return facilityManagerFirestoreRateGatePromise
+}
+
+function getFacilityManagerRegistrationFirestore() {
+  if (!facilityManagerRegistrationFirestorePromise) {
+    facilityManagerRegistrationFirestorePromise = Promise.resolve().then(() => {
+      const databaseId = PORTAL_FIRESTORE_DATABASE_ID
+      if (
+        !databaseId ||
+        (databaseId !== '(default)' && !/^[a-z][a-z0-9-]{2,62}$/.test(databaseId))
+      ) {
+        throw new Error('FACILITY_MANAGER_FIRESTORE_DATABASE_ID_INVALID')
+      }
+
+      const projectId = normalizeText(
+        process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || FIREBASE_PROJECT_ID,
+      )
+      if (projectId === 'iclean-room' && databaseId !== PORTAL_PRODUCTION_FIRESTORE_DATABASE_ID) {
+        throw new Error('FACILITY_MANAGER_PRODUCTION_FIRESTORE_DATABASE_MISMATCH')
+      }
+
+      return getAdminFirestore(ensureFirebaseAdmin().app(), databaseId)
+    })
+  }
+  return facilityManagerRegistrationFirestorePromise
+}
+
+async function getFacilityManagerFirebaseAppCheckGate() {
+  if (!facilityManagerFirebaseAppCheckGatePromise) {
+    facilityManagerFirebaseAppCheckGatePromise = Promise.resolve().then(() =>
+      createFacilityManagerFirebaseAppCheckGate({
+        appCheck: getAppCheck(ensureFirebaseAdmin().app()),
+        allowedAppIds: FACILITY_MANAGER_REGISTRATION_APP_CHECK_APP_IDS,
+      }),
+    )
+  }
+  return facilityManagerFirebaseAppCheckGatePromise
+}
+
+const facilityManagerRegistrationGate = createFacilityManagerRegistrationGate({
+  enabled: FACILITY_MANAGER_REGISTRATION_ENABLED,
+  rateGate: {
+    async assertAllowed(input) {
+      return (await getFacilityManagerFirestoreRateGate()).assertAllowed(input)
+    },
+  },
+  appCheckGate: {
+    async assertAllowed(input) {
+      return (await getFacilityManagerFirebaseAppCheckGate()).assertAllowed(input)
+    },
+  },
+})
+
+const facilityManagerRegistrationApi = createFacilityManagerRegistrationApi({
+  connectDbClient,
+  facilityManagerRegistrationGate,
+  getFacilityManagerRegistrationService,
+  mapDatabaseConnectionError,
+  mapFirebaseAdminError,
+  parseBearerToken,
+  readJsonBody,
+  sendApiError,
+  sendJson,
+  verifyFirebaseIdToken,
+  normalizeText,
+})
+
+async function handleFacilityManagerRegistrationRequest(req, res) {
+  return facilityManagerRegistrationApi.handleRegisterRequest(req, res)
+}
+
 async function handleAuthSessionContextRequest(req, res, requestUrl) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
@@ -10337,6 +10474,13 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   if (requestUrl.pathname === CLEANING_COMPANY_ONBOARDING_PROVISION_PATH) {
     handleCleaningCompanyProvisionRequest(req, res).catch((error) => {
       sendApiError(res, 500, 'CLEANING_COMPANY_ONBOARDING_ERROR', error?.message || 'Unexpected onboarding error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === FACILITY_MANAGER_REGISTRATION_PATH) {
+    handleFacilityManagerRegistrationRequest(req, res).catch(() => {
+      sendApiError(res, 500, 'FACILITY_MANAGER_REGISTRATION_ERROR', 'Nie udało się utworzyć panelu zarządcy.')
     })
     return
   }

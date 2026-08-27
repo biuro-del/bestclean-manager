@@ -99,6 +99,14 @@ function isKnownPortalRole(value) {
   ].includes(toStatus(value))
 }
 
+function isSubscriptionlessFacilityManager(row) {
+  return (
+    toStatus(row?.organization_kind) === 'FACILITY_MANAGER' &&
+    !toStatus(row?.plan_code) &&
+    !toStatus(row?.subscription_status)
+  )
+}
+
 function deny(code) {
   return { allowed: false, code }
 }
@@ -140,6 +148,12 @@ function evaluateOrganizationAccess(row, now = new Date()) {
     return deny('PORTAL_ROLE_MISSING')
   }
 
+  // Facility managers have a product-level, non-billed entitlement. This runs
+  // after membership/worker/role checks, so it cannot bypass portal security.
+  if (isSubscriptionlessFacilityManager(row)) {
+    return { allowed: true, code: 'ACCESS_ALLOWED' }
+  }
+
   const subscriptionAccess = evaluateSubscriptionAccess({
     planCode: row.plan_code,
     status: row.subscription_status,
@@ -156,7 +170,7 @@ function buildOrganizationSummary(row) {
     organizationName: toText(row.organization_name),
     role: toStatus(row.role),
     onboardingStatus: toStatus(row.onboarding_status),
-    planCode: normalizePlanCode(row.plan_code),
+    planCode: isSubscriptionlessFacilityManager(row) ? 'FREE' : normalizePlanCode(row.plan_code),
   }
 }
 
@@ -170,11 +184,16 @@ function toIsoTimestamp(value) {
 }
 
 function buildSessionContext(uid, row) {
+  const facilityManagerFreeAccess = isSubscriptionlessFacilityManager(row)
   const rawPlanCode = toStatus(row.plan_code)
-  const planCode = normalizePlanCode(rawPlanCode)
-  const entitlements = resolvePlanEntitlements(planCode)
+  const normalizedPlanCode = normalizePlanCode(rawPlanCode)
+  const planCode = facilityManagerFreeAccess ? 'FREE' : normalizedPlanCode
+  const entitlements = resolvePlanEntitlements(normalizedPlanCode)
+  const subscriptionStatus = facilityManagerFreeAccess ? 'UNLIMITED' : toStatus(row.subscription_status)
   const subscriptionEndsAt =
-    planCode === 'TRIAL'
+    facilityManagerFreeAccess
+      ? ''
+      : planCode === 'TRIAL'
       ? toIsoTimestamp(row.trial_ends_at)
       : toIsoTimestamp(row.current_period_ends_at)
 
@@ -188,7 +207,7 @@ function buildSessionContext(uid, row) {
     },
     subscription: {
       planCode,
-      status: toStatus(row.subscription_status),
+      status: subscriptionStatus,
     },
     grants: row.profitability_grants,
   }
@@ -208,8 +227,8 @@ function buildSessionContext(uid, row) {
     onboardingRequired: role === 'OWNER' && onboardingStatus !== 'COMPLETED',
     rawPlanCode,
     planCode,
-    planName: entitlements.planName,
-    subscriptionStatus: toStatus(row.subscription_status),
+    planName: facilityManagerFreeAccess ? 'Bezpłatny' : entitlements.planName,
+    subscriptionStatus,
     subscriptionEndsAt,
     limits: entitlements.limits,
     capabilities: {
