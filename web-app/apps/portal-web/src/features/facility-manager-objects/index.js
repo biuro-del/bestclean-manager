@@ -1,6 +1,7 @@
 import './style.css'
 import template from './template.html?raw'
 import { createFacilityManagerObject, listFacilityManagerObjects } from '../../services/facilityManagerObjectService'
+import { createSessionEpochGuard } from './sessionGuard'
 
 export const route = 'managerObjects'
 export const viewId = 'view-managerObjects'
@@ -49,6 +50,15 @@ export function createFacilityManagerObjectsFeature(ctx) {
   const byId = (id) => document.getElementById(id)
   const orgId = () => text(appState.session?.activeOrgId || appState.session?.orgId)
   const isFacilityManager = () => text(appState.session?.organizationKind).toUpperCase() === 'FACILITY_MANAGER'
+  const sessionGuard = createSessionEpochGuard(() => JSON.stringify([
+    text(appState.session?.uid),
+    orgId(),
+    text(appState.session?.organizationKind).toUpperCase(),
+  ]))
+
+  function isCurrentManagerSession(token) {
+    return sessionGuard.isCurrent(token) && isFacilityManager()
+  }
 
   function setNotice(message = '', tone = '') {
     const node = byId('facilityManagerObjectsNotice')
@@ -133,7 +143,27 @@ export function createFacilityManagerObjectsFeature(ctx) {
     }
   }
 
+  function resetSession() {
+    sessionGuard.invalidate()
+    objects = []
+    pendingCreateActions.clear()
+    byId('facilityManagerObjectForm')?.reset()
+    for (const id of [
+      'facilityManagerObjectName',
+      'facilityManagerObjectAddress',
+      'facilityManagerObjectPostalCode',
+      'facilityManagerObjectCity',
+    ]) {
+      setFieldError(byId(id), false)
+    }
+    renderList()
+    setNotice('')
+    setBusy(false)
+  }
+
   async function refresh() {
+    const requestToken = sessionGuard.startRequest()
+    const requestOrgId = orgId()
     if (!isFacilityManager()) {
       objects = []
       renderList()
@@ -143,15 +173,17 @@ export function createFacilityManagerObjectsFeature(ctx) {
     setBusy(true)
     setNotice('')
     try {
-      const payload = await listFacilityManagerObjects(orgId())
+      const payload = await listFacilityManagerObjects(requestOrgId)
+      if (!sessionGuard.isCurrentRequest(requestToken) || !isCurrentManagerSession(requestToken)) return
       objects = Array.isArray(payload?.objects) ? payload.objects : []
       renderList()
     } catch (error) {
+      if (!sessionGuard.isCurrentRequest(requestToken) || !isCurrentManagerSession(requestToken)) return
       objects = []
       renderList()
       setNotice(error instanceof Error ? error.message : 'Nie udało się pobrać obiektów.', 'error')
     } finally {
-      setBusy(false)
+      if (sessionGuard.isCurrentRequest(requestToken) && isCurrentManagerSession(requestToken)) setBusy(false)
     }
   }
 
@@ -160,21 +192,25 @@ export function createFacilityManagerObjectsFeature(ctx) {
     const formPayload = validateForm()
     if (!formPayload) return
     const action = createPayloadWithPendingAction(formPayload)
+    const requestToken = sessionGuard.capture()
     setBusy(true)
     setNotice('')
     try {
       await createFacilityManagerObject(action.payload)
+      if (!isCurrentManagerSession(requestToken)) return
       // Only a confirmed API response consumes the local retry key.
       pendingCreateActions.delete(action.actionKey)
       byId('facilityManagerObjectForm')?.reset()
       await refresh()
+      if (!isCurrentManagerSession(requestToken)) return
       const message = 'Obiekt został zapisany w Twoim panelu. Kolejnym krokiem będzie podłączenie firmy sprzątającej.'
       setNotice(message, 'success')
       showTransientNotice?.(message, 'success')
     } catch (error) {
+      if (!isCurrentManagerSession(requestToken)) return
       setNotice(error instanceof Error ? error.message : 'Nie udało się dodać obiektu.', 'error')
     } finally {
-      setBusy(false)
+      if (isCurrentManagerSession(requestToken)) setBusy(false)
     }
   }
 
@@ -185,5 +221,5 @@ export function createFacilityManagerObjectsFeature(ctx) {
     return () => binding.done()
   }
 
-  return { bind, refresh }
+  return { bind, refresh, resetSession }
 }
