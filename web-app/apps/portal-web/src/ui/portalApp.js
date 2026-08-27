@@ -123,6 +123,9 @@ let cleaningCompanyRegistrationAvailable = false
 let cleaningCompanyRegistrationAvailabilityRequest = 0
 let loginControlsBusy = false
 let pendingFacilityManagerRegistration = null
+const COMPANY_EMAIL_RETRY_COOLDOWN_MS = 60_000
+let companyEmailRetryAvailableAtMs = 0
+let companyEmailRetryTimer = null
 let calendarRemoteSaveTimer = 0
 let sidebarGlobalSearchResults = []
 let sidebarGlobalSearchActiveIndex = -1
@@ -4113,6 +4116,32 @@ function showLoginMfaEnrollment() {
   pendingEmailMfaChallengeId = ''
 }
 
+function companyEmailRetrySecondsRemaining() {
+  return Math.max(0, Math.ceil((companyEmailRetryAvailableAtMs - Date.now()) / 1_000))
+}
+
+function refreshCompanyEmailRetryControl() {
+  const button = document.getElementById('loginCompanyEmailSend')
+  const remaining = companyEmailRetrySecondsRemaining()
+  if (button) {
+    button.disabled = loginControlsBusy || remaining > 0
+    button.textContent = remaining > 0
+      ? `Odczekaj ${remaining} s`
+      : 'Wyślij link potwierdzający'
+  }
+  if (remaining === 0 && companyEmailRetryTimer) {
+    window.clearInterval(companyEmailRetryTimer)
+    companyEmailRetryTimer = null
+  }
+}
+
+function startCompanyEmailRetryCooldown() {
+  companyEmailRetryAvailableAtMs = Date.now() + COMPANY_EMAIL_RETRY_COOLDOWN_MS
+  if (companyEmailRetryTimer) window.clearInterval(companyEmailRetryTimer)
+  refreshCompanyEmailRetryControl()
+  companyEmailRetryTimer = window.setInterval(refreshCompanyEmailRetryControl, 1_000)
+}
+
 function registrationPlanLabel(attempt = activeRegistrationAttempt) {
   const planCode = String(attempt?.planCode ?? '').toUpperCase()
   const labels = { TRIAL: 'Trial 7 dni (168 godzin)', GO_PLUS: 'GO+', PLUS: 'PLUS', PRO: 'PRO' }
@@ -4304,8 +4333,12 @@ function setLoginControlsBusy(isBusy, label = '') {
     }
   })
   if (companyEmailSend) {
-    companyEmailSend.disabled = isBusy
-    companyEmailSend.textContent = isBusy ? label || 'Wysyłanie...' : 'Wyślij link potwierdzający'
+    if (isBusy) {
+      companyEmailSend.disabled = true
+      companyEmailSend.textContent = label || 'Wysyłanie...'
+    } else {
+      refreshCompanyEmailRetryControl()
+    }
   }
   if (companyEmailLinkConfirm) {
     companyEmailLinkConfirm.disabled = isBusy
@@ -7874,12 +7907,19 @@ function bindPlatformLogin(router) {
   }
   const handleCompanyEmailSend = async (event) => {
     event?.preventDefault?.()
+    const retryWaitSeconds = companyEmailRetrySecondsRemaining()
+    if (retryWaitSeconds > 0) {
+      refreshCompanyEmailRetryControl()
+      setLoginError(`Kolejną próbę możesz wykonać za ${retryWaitSeconds} s.`)
+      return
+    }
     setLoginControlsBusy(true, 'Wysyłanie...')
     setLoginError('')
     try {
       const result = await requestCleaningCompanyEmailLink(companyEmail?.value)
       if (companyEmail && result?.email) companyEmail.value = result.email
-      setLoginError('Link potwierdzający został wysłany. Sprawdź skrzynkę e-mail, także folder spam.', 'success')
+      startCompanyEmailRetryCooldown()
+      setLoginError('Zleciliśmy wysyłkę. Sprawdź Odebrane oraz Spam. Link rejestracyjny jest ważny 30 minut.', 'success')
     } catch (error) {
       setLoginError(formatLoginError(error))
     } finally {
@@ -8381,6 +8421,10 @@ function bindPlatformLogin(router) {
   companyBasicsForm?.addEventListener('submit', handleCompanyBasicsSubmit)
   companyBasicsSignOut?.addEventListener('click', handleCompanyBasicsSignOut)
   return () => {
+    if (companyEmailRetryTimer) {
+      window.clearInterval(companyEmailRetryTimer)
+      companyEmailRetryTimer = null
+    }
     loginForm?.removeEventListener('submit', submit)
     googleButton?.removeEventListener('click', handleGoogleLogin)
     authScope?.removeEventListener('change', updateAuthScopeCopy)

@@ -53,6 +53,7 @@ export function createDashboardFeature(ctx) {
   let dashboardActiveWorkersMapLiveGroupKey = ''
   let dashboardServiceOperationStream = []
   let dashboardOperationsDialogRestoreFocus = null
+  let dashboardCommandCenterAlertContext = null
   let dashboardStopProposalAttention = {
     orgId: '',
     pendingCount: 0,
@@ -86,7 +87,7 @@ export function createDashboardFeature(ctx) {
     'portal.dashboard.insightPanelCollapsed.v1'
   const DASHBOARD_COMMENT_SYNC_LOOKBACK_DAYS = 3
   const DATA_SYNC_OVERLAY_DELAY_MS = 420
-  const DASHBOARD_STOP_PROPOSAL_ATTENTION_CACHE_TTL_MS = 5 * 60 * 1000
+  const DASHBOARD_STOP_PROPOSAL_ATTENTION_CACHE_TTL_MS = DASHBOARD_CHANGE_POLL_INTERVAL_MS
 
   function dashboardAssertCompleteReadResponses(entries = []) {
     entries.forEach((entry) => {
@@ -6689,7 +6690,9 @@ export function createDashboardFeature(ctx) {
           return dashboardStopProposalAttention.pendingCount
         }
         const total = Math.max(0, Math.trunc(Number(payload?.total) || 0))
-        dashboardStopProposalAttention.pendingCount = total || (Array.isArray(payload?.proposals) ? payload.proposals.length : 0)
+        dashboardStopProposalAttention.pendingCount = payload?.capability?.canApprove === true
+          ? total || (Array.isArray(payload?.proposals) ? payload.proposals.length : 0)
+          : 0
         dashboardStopProposalAttention.loadedAt = Date.now()
         return dashboardStopProposalAttention.pendingCount
       })
@@ -6713,6 +6716,12 @@ export function createDashboardFeature(ctx) {
     activeRows = [],
     pendingStopProposalCount = 0,
   } = {}) {
+    dashboardCommandCenterAlertContext = {
+      values,
+      operationalServices,
+      locations,
+      activeRows,
+    }
     const alerts = []
     const stopProposalAttentionAlert = buildDashboardStopProposalAttentionAlert(pendingStopProposalCount)
     if (stopProposalAttentionAlert) {
@@ -9335,6 +9344,27 @@ export function createDashboardFeature(ctx) {
     void refreshDashboardWidgets().catch(() => {})
   }
 
+  function dashboardRerenderStopProposalAttention() {
+    if (!dashboardCommandCenterAlertContext) {
+      return
+    }
+    dashboardRenderCommandCenterAlerts({
+      ...dashboardCommandCenterAlertContext,
+      pendingStopProposalCount: dashboardStopProposalAttention.pendingCount,
+    })
+  }
+
+  async function dashboardRefreshStopProposalAttentionPoll() {
+    if (!canAutoRefreshDashboard()) {
+      return
+    }
+    const previousPendingCount = dashboardStopProposalAttention.pendingCount
+    await dashboardRefreshStopProposalAttention(appState.session?.orgId, { forceRefresh: true })
+    if (dashboardStopProposalAttention.pendingCount !== previousPendingCount) {
+      dashboardRerenderStopProposalAttention()
+    }
+  }
+
   function dashboardTimelineFingerprintRange(dayKey = todayYmd()) {
     const normalizedDay = dashboardActivityDayKey(dayKey || todayYmd())
     const rangeStart = new Date(`${normalizedDay}T00:00:00`)
@@ -9655,6 +9685,7 @@ export function createDashboardFeature(ctx) {
     stopDashboardAutoRefresh()
     scheduleDashboardActivitySimulationTick()
     dashboardChangePollTimer = window.setInterval(() => {
+      void dashboardRefreshStopProposalAttentionPoll().catch(() => {})
       void refreshDashboardTimelineIfChanged().catch(() => {})
     }, DASHBOARD_CHANGE_POLL_INTERVAL_MS)
   }

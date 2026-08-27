@@ -178,6 +178,16 @@ export function createWorkdayStopProposalsFeature(ctx) {
       decisionNote,
       ...(action === 'CORRECT' && correctValue ? { officialStopAt: new Date(correctValue).toISOString() } : {}),
     })
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('portal:workday-updated', {
+        detail: {
+          source: 'workday-stop-proposal-decision',
+          action,
+          proposalId: proposal.proposalId || proposal.id,
+          workdayId: proposal.workdayId || '',
+        },
+      }))
+    }
     showTransientNotice?.('Decyzja została zapisana w audycie i ewidencji czasu pracy.', 'success')
     await refresh({ preserveDetail: false })
     if (result?.proposal?.proposalId || result?.proposal?.id) await openDetail(result.proposal.proposalId || result.proposal.id)

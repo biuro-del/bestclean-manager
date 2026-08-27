@@ -109,7 +109,7 @@ export const portalLayoutTemplate = `
           <input id="loginCompanyEmail" type="email" maxlength="160" autocomplete="email" inputmode="email" spellcheck="false" placeholder="np. biuro@firma.pl" />
         </div>
         <button class="btn primary login-submit" id="loginCompanyEmailSend" type="submit">Wy&#347;lij link potwierdzaj&#261;cy</button>
-        <p class="login-company-note">Link wysy&#322;amy na podany adres. Otw&#243;rz go, aby potwierdzi&#263; email i przej&#347;&#263; dalej.</p>
+        <p class="login-company-note">Wiadomo&#347;&#263; powinna dotrze&#263; w ci&#261;gu kilku minut. Link rejestracyjny jest wa&#380;ny 30 minut.</p>
         <button class="login-reset-back" id="loginCompanyEmailBack" type="button">Wr&#243;&#263; do sposob&#243;w rejestracji</button>
       </div>
 
