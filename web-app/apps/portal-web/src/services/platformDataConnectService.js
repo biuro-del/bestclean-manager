@@ -84,13 +84,17 @@ function variablesFromArgs(args) {
   return first && typeof first === 'object' ? first : {}
 }
 
-function wrap(kind, operationName, directOperation) {
+function wrap(kind, operationName, directOperation, dataConnectKey = 'dataConnect') {
   return (...args) => {
     if (isPlatformSession()) return executePlatformDataConnect(kind, operationName, variablesFromArgs(args))
-    const dataConnect = ensureFirebase()?.dataConnect
+    const dataConnect = ensureFirebase()?.[dataConnectKey]
     if (!dataConnect) throw new Error('Brak konfiguracji Data Connect. Uzupełnij zmienne VITE_DATACONNECT_*.')
     return directOperation(dataConnect, ...args)
   }
+}
+
+function wrapReadGuard(kind, operationName, directOperation) {
+  return wrap(kind, operationName, directOperation, 'readGuardDataConnect')
 }
 
 export async function listPlatformOrganizations(filters = {}) {
@@ -169,20 +173,20 @@ export const startWorkdayPause = wrap('mutation', 'StartWorkdayPause', generated
 export const stopWorkdayPause = wrap('mutation', 'StopWorkdayPause', generated.stopWorkdayPause)
 
 export const workersForOrg = wrap('query', 'WorkersForOrg', generated.workersForOrg)
-export const workersPageForOrg = wrap('query', 'WorkersPageForOrg', readGuardGenerated.workersPageForOrg)
-export const workerForOrgByLogin = wrap('query', 'WorkerForOrgByLogin', readGuardGenerated.workerForOrgByLogin)
+export const workersPageForOrg = wrapReadGuard('query', 'WorkersPageForOrg', readGuardGenerated.workersPageForOrg)
+export const workerForOrgByLogin = wrapReadGuard('query', 'WorkerForOrgByLogin', readGuardGenerated.workerForOrgByLogin)
 export const clientsForOrg = wrap('query', 'ClientsForOrg', generated.clientsForOrg)
-export const clientsPageForOrg = wrap('query', 'ClientsPageForOrg', readGuardGenerated.clientsPageForOrg)
+export const clientsPageForOrg = wrapReadGuard('query', 'ClientsPageForOrg', readGuardGenerated.clientsPageForOrg)
 export const individualJobsForOrg = wrap('query', 'IndividualJobsForOrg', generated.individualJobsForOrg)
 export const tasksForOrg = wrap('query', 'TasksForOrg', generated.tasksForOrg)
 export const zonesForOrg = wrap('query', 'ZonesForOrg', generated.zonesForOrg)
-export const zonesPageForOrg = wrap('query', 'ZonesPageForOrg', readGuardGenerated.zonesPageForOrg)
+export const zonesPageForOrg = wrapReadGuard('query', 'ZonesPageForOrg', readGuardGenerated.zonesPageForOrg)
 export const workdaysForOrg = wrap('query', 'WorkdaysForOrg', generated.workdaysForOrg)
 export const workerWorkdaysForOrg = wrap('query', 'WorkerWorkdaysForOrg', generated.workerWorkdaysForOrg)
 export const backupCyclesForOrg = wrap('query', 'BackupCyclesForOrg', generated.backupCyclesForOrg)
-export const backupCyclesPageForOrg = wrap('query', 'BackupCyclesPageForOrg', readGuardGenerated.backupCyclesPageForOrg)
+export const backupCyclesPageForOrg = wrapReadGuard('query', 'BackupCyclesPageForOrg', readGuardGenerated.backupCyclesPageForOrg)
 export const eventsForOrg = wrap('query', 'EventsForOrg', generated.eventsForOrg)
 export const storageForOrg = wrap('query', 'StorageForOrg', generated.storageForOrg)
 export const clientStorageForOrg = wrap('query', 'ClientStorageForOrg', generated.clientStorageForOrg)
 export const workdayPausesForOrg = wrap('query', 'WorkdayPausesForOrg', generated.workdayPausesForOrg)
-export const workdayPausesPageForOrg = wrap('query', 'WorkdayPausesPageForOrg', readGuardGenerated.workdayPausesPageForOrg)
+export const workdayPausesPageForOrg = wrapReadGuard('query', 'WorkdayPausesPageForOrg', readGuardGenerated.workdayPausesPageForOrg)

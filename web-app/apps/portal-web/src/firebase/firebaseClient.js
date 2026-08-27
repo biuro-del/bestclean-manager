@@ -3,6 +3,7 @@ import { browserLocalPersistence, getAuth, onAuthStateChanged, setPersistence } 
 import { ReCaptchaEnterpriseProvider, getToken, initializeAppCheck } from 'firebase/app-check'
 import { connectDataConnectEmulator, getDataConnect } from 'firebase/data-connect'
 import { connectorConfig } from '@dataconnect/generated'
+import { connectorConfig as readGuardConnectorConfig } from '@dataconnect/read-guard-generated'
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -66,6 +67,13 @@ export function ensureFirebase() {
   const auth = getAuth(app)
   Object.assign(connectorConfig, dataConnectConfig)
   const dataConnect = isDataConnectConfigured() ? getDataConnect(connectorConfig) : null
+  const readGuardDataConnect = isDataConnectConfigured()
+    ? getDataConnect({
+        ...readGuardConnectorConfig,
+        service: dataConnectConfig.service,
+        location: dataConnectConfig.location,
+      })
+    : null
 
   const emulatorHost = import.meta.env.VITE_DATACONNECT_EMULATOR_HOST
   const emulatorPort = Number(import.meta.env.VITE_DATACONNECT_EMULATOR_PORT ?? 9399)
@@ -73,6 +81,7 @@ export function ensureFirebase() {
 
   if (dataConnect && !emulatorConnected && useEmulators && hasValue(emulatorHost)) {
     connectDataConnectEmulator(dataConnect, emulatorHost, emulatorPort)
+    connectDataConnectEmulator(readGuardDataConnect, emulatorHost, emulatorPort)
     emulatorConnected = true
   }
 
@@ -81,6 +90,7 @@ export function ensureFirebase() {
     auth,
     appCheck,
     dataConnect,
+    readGuardDataConnect,
   }
 }
 

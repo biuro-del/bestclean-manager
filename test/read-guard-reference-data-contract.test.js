@@ -104,6 +104,27 @@ test('sesja platformowa kieruje wyłącznie nowe strony do konektora read-guard'
   assert.match(backend, /connector,\s*\n\s*}\)/)
 })
 
+test('portal tworzy osobną instancję read-guard dla bezpośrednich odczytów', () => {
+  const firebaseClient = read('web-app', 'apps', 'portal-web', 'src', 'firebase', 'firebaseClient.js')
+  const gateway = read('web-app', 'apps', 'portal-web', 'src', 'services', 'platformDataConnectService.js')
+
+  assert.match(firebaseClient, /connectorConfig as readGuardConnectorConfig/)
+  assert.match(firebaseClient, /const readGuardDataConnect = isDataConnectConfigured\(\)/)
+  assert.match(firebaseClient, /readGuardDataConnect,\s*\n\s*}/)
+  assert.match(gateway, /function wrapReadGuard\(/)
+
+  for (const operation of [
+    'WorkersPageForOrg',
+    'WorkerForOrgByLogin',
+    'ClientsPageForOrg',
+    'ZonesPageForOrg',
+    'BackupCyclesPageForOrg',
+    'WorkdayPausesPageForOrg',
+  ]) {
+    assert.match(gateway, new RegExp(`wrapReadGuard\\('query', '${operation}'`))
+  }
+})
+
 test('klienci i strefy używają stron, a lista pracowników zachowuje bezpośredni odczyt ze zdjęciem', () => {
   const clientService = read('web-app', 'apps', 'portal-web', 'src', 'services', 'clientService.js')
   const zoneService = read('web-app', 'apps', 'portal-web', 'src', 'services', 'zoneService.js')
