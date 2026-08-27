@@ -248,6 +248,7 @@ const PORTAL_ROUTE_VIEW_IDS = {
   events: 'view-events',
   orders: 'view-orders',
   ordersMap: 'view-ordersMap',
+  managerObjects: 'view-managerObjects',
   zones: 'view-zones',
   workerProfile: 'view-workerProfile',
   workerAccount: 'view-workerAccount',
@@ -277,6 +278,7 @@ const PORTAL_ROUTE_FEATURE_KEYS = {
   events: ['dashboard', 'reports', 'zones', 'clientProfile', 'workerTime', 'events'],
   orders: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar'],
   ordersMap: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar'],
+  managerObjects: ['facilityManagerObjects'],
   zones: ['zones'],
   workerProfile: ['dashboard', 'workerProfile'],
   workerAccount: ['dashboard', 'workerAccount'],
@@ -312,6 +314,7 @@ const PORTAL_ROUTE_BIND_KEYS = {
   events: 'events',
   orders: 'orders:list',
   ordersMap: 'orders:map',
+  managerObjects: 'facilityManagerObjects',
   zones: 'zones',
   workerProfile: 'workerProfile',
   workerAccount: 'workerAccount',
@@ -1561,11 +1564,35 @@ function normalizeRouteSyncPolicy(policy = '') {
 }
 
 function routeSyncKey(route) {
-  return normalizePortalRoute(String(route ?? '').trim()) || 'dashboard'
+  return normalizeNavigationRoute(String(route ?? '').trim()) || 'dashboard'
+}
+
+function organizationKindForSession(session = appState.session) {
+  return String(session?.organizationKind ?? '').trim().toUpperCase()
+}
+
+function isFacilityManagerSession(session = appState.session) {
+  return organizationKindForSession(session) === 'FACILITY_MANAGER'
+}
+
+function applyOrganizationKindUi(session = null) {
+  const organizationKind = organizationKindForSession(session)
+  const root = document.getElementById('portalRoot')
+  const managerNavigation = document.getElementById('facilityManagerSidebarNav')
+  if (root) {
+    if (organizationKind) root.dataset.organizationKind = organizationKind
+    else delete root.dataset.organizationKind
+  }
+  if (managerNavigation) {
+    managerNavigation.hidden = organizationKind !== 'FACILITY_MANAGER'
+  }
 }
 
 function normalizeNavigationRoute(route) {
   const normalizedRoute = normalizePortalRoute(route)
+  if (isFacilityManagerSession() && normalizedRoute !== 'managerObjects') {
+    return 'managerObjects'
+  }
   if (normalizedRoute === 'clientsList') {
     return 'clientProfile'
   }
@@ -3100,6 +3127,23 @@ function kanbanNormalizeSection(...args) {
 
 let contractProfitabilityFeature = null
 
+let facilityManagerObjectsFeature = null
+
+function getFacilityManagerObjectsFeature() {
+  if (!facilityManagerObjectsFeature) {
+    throw new Error('Facility-manager object feature is not initialized.')
+  }
+  return facilityManagerObjectsFeature
+}
+
+function refreshFacilityManagerObjects(...args) {
+  return getFacilityManagerObjectsFeature().refresh(...args)
+}
+
+function bindFacilityManagerObjectsViewFunctions(...args) {
+  return getFacilityManagerObjectsFeature().bind(...args)
+}
+
 function getContractProfitabilityFeature() {
   if (!contractProfitabilityFeature) {
     throw new Error('Contract profitability feature is not initialized.')
@@ -3167,6 +3211,8 @@ function loadPortalTemplateModule(route) {
       return import('../features/orders/list/index.js')
     case 'ordersMap':
       return import('../features/orders/map/index.js')
+    case 'managerObjects':
+      return import('../features/facility-manager-objects/index.js')
     case 'reports':
       return import('../features/reports/index.js')
     case 'settings':
@@ -3204,6 +3250,8 @@ function loadPortalFeatureModule(featureKey) {
       return import('../features/profitability/index.js')
     case 'orders':
       return import('../features/orders/index.js')
+    case 'facilityManagerObjects':
+      return import('../features/facility-manager-objects/index.js')
     case 'reports':
       return import('../features/reports/index.js')
     case 'settings':
@@ -3241,6 +3289,8 @@ function portalFeatureIsReady(featureKey) {
       return Boolean(contractProfitabilityFeature)
     case 'orders':
       return Boolean(ordersFeature)
+    case 'facilityManagerObjects':
+      return Boolean(facilityManagerObjectsFeature)
     case 'reports':
       return Boolean(reportsFeature)
     case 'settings':
@@ -3290,6 +3340,9 @@ function assignPortalFeature(featureKey, module) {
     case 'orders':
       ordersFeature = ordersFeature || module.createOrdersFeature(portalFeatureContext)
       return ordersFeature
+    case 'facilityManagerObjects':
+      facilityManagerObjectsFeature = facilityManagerObjectsFeature || module.createFacilityManagerObjectsFeature(portalFeatureContext)
+      return facilityManagerObjectsFeature
     case 'reports':
       reportsFeature = reportsFeature || module.createReportsFeature(portalFeatureContext)
       return reportsFeature
@@ -3462,6 +3515,9 @@ function bindPortalRouteOnce(route, navigation = portalNavigation) {
       break
     case 'ordersMap':
       cleanup = bindOrdersMapViewFunctions()
+      break
+    case 'managerObjects':
+      cleanup = bindFacilityManagerObjectsViewFunctions()
       break
     case 'zones':
       cleanup = bindZonesViewFunctions()
@@ -3686,6 +3742,7 @@ async function showCleaningCompanyBasicsOverlay() {
 
 function showLoginScreen() {
   hideCleaningCompanyBasicsOverlay()
+  applyOrganizationKindUi(null)
   const loginScreen = document.getElementById('loginScreen')
   const portalRoot = document.getElementById('portalRoot')
 
@@ -7148,11 +7205,19 @@ async function activatePortalSession(session, router, { restoreRoute = false } =
   }
 
   resetPortalState({ session })
+  applyOrganizationKindUi(session)
   syncProfitabilityEntryPermissions()
   syncPlanFeaturePermissions()
   showPortal()
   setUserChip(session)
   await showRequiredCompanyProfile(session)
+
+  if (isFacilityManagerSession(session)) {
+    clearStoredCurrentRoute()
+    await router.go('managerObjects')
+    return
+  }
+
   syncProfitabilityEntryPermissions()
 
   if (restoreRoute) {
@@ -8575,6 +8640,11 @@ async function syncRouteDataNow(normalizedRoute, options = {}) {
     return
   }
 
+  if (normalizedRoute === 'managerObjects') {
+    await refreshFacilityManagerObjects()
+    return
+  }
+
   if (normalizedRoute === 'clientsList' || normalizedRoute === 'clientProfile') {
     await fetchClientProfileForCurrentSession(force)
     return
@@ -8751,6 +8821,11 @@ export function mountPortalApp() {
 
     if (routeName === 'ordersMap') {
       renderOrdersMapView()
+      await syncRouteData(routeName)
+      return
+    }
+
+    if (routeName === 'managerObjects') {
       await syncRouteData(routeName)
       return
     }

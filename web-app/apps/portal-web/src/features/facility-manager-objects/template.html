@@ -1,0 +1,62 @@
+<section class="facility-manager-objects" aria-labelledby="facilityManagerObjectsTitle">
+  <header class="facility-manager-objects__hero">
+    <div>
+      <p class="facility-manager-objects__eyebrow">PANEL ZARZĄDCY OBIEKTU</p>
+      <h1 id="facilityManagerObjectsTitle">Twoje obiekty</h1>
+      <p>Najpierw dodaj obiekt, którym zarządzasz. W następnym kroku podłączysz do niego firmę sprzątającą — dopiero po jej akceptacji.</p>
+    </div>
+    <button class="facility-manager-objects__refresh" id="facilityManagerObjectsRefresh" type="button">Odśwież</button>
+  </header>
+
+  <div class="facility-manager-objects__notice" id="facilityManagerObjectsNotice" role="status" aria-live="polite"></div>
+
+  <div class="facility-manager-objects__layout">
+    <section class="facility-manager-objects__list-card" aria-labelledby="facilityManagerObjectsListTitle">
+      <div class="facility-manager-objects__card-heading">
+        <div>
+          <p class="facility-manager-objects__label">TWÓJ PORTFEL</p>
+          <h2 id="facilityManagerObjectsListTitle">Zarządzane obiekty</h2>
+        </div>
+        <span class="facility-manager-objects__count" id="facilityManagerObjectsCount">0</span>
+      </div>
+      <div class="facility-manager-objects__list" id="facilityManagerObjectsList" aria-live="polite"></div>
+      <p class="facility-manager-objects__next-step"><strong>Co dalej?</strong> Gdy zapiszesz obiekt, przygotujemy bezpieczne zaproszenie do firmy sprzątającej. Firma zawsze sama potwierdzi połączenie.</p>
+    </section>
+
+    <section class="facility-manager-objects__form-card" aria-labelledby="facilityManagerObjectFormTitle">
+      <div class="facility-manager-objects__card-heading">
+        <div>
+          <p class="facility-manager-objects__label">PIERWSZY KROK</p>
+          <h2 id="facilityManagerObjectFormTitle">Dodaj obiekt</h2>
+        </div>
+      </div>
+      <p class="facility-manager-objects__form-copy">Zapisujemy te dane wyłącznie w Twoim panelu zarządcy. Nie tworzą jeszcze klienta ani dostępu dla firmy sprzątającej.</p>
+      <form id="facilityManagerObjectForm" novalidate>
+        <label>
+          <span>Nazwa obiektu</span>
+          <input id="facilityManagerObjectName" name="name" type="text" minlength="2" maxlength="160" autocomplete="organization" required placeholder="np. Osiedle Zielone – budynki A–C" />
+        </label>
+        <label>
+          <span>Adres</span>
+          <input id="facilityManagerObjectAddress" name="addressLine1" type="text" minlength="2" maxlength="180" autocomplete="street-address" required placeholder="np. ul. Ogrodowa 12" />
+        </label>
+        <div class="facility-manager-objects__address-grid">
+          <label>
+            <span>Kod pocztowy</span>
+            <input id="facilityManagerObjectPostalCode" name="postalCode" type="text" inputmode="numeric" autocomplete="postal-code" pattern="[0-9]{2}-?[0-9]{3}" maxlength="6" required placeholder="00-000" />
+          </label>
+          <label>
+            <span>Miejscowość</span>
+            <input id="facilityManagerObjectCity" name="city" type="text" minlength="2" maxlength="100" autocomplete="address-level2" required placeholder="np. Warszawa" />
+          </label>
+        </div>
+        <label>
+          <span>Oznaczenie wewnętrzne <em>(opcjonalnie)</em></span>
+          <input id="facilityManagerObjectReference" name="reference" type="text" maxlength="160" autocomplete="off" placeholder="np. UM/2026/14" />
+        </label>
+        <p class="facility-manager-objects__form-error" id="facilityManagerObjectError" role="alert" hidden></p>
+        <button class="facility-manager-objects__submit" id="facilityManagerObjectSubmit" type="submit">Zapisz obiekt</button>
+      </form>
+    </section>
+  </div>
+</section>

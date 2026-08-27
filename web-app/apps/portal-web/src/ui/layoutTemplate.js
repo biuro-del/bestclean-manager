@@ -409,6 +409,19 @@ export const portalLayoutTemplate = `
   <div class="app-shell">
     <div class="app-body">
       <aside class="sidebar" id="portalSidebar">
+        <div class="facility-manager-sidebar" id="facilityManagerSidebarNav" hidden>
+          <button class="facility-manager-sidebar__brand" data-route="managerObjects" type="button" aria-label="Przejdź do moich obiektów">
+            <img src="/cleanzi-logo.svg" alt="Cleanzi" width="146" height="42" />
+          </button>
+          <p>PANEL ZARZĄDCY</p>
+          <button class="facility-manager-sidebar__link menu-item" data-route="managerObjects" type="button">
+            <span aria-hidden="true">⌂</span>
+            <span>Moje obiekty</span>
+          </button>
+          <div class="facility-manager-sidebar__note">
+            Najpierw dodaj obiekt. Połączenie z firmą sprzątającą będzie wymagało jej akceptacji.
+          </div>
+        </div>
         <button
           class="sidebar-brand"
           data-route="dashboard"
@@ -1482,6 +1495,7 @@ export const portalLayoutTemplate = `
         <section id="view-events" style="display:none;"></section>
         <section id="view-orders" style="display:none;"></section>
         <section id="view-ordersMap" style="display:none;"></section>
+        <section id="view-managerObjects" style="display:none;"></section>
         <section id="view-zones" style="display:none;"></section>
         <section id="view-workerProfile" style="display:none;"></section>
         <section id="view-workerAccount" style="display:none;"></section>

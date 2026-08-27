@@ -356,8 +356,11 @@ async function requestSessionContext(firebaseUser, { orgId = '', method = 'GET' 
       .map((organization) => ({
         orgId: toText(organization?.orgId),
         organizationName: toText(organization?.organizationName),
+        organizationKind: toText(organization?.organizationKind).toUpperCase(),
         role: toText(organization?.role).toUpperCase(),
       }))
+      // organizationKind is additive. Existing cleaning-company organizations
+      // may not have it yet, and must keep their established login path.
       .filter((organization) => organization.orgId && organization.organizationName && organization.role)
 
     if (organizations.length < 2) {
@@ -410,6 +413,7 @@ function buildSessionFromFirebase(user, context) {
     subscriptionEndsAt: toText(context.subscriptionEndsAt),
     activeOrgId,
     organizationName,
+    organizationKind: toText(context.organizationKind).toUpperCase(),
     orgId: activeOrgId,
     orgName: organizationName,
     platformContextId: toText(context.platformContextId),

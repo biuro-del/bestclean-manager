@@ -6,6 +6,7 @@
   events: 'view-events',
   orders: 'view-orders',
   ordersMap: 'view-ordersMap',
+  managerObjects: 'view-managerObjects',
   zones: 'view-zones',
   workerProfile: 'view-workerProfile',
   workerAccount: 'view-workerAccount',

@@ -86,6 +86,7 @@ test('active facility-manager OWNER without subscription gets free unlimited acc
   assert.equal(context.planCode, 'FREE')
   assert.equal(context.subscriptionStatus, 'UNLIMITED')
   assert.equal(context.subscriptionEndsAt, '')
+  assert.equal(context.organizationKind, 'FACILITY_MANAGER')
   assert.deepEqual(context.capabilities.profitabilityModule, {
     enabled: false,
     canRead: false,
@@ -106,4 +107,5 @@ test('missing subscription does not extend cleaning-provider access', () => {
     allowed: false,
     code: 'SUBSCRIPTION_MISSING',
   })
+  assert.equal(buildSessionContext('UID-1', provider).organizationKind, 'CLEANING_PROVIDER')
 })

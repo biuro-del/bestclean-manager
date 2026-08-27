@@ -168,6 +168,7 @@ function buildOrganizationSummary(row) {
   return {
     orgId: toText(row.org_id),
     organizationName: toText(row.organization_name),
+    organizationKind: toStatus(row.organization_kind),
     role: toStatus(row.role),
     onboardingStatus: toStatus(row.onboarding_status),
     planCode: isSubscriptionlessFacilityManager(row) ? 'FREE' : normalizePlanCode(row.plan_code),
@@ -220,6 +221,7 @@ function buildSessionContext(uid, row) {
     uid: toText(uid),
     activeOrgId: toText(row.org_id),
     organizationName: toText(row.organization_name),
+    organizationKind: toStatus(row.organization_kind),
     workerId: toText(row.worker_record_id),
     role,
     organizationStatus: toStatus(row.organization_status),

@@ -54,6 +54,8 @@ const { createFacilityManagerRegistrationApi } = require('./facility-manager-reg
 const { createFacilityManagerRegistrationGate } = require('./facility-manager-registration-gate')
 const { createFacilityManagerFirebaseAppCheckGate } = require('./facility-manager-registration-app-check')
 const { createFacilityManagerFirestoreRateGate } = require('./facility-manager-registration-firestore-rate-gate')
+const { createFacilityManagerObjectService } = require('./facility-manager-object-service')
+const { createFacilityManagerObjectApi } = require('./facility-manager-object-api')
 const {
   CLEANING_COMPANY_ONBOARDING_REQUIRED,
   CleaningCompanyOnboardingError,
@@ -164,6 +166,7 @@ const STRIPE_WEBHOOK_PATH = '/api/billing/stripe/webhook'
 const CLEANING_COMPANY_ONBOARDING_LEGAL_DOCUMENTS_PATH = '/api/registration/cleaning-company/legal-documents'
 const CLEANING_COMPANY_ONBOARDING_PROVISION_PATH = '/api/registration/cleaning-company/provision'
 const FACILITY_MANAGER_REGISTRATION_PATH = '/api/registration/facility-manager'
+const FACILITY_MANAGER_OBJECTS_PATH = '/api/facility-manager/objects'
 const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
 const PORTAL_JOB_CARDS_PATH = '/api/portal/job-cards'
@@ -7629,6 +7632,25 @@ async function handleFacilityManagerRegistrationRequest(req, res) {
   return facilityManagerRegistrationApi.handleRegisterRequest(req, res)
 }
 
+const facilityManagerObjectService = createFacilityManagerObjectService()
+const facilityManagerObjectApi = createFacilityManagerObjectApi({
+  connectDbClient,
+  async getFacilityManagerObjectService() {
+    return facilityManagerObjectService
+  },
+  mapDatabaseConnectionError,
+  mapFirebaseAdminError,
+  parseBearerToken,
+  readJsonBody,
+  sendApiError,
+  sendJson,
+  verifyFirebaseIdToken,
+})
+
+async function handleFacilityManagerObjectsRequest(req, res, requestUrl) {
+  return facilityManagerObjectApi.handleRequest(req, res, requestUrl)
+}
+
 async function handleAuthSessionContextRequest(req, res, requestUrl) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
@@ -10562,6 +10584,13 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   if (requestUrl.pathname === FACILITY_MANAGER_REGISTRATION_PATH) {
     handleFacilityManagerRegistrationRequest(req, res).catch(() => {
       sendApiError(res, 500, 'FACILITY_MANAGER_REGISTRATION_ERROR', 'Nie udało się utworzyć panelu zarządcy.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === FACILITY_MANAGER_OBJECTS_PATH) {
+    handleFacilityManagerObjectsRequest(req, res, requestUrl).catch(() => {
+      sendApiError(res, 500, 'FACILITY_MANAGER_OBJECT_ERROR', 'Nie udało się obsłużyć obiektów zarządcy.')
     })
     return
   }
