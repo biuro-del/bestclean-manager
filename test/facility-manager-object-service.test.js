@@ -122,6 +122,29 @@ test('only an active owner or administrator in a facility-manager organization c
   assert.ok(deniedClient.calls.some((call) => call.sql === 'ROLLBACK'))
 })
 
+test('an unavailable manager organization cannot call the object API directly', async () => {
+  const service = createFacilityManagerObjectService({
+    now: () => new Date('2026-08-27T09:00:00.000Z'),
+    objectIdFactory: () => 'fmobj_test_01',
+  })
+  const expiredMembership = { ...MANAGER_MEMBERSHIP, organization_status: 'EXPIRED' }
+  const expiredListClient = createClient({ membership: expiredMembership })
+
+  await assert.rejects(
+    () => service.list({ client: expiredListClient, uid: 'uid-owner', orgId: 'manager_01' }),
+    (error) => error instanceof FacilityManagerObjectError && error.publicCode === 'FACILITY_MANAGER_OBJECT_ACCESS_DENIED',
+  )
+  assert.equal(expiredListClient.calls.some((call) => call.sql.includes('from public.facility_manager_object')), false)
+
+  const expiredCreateClient = createClient({ membership: expiredMembership })
+  await assert.rejects(
+    () => service.create({ client: expiredCreateClient, uid: 'uid-owner', payload: validPayload() }),
+    (error) => error instanceof FacilityManagerObjectError && error.publicCode === 'FACILITY_MANAGER_OBJECT_ACCESS_DENIED',
+  )
+  assert.equal(expiredCreateClient.calls.some((call) => call.sql.includes('insert into public.facility_manager_object')), false)
+  assert.ok(expiredCreateClient.calls.some((call) => call.sql === 'ROLLBACK'))
+})
+
 test('a replayed create action returns the original object without writing a second audit record', async () => {
   const payload = normalizeCreatePayload(validPayload())
   const replay = {

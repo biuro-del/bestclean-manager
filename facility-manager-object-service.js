@@ -7,6 +7,7 @@ const OBJECT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
 const CLIENT_ACTION_ID_PATTERN = /^[A-Za-z0-9_-]{16,160}$/
 const POSTAL_CODE_PATTERN = /^\d{2}-\d{3}$/
 const WRITE_ROLES = new Set(['OWNER', 'ADMIN', 'ADMINISTRATOR'])
+const AVAILABLE_ORGANIZATION_STATUSES = new Set(['ACTIVE', 'TRIAL'])
 
 class FacilityManagerObjectError extends Error {
   constructor(publicCode, publicMessage, statusCode = 400) {
@@ -193,6 +194,10 @@ function isAllowedManagerRole(value) {
   return WRITE_ROLES.has(text(value).toUpperCase())
 }
 
+function isAvailableOrganizationStatus(value) {
+  return AVAILABLE_ORGANIZATION_STATUSES.has(text(value).toUpperCase())
+}
+
 async function rollbackQuietly(client) {
   try {
     await client.query('ROLLBACK')
@@ -248,7 +253,7 @@ function createFacilityManagerObjectService({ now = () => new Date(), objectIdFa
       !membership ||
       text(membership.membership_status).toUpperCase() !== 'ACTIVE' ||
       text(membership.organization_kind).toUpperCase() !== 'FACILITY_MANAGER' ||
-      text(membership.organization_status).toUpperCase() === 'SUSPENDED' ||
+      !isAvailableOrganizationStatus(membership.organization_status) ||
       membership.organization_deleted_at ||
       membership.worker_active === false ||
       text(membership.worker_status).toUpperCase() === 'DELETED' ||
