@@ -9,6 +9,7 @@ import {
   enrichWorkdaysWithEventIntervals,
   formatWorkDurationHms,
   mergeWorkIntervals,
+  resolveWorkIntervalZoneSnapshot,
   WORKDAY_INTEGRITY_STATES,
   workIntervalCodes,
   workIntervalGpsCoordinates,
@@ -17,6 +18,7 @@ import {
   workIntervalsTotalSeconds,
   workSessionAccountingFromRow,
   workTimeCycleRowsFromDays,
+  workTimeDayHasHistoryAlert,
   workdayPresenceFromRows,
   workSessionConfirmedTotalSeconds,
   workSessionProvisionalTotalSeconds,
@@ -35,6 +37,29 @@ import {
 
 const require = createRequire(import.meta.url)
 const { buildWorkTimeDay } = require('../work-time-days-policy.js')
+
+test('wykrywa dowolny alert historii, ale nie zwykla dzisiejsza otwarta sesje', () => {
+  const today = '2026-08-26'
+  assert.equal(workTimeDayHasHistoryAlert({
+    businessDateYmd: today,
+    integrityState: 'OPEN_SESSION',
+    issues: [{ code: 'OPEN_SESSION' }],
+  }, { today }), false)
+  assert.equal(workTimeDayHasHistoryAlert({
+    businessDateYmd: today,
+    integrityState: 'INVALID',
+    issues: [
+      { code: 'OPEN_SESSION' },
+      { code: 'ACTIVITY_OUTSIDE_SESSION' },
+    ],
+  }, { today }), true)
+  assert.equal(workTimeDayHasHistoryAlert({
+    businessDateYmd: today,
+    integrityState: 'OPEN_SESSION',
+    issues: [{ code: 'OPEN_SESSION' }],
+    activities: [{ startAt: '2026-08-26T08:00:00.000Z', endAt: '', isOpen: true }],
+  }, { today }), true)
+})
 
 function exportDeps(getWorkdays) {
   return {
@@ -441,6 +466,46 @@ test('deduplicates operational eventId without treating activities as attendance
   assert.equal(accounting.integrityState, WORKDAY_INTEGRITY_STATES.INVALID)
   assert.ok(accounting.integrityIssues.some((entry) => entry.code === 'DUPLICATE_EVENT_ID'))
   assert.equal(accounting.integrityIssues.some((entry) => entry.code === 'OVERLAPPING_SESSIONS'), false)
+})
+
+test('frontend recovers a CLEAN code misclassified as attendance STOP through the last activity', () => {
+  const accounting = aggregateWorkSessions({
+    workdayId: 'WD-CLEAN-STOP',
+    startAt: '2026-08-01T16:03:06Z',
+    endAt: '2026-08-01T16:04:00Z',
+    stopObject: 'BC0326',
+    stopZoneFunction: 'clean (spoza listy)',
+    status: 'CLOSED',
+  }, [
+    { eventId: 'EV-CLEAN-1', workdayId: 'WD-CLEAN-STOP', historySourceKind: 'event', startAt: '2026-08-01T16:09:00Z', endAt: '2026-08-01T16:38:00Z' },
+    { eventId: 'EV-CLEAN-2', workdayId: 'WD-CLEAN-STOP', historySourceKind: 'event', startAt: '2026-08-01T16:38:00Z', endAt: '2026-08-01T18:26:00Z' },
+  ], { nowMs: Date.parse('2026-08-03T00:00:00Z') })
+
+  assert.equal(accounting.closedSessionsSec, 2 * 3600 + 22 * 60 + 54)
+  assert.equal(accounting.workIntervals[0].recordedEndAt, '2026-08-01T16:04:00.000Z')
+  assert.equal(accounting.workIntervals[0].endAt, '2026-08-01T18:26:00.000Z')
+  assert.equal(accounting.integrityIssues.some((entry) => entry.code === 'ACTIVITY_OUTSIDE_SESSION'), false)
+  assert.equal(accounting.integrityState, WORKDAY_INTEGRITY_STATES.COMPLETE)
+})
+
+test('history resolves STOP phase metadata from the current zone catalog without a STOP fallback', () => {
+  const snapshot = resolveWorkIntervalZoneSnapshot({
+    startObject: 'START-1',
+    stopObject: 'BC0326',
+    zoneId: 'START-1',
+    zoneFunction: 'START',
+  }, 'STOP', [{
+    id: 'BC0326',
+    clientName: 'GAPR',
+    name: 'WC / Prysznic',
+    function: 'clean (spoza listy)',
+    location: 'A2 damski I meski',
+  }])
+
+  assert.equal(snapshot.qrCode, 'BC0326')
+  assert.equal(snapshot.zoneName, 'WC / Prysznic')
+  assert.equal(snapshot.functionName, 'clean (spoza listy)')
+  assert.equal(snapshot.clientName, 'GAPR')
 })
 
 test('profile and evidence exports use the closed Workday even when an activity is open', async () => {

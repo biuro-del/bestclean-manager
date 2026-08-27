@@ -53,3 +53,24 @@ test('historyczny brak STOP z biezacego miesiaca wyroznia caly rekord pracownika
   assert.match(feature, /has-missing-stop/)
   assert.match(style, /\.workers-row\.has-missing-stop\{[\s\S]*?background:#fff8df !important/)
 })
+
+test('dowolny alert historii czasu pracy korzysta z tego samego zoltego rekordu pracownika', () => {
+  assert.match(feature, /fetchCurrentMonthWorkTimeAlertDays/)
+  assert.match(feature, /hasCurrentMonthWorkTimeAlert/)
+  assert.match(feature, /const hasWorkTimeWarning = hasMissingStop \|\| hasHistoryAlert/)
+  assert.match(feature, /hasWorkTimeWarning \? ' has-missing-stop'/)
+})
+
+test('pobieranie alertow historii nie blokuje zaladowania listy pracownikow', () => {
+  const fetchBlock = feature.slice(
+    feature.indexOf('async function fetchWorkerProfilesForCurrentSession'),
+    feature.indexOf('async function saveWorkerProfileData'),
+  )
+  const initialRenderIndex = fetchBlock.indexOf('applyWorkerProfileRows(rows, { clearSelection, resetPage })')
+  const deferredAlertsIndex = fetchBlock.indexOf('window.setTimeout(() => {')
+
+  assert.match(fetchBlock, /const \[workers, activeWorkers, missingStopWorkdays\] = await Promise\.all/)
+  assert.ok(initialRenderIndex >= 0)
+  assert.ok(deferredAlertsIndex > initialRenderIndex)
+  assert.match(fetchBlock, /applyWorkerProfileRows\(updatedRows, \{ clearSelection: false, resetPage: false \}\)/)
+})

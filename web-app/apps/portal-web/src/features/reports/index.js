@@ -1,11 +1,51 @@
-import template from './template.html?raw'
-import { reportBusinessDateYmd } from './reportBusinessDateModel.js'
+import './style.css'
+import shellTemplate from './template.html?raw'
+import dashboardTemplate from './dashboard/template.html?raw'
+import podsumowanieTemplate from './podsumowanie/template.html?raw'
+import zestawieniaOverviewTemplate from './zestawienia/overview.html?raw'
+import analizyTemplate from './analizy/template.html?raw'
+import raportyGotoweTemplate from './raporty-gotowe/template.html?raw'
+import mojeRaportyTemplate from './moje-raporty/template.html?raw'
+import zestawieniaTemplate from './zestawienia/template.html?raw'
+import historiaTemplate from './shared/history-detail.html?raw'
+import {
+  REPORT_SECTION_DEFINITIONS,
+  getReportDefinition,
+  reportDefinitionsBySection,
+} from './shared/reportRegistry.js'
+import { reportBusinessDateYmd } from './zestawienia/reportBusinessDateModel.js'
 import {
   reportAttendanceSessionDurationSec,
   reportClosedSessionDurationSec,
   reportHasClosedSession,
-} from './reportEventAccountingModel.js'
-import { workIntervalsTotalSeconds } from '../workers/workIntervals.js'
+} from './zestawienia/reportEventAccountingModel.js'
+import {
+  buildReportWorkerHistoryDays,
+  reportWorkerHistoryOpenState,
+} from './zestawienia/reportWorkerHistoryModel.js'
+import {
+  resolveWorkIntervalZoneSnapshot,
+  workIntervalsTotalSeconds,
+} from '../workers/workIntervals.js'
+
+const template = shellTemplate
+  .replace('<!-- REPORTS_DASHBOARD -->', dashboardTemplate)
+  .replace('<!-- REPORTS_PODSUMOWANIE -->', podsumowanieTemplate)
+  .replace('<!-- REPORTS_ZESTAWIENIA_OVERVIEW -->', zestawieniaOverviewTemplate)
+  .replace('<!-- REPORTS_ANALIZY -->', analizyTemplate)
+  .replace('<!-- REPORTS_GOTOWE -->', raportyGotoweTemplate)
+  .replace('<!-- REPORTS_MOJE -->', mojeRaportyTemplate)
+  .replace('<!-- REPORTS_ZESTAWIENIA -->', zestawieniaTemplate)
+  .replace('<!-- REPORTS_HISTORIA -->', historiaTemplate)
+
+const REPORT_BUILDER_PRESENTATION = {
+  eventsOperational: { eyebrow: 'Analiza operacyjna', icon: 'ph-chart-bar' },
+  events: { eyebrow: 'Historia stref', icon: 'ph-activity' },
+  workerTime: { eyebrow: 'Ewidencja czasu', icon: 'ph-users-three' },
+  clients: { eyebrow: 'Raporty klientów', icon: 'ph-buildings' },
+  history: { eyebrow: 'Widok zbiorczy', icon: 'ph-clock-counter-clockwise' },
+  audits: { eyebrow: 'Kontrola jakości', icon: 'ph-clipboard-text' },
+}
 
 export const route = 'reports'
 export const viewId = 'view-reports'
@@ -30,7 +70,6 @@ export function createReportsFeature(ctx) {
     firstDayOfCurrentMonthYmd,
     eventTypeInfo,
     ensureSelectValue,
-    daysAgoYmd,
     dashboardWorkerSurnameDisplayName,
     dashboardResolveZoneLabel,
     dashboardClockLabelToHm,
@@ -43,6 +82,9 @@ export function createReportsFeature(ctx) {
     getWorkers,
     getWorkdays,
     getZones,
+    ensureJsPdfLoaded,
+    ensurePdfUnicodeFont,
+    setPdfUnicodeFont,
     normalizeSearchText,
     openEventEditor,
   } = ctx
@@ -50,13 +92,28 @@ export function createReportsFeature(ctx) {
   let reportsViewInitPromise = null
   let reportGeoPreviewHideTimer = null
   let reportHistoryScopedFilter = null
+  let reportLastTrigger = null
+  let reportBuilderParentSection = 'zestawienia'
+  let reportCurrentDefinition = null
+  let reportLastDetailTrigger = null
+  let reportActiveScreen = 'home'
+  const reportSessionRecent = []
   const reportGeoModalState = {
     lat: '',
     lon: '',
     zoom: 18,
   }
-  const REPORT_HISTORY_SYSTEM_CLIENT_LABEL = 'Best Clean biuro'
-  const REPORT_HISTORY_SYSTEM_ZONE_LABEL = 'SYSTEM'
+  const REPORT_HISTORY_PICKER_MAX_OPTIONS = 36
+  const REPORT_HISTORY_PICKER_EMPTY_MAX_OPTIONS = 18
+  const REPORT_SCREEN_IDS = {
+    home: 'repHome',
+    podsumowanie: 'repSectionSummary',
+    zestawienia: 'repSectionListings',
+    analizy: 'repSectionAnalyses',
+    'raporty-gotowe': 'repSectionReady',
+    'moje-raporty': 'repSectionMine',
+    detail: 'repBuilder',
+  }
 
   function reportSetVisible(id, visible) {
     const element = document.getElementById(id)
@@ -65,6 +122,172 @@ export function createReportsFeature(ctx) {
     }
 
     element.style.display = visible ? '' : 'none'
+  }
+
+  function reportSectionLabel(sectionId) {
+    return REPORT_SECTION_DEFINITIONS.find((section) => section.id === sectionId)?.label ?? 'Raporty'
+  }
+
+  function reportTileToneClass(tone) {
+    const normalized = String(tone ?? '').trim().toLowerCase()
+    return ['cyan', 'green', 'amber', 'violet', 'muted'].includes(normalized)
+      ? `report-tile--${normalized}`
+      : 'report-tile--primary'
+  }
+
+  function reportRenderHomeTiles() {
+    const root = document.getElementById('repHomeTiles')
+    if (!root) {
+      return
+    }
+
+    root.innerHTML = REPORT_SECTION_DEFINITIONS.map((section) => `
+      <button class="report-tile report-section-tile ${reportTileToneClass(section.tone)}" type="button" data-rep-section="${escapeHtml(section.id)}">
+        <span class="report-tile__topline">
+          <span class="report-tile__icon" aria-hidden="true"><i class="ph ${escapeHtml(section.icon)}"></i></span>
+          <span class="report-tile__status">${escapeHtml(section.meta)}</span>
+        </span>
+        <span class="report-tile__copy">
+          <strong>${escapeHtml(section.label)}</strong>
+          <span>${escapeHtml(section.description)}</span>
+        </span>
+        <span class="report-tile__action">Otwórz sekcję <i class="ph ph-arrow-right" aria-hidden="true"></i></span>
+      </button>
+    `).join('')
+  }
+
+  function reportCatalogCard(definition, index = 0) {
+    const classes = `report-tile report-catalog-card ${reportTileToneClass(definition.tone)}`
+    const top = `
+      <span class="report-tile__topline">
+        <span class="report-tile__icon" aria-hidden="true"><i class="ph ${escapeHtml(definition.icon)}"></i></span>
+        <span class="report-tile__status">${definition.available ? 'PDF · CSV' : 'Niedostępne'}</span>
+      </span>
+      <span class="report-tile__copy">
+        <strong>${escapeHtml(definition.label)}</strong>
+        <span>${escapeHtml(definition.description)}</span>
+      </span>
+    `
+
+    if (!definition.available) {
+      return `<article class="${classes} is-disabled" aria-disabled="true">${top}<span class="report-tile__unavailable"><i class="ph ph-lock-key" aria-hidden="true"></i>${escapeHtml(definition.unavailableReason || 'Funkcja nie jest jeszcze dostępna.')}</span></article>`
+    }
+
+    const focusId = definition.section === 'zestawienia' && index === 0 ? ' id="repListingsFirst"' : ''
+    return `<button class="${classes}" type="button" data-report-id="${escapeHtml(definition.id)}"${focusId}>${top}<span class="report-tile__action">Ustaw parametry <i class="ph ph-arrow-right" aria-hidden="true"></i></span></button>`
+  }
+
+  function reportRenderCatalog(containerId, sectionId) {
+    const root = document.getElementById(containerId)
+    if (!root) {
+      return
+    }
+    root.innerHTML = reportDefinitionsBySection(sectionId).map(reportCatalogCard).join('')
+  }
+
+  function reportRenderNavigationCatalogs() {
+    reportRenderHomeTiles()
+    reportRenderCatalog('repListingsCatalog', 'zestawienia')
+    reportRenderCatalog('repReadyCatalog', 'raporty-gotowe')
+    reportRenderCatalog('repMineCatalog', 'moje-raporty')
+  }
+
+  function reportShowScreen(screenId) {
+    Object.entries(REPORT_SCREEN_IDS).forEach(([key, id]) => reportSetVisible(id, key === screenId))
+    reportActiveScreen = screenId
+    const activeSection = screenId === 'detail' ? reportBuilderParentSection : screenId
+    window.dispatchEvent(new CustomEvent('reports-section-change', {
+      detail: { sectionId: activeSection },
+    }))
+    document.getElementById('view-reports')?.scrollIntoView({ block: 'start' })
+  }
+
+  function reportRenderSummary() {
+    const workers = Array.isArray(appState.workers) ? appState.workers : []
+    const clients = Array.isArray(appState.clients) ? appState.clients : []
+    const zones = Array.isArray(appState.zones) ? appState.zones : []
+    const kpiRoot = document.getElementById('repSummaryKpis')
+    if (kpiRoot) {
+      kpiRoot.innerHTML = [
+        ['ph-users-three', 'Pracownicy', workers.length, 'green'],
+        ['ph-buildings', 'Klienci', clients.length, 'primary'],
+        ['ph-map-pin-area', 'Strefy', zones.length, 'cyan'],
+      ].map(([icon, label, value, tone]) => `
+        <article class="reports-summary-kpi reports-summary-kpi--${tone}">
+          <span class="reports-summary-kpi__icon" aria-hidden="true"><i class="ph ${icon}"></i></span>
+          <span><small>${label}</small><strong>${value}</strong></span>
+        </article>
+      `).join('')
+    }
+
+    const incompleteClients = clients.filter((client) => !String(client?.name ?? client?.label ?? '').trim()).length
+    const incompleteZones = zones.filter((zone) => !String(zone?.clientId ?? zone?.clientName ?? zone?.klient ?? '').trim()).length
+    const alerts = []
+    if (incompleteClients) alerts.push(`${incompleteClients} ${incompleteClients === 1 ? 'klient bez nazwy' : 'klientów bez nazwy'}`)
+    if (incompleteZones) alerts.push(`${incompleteZones} ${incompleteZones === 1 ? 'strefa bez przypisanego klienta' : 'stref bez przypisanego klienta'}`)
+    const alertsRoot = document.getElementById('repSummaryAlerts')
+    if (alertsRoot) {
+      alertsRoot.innerHTML = alerts.length
+        ? alerts.map((label) => `<div class="reports-state-row reports-state-row--warning"><i class="ph ph-warning" aria-hidden="true"></i><span>${escapeHtml(label)}</span></div>`).join('')
+        : '<div class="reports-state-empty reports-state-empty--success"><i class="ph ph-check-circle" aria-hidden="true"></i><div><strong>Brak wykrytych braków</strong><span>Dane klientów i stref są kompletne.</span></div></div>'
+    }
+
+    const recentRoot = document.getElementById('repSummaryRecent')
+    if (recentRoot) {
+      recentRoot.innerHTML = reportSessionRecent.length
+        ? reportSessionRecent.map((entry) => `<button class="reports-state-row reports-state-row--link" type="button" data-report-id="${escapeHtml(entry.id)}"><span><strong>${escapeHtml(entry.label)}</strong><small>${escapeHtml(entry.time)}</small></span><i class="ph ph-arrow-up-right" aria-hidden="true"></i></button>`).join('')
+        : '<div class="reports-state-empty"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i><div><strong>Brak użytych raportów</strong><span>Wygenerowane raporty pojawią się tutaj do końca sesji.</span></div></div>'
+    }
+  }
+
+  function reportRememberRecentReport() {
+    if (!reportCurrentDefinition?.id) {
+      return
+    }
+    const now = new Intl.DateTimeFormat('pl-PL', { hour: '2-digit', minute: '2-digit' }).format(new Date())
+    const entry = { id: reportCurrentDefinition.id, label: reportCurrentDefinition.label, time: `Użyto o ${now}` }
+    const existingIndex = reportSessionRecent.findIndex((item) => item.id === entry.id)
+    if (existingIndex >= 0) {
+      reportSessionRecent.splice(existingIndex, 1)
+    }
+    reportSessionRecent.unshift(entry)
+    reportSessionRecent.splice(5)
+    reportRenderSummary()
+  }
+
+  async function reportOpenSection(sectionId, { trigger = null, focusCatalog = false } = {}) {
+    if (!Object.prototype.hasOwnProperty.call(REPORT_SCREEN_IDS, sectionId) || sectionId === 'detail') {
+      return false
+    }
+    if (trigger) {
+      reportLastTrigger = trigger
+    }
+    reportShowScreen(sectionId)
+    if (sectionId === 'podsumowanie') {
+      await ensureReportsReferenceDataLoaded()
+      reportRenderSummary()
+    }
+    window.requestAnimationFrame(() => {
+      const focusTarget = focusCatalog
+        ? document.getElementById('repListingsFirst')
+        : document.querySelector(`#${REPORT_SCREEN_IDS[sectionId]} ${sectionId === 'home' ? 'h1' : 'h2'}`)
+      focusTarget?.focus({ preventScroll: true })
+    })
+    return true
+  }
+
+  function reportBackToHome() {
+    reportShowScreen('home')
+    reportCurrentDefinition = null
+    reportGeoHidePreview()
+    reportGeoCloseModal()
+    window.requestAnimationFrame(() => {
+      if (reportLastTrigger?.isConnected) {
+        reportLastTrigger.focus({ preventScroll: true })
+      } else {
+        document.querySelector('#repHome h1')?.focus({ preventScroll: true })
+      }
+    })
   }
 
   function reportSetStatus(message = '', isError = false) {
@@ -125,10 +348,16 @@ export function createReportsFeature(ctx) {
     reportSetStatus('')
     appState.reportLastCsv = ''
 
-    const downloadButton = document.getElementById('repDownloadCsv')
-    if (downloadButton) {
-      downloadButton.disabled = true
-    }
+    document.querySelectorAll('[data-rep-export]').forEach((button) => {
+      button.disabled = true
+    })
+  }
+
+  function reportUpdateExportButtons() {
+    const hasData = Boolean(String(appState.reportLastCsv ?? '').trim())
+    document.querySelectorAll('[data-rep-export]').forEach((button) => {
+      button.disabled = !hasData
+    })
   }
 
   async function ensureReportsReferenceDataLoaded() {
@@ -199,6 +428,26 @@ export function createReportsFeature(ctx) {
     })
   }
 
+  function reportHistoryPickerFilteredOptions(options, query, currentValue, { expandOnEmpty = false } = {}) {
+    const sourceOptions = Array.isArray(options) ? options : []
+    const queryKey = normalizeSearchText(query)
+    const normalizedCurrent = String(currentValue ?? '').trim()
+    const maxOptions = queryKey ? REPORT_HISTORY_PICKER_MAX_OPTIONS : REPORT_HISTORY_PICKER_EMPTY_MAX_OPTIONS
+    const selectedOption = normalizedCurrent
+      ? sourceOptions.find((option) => String(option?.value ?? '').trim() === normalizedCurrent) ?? null
+      : null
+
+    if (!queryKey) {
+      const baseOptions = expandOnEmpty ? sourceOptions.slice(0, maxOptions) : []
+      if (selectedOption && !baseOptions.some((option) => String(option?.value ?? '').trim() === normalizedCurrent)) {
+        return [selectedOption, ...baseOptions].slice(0, maxOptions)
+      }
+      return baseOptions
+    }
+
+    return reportHistoryFilterOptions(sourceOptions, query).slice(0, maxOptions)
+  }
+
   function reportHistoryGetSelectConfig(kind) {
     const normalizedKind = String(kind ?? '').trim().toLowerCase()
     if (normalizedKind === 'worker' || normalizedKind === 'workers') {
@@ -229,9 +478,15 @@ export function createReportsFeature(ctx) {
 
   function reportHistorySetSelectExpanded(config, expanded, optionCount = 0) {
     const select = document.getElementById(config.selectId)
+    const input = document.getElementById(config.inputId)
     if (!select) {
       return
     }
+
+    const picker = select.closest('.rep-history-picker')
+    picker?.classList.toggle('is-expanded', Boolean(expanded))
+    input?.setAttribute('aria-expanded', expanded ? 'true' : 'false')
+    select.setAttribute('aria-expanded', expanded ? 'true' : 'false')
 
     if (!expanded) {
       select.size = 1
@@ -254,6 +509,15 @@ export function createReportsFeature(ctx) {
     reportHistoryCollapseSelect('zone')
   }
 
+  function reportHistoryCollapseOtherSelects(activeKind = '') {
+    const normalizedActiveKind = String(activeKind ?? '').trim().toLowerCase()
+    ;['client', 'worker', 'zone'].forEach((kind) => {
+      if (kind !== normalizedActiveKind) {
+        reportHistoryCollapseSelect(kind)
+      }
+    })
+  }
+
   function reportHistoryMaybeCollapseSelect(kind) {
     const config = reportHistoryGetSelectConfig(kind)
     const activeId = String(document.activeElement?.id ?? '').trim()
@@ -264,7 +528,7 @@ export function createReportsFeature(ctx) {
     reportHistorySetSelectExpanded(config, false, 0)
   }
 
-  function reportHistoryApplySelectFilter(kind, { expandOnEmpty = false } = {}) {
+  function reportHistoryApplySelectFilter(kind, { expandOnEmpty = false, open = false } = {}) {
     const config = reportHistoryGetSelectConfig(kind)
 
     const select = document.getElementById(config.selectId)
@@ -274,7 +538,7 @@ export function createReportsFeature(ctx) {
 
     const currentValue = String(select.value ?? '').trim()
     const query = String(document.getElementById(config.inputId)?.value ?? '').trim()
-    const filteredOptions = reportHistoryFilterOptions(config.options, query)
+    const filteredOptions = reportHistoryPickerFilteredOptions(config.options, query, currentValue, { expandOnEmpty })
     const placeholderLabel = query && !filteredOptions.length ? '(brak dopasowan)' : config.placeholderLabel
 
     reportSetSelectOptions(config.selectId, filteredOptions, placeholderLabel)
@@ -284,7 +548,7 @@ export function createReportsFeature(ctx) {
       placeholderOption.hidden = hasMatches
       placeholderOption.disabled = hasMatches
     }
-    reportHistorySetSelectExpanded(config, Boolean(query) || expandOnEmpty, filteredOptions.length)
+    reportHistorySetSelectExpanded(config, Boolean(open) && (Boolean(query) || expandOnEmpty), filteredOptions.length)
 
     if (currentValue && filteredOptions.some((option) => option.value === currentValue)) {
       select.value = currentValue
@@ -492,7 +756,7 @@ export function createReportsFeature(ctx) {
     reportRefreshZoneOptions('B')
     reportDefaultDates()
     reportHistorySetTab(appState.reportHistoryTab)
-    reportHistoryApplyRangeMode(reportHistoryReadRangeMode(), { force: false })
+    reportHistoryEnsureDateRange()
     reportHistoryResetResults({ clearStatus: true })
     reportHistorySetStatus('Wybierz filtr i kliknij "Pokaż historię".')
     reportSetKpiValues()
@@ -553,8 +817,8 @@ export function createReportsFeature(ctx) {
     if (normalized === 'history') {
       return {
         tab: appState.reportHistoryTab,
-        title: 'Historia',
-        subtitle: 'Historia dnia dla klienta, osoby lub strefy.',
+        title: 'Historia czasu pracy',
+        subtitle: 'Historia czasu pracy według pracownika, klienta lub strefy.',
         status: 'Wybierz filtr i kliknij "Pokaż historię".',
         showTabs: true,
       }
@@ -572,40 +836,20 @@ export function createReportsFeature(ctx) {
     tabs.style.display = visible ? '' : 'none'
   }
 
-  function reportHistoryReadRangeMode() {
-    return document.getElementById('repHistoryRangeWeek')?.checked ? 'week' : 'month'
-  }
-
-  function reportHistoryApplyRangeMode(mode, { force = false } = {}) {
-    const normalized = String(mode ?? '').trim().toLowerCase() === 'week' ? 'week' : 'month'
-    const monthRadio = document.getElementById('repHistoryRangeMonth')
-    const weekRadio = document.getElementById('repHistoryRangeWeek')
+  function reportHistoryEnsureDateRange() {
     const fromInput = document.getElementById('repHistoryFrom')
     const toInput = document.getElementById('repHistoryTo')
-
-    if (monthRadio) {
-      monthRadio.checked = normalized === 'month'
-    }
-    if (weekRadio) {
-      weekRadio.checked = normalized === 'week'
-    }
 
     if (!fromInput || !toInput) {
       return
     }
 
-    if (!force && String(fromInput.value ?? '').trim() && String(toInput.value ?? '').trim()) {
-      return
+    if (!String(fromInput.value ?? '').trim()) {
+      fromInput.value = firstDayOfCurrentMonthYmd()
     }
-
-    if (normalized === 'week') {
-      fromInput.value = daysAgoYmd(6)
+    if (!String(toInput.value ?? '').trim()) {
       toInput.value = todayYmd()
-      return
     }
-
-    fromInput.value = firstDayOfCurrentMonthYmd()
-    toInput.value = todayYmd()
   }
 
   function reportHistorySetStatus(message = '', isError = false) {
@@ -622,6 +866,7 @@ export function createReportsFeature(ctx) {
     const loading = document.getElementById('repHistoryLoading')
     const loadingText = loading?.querySelector('[data-rep-history-loading-text]')
     const button = document.getElementById('repHistoryRun')
+    const buttonLabel = button?.querySelector('span')
 
     if (loading) {
       loading.style.display = isLoading ? 'grid' : 'none'
@@ -632,7 +877,9 @@ export function createReportsFeature(ctx) {
     }
     if (button) {
       button.disabled = Boolean(isLoading)
-      button.textContent = isLoading ? 'Ładowanie...' : 'Pokaż historię'
+    }
+    if (buttonLabel) {
+      buttonLabel.textContent = isLoading ? 'Ładowanie...' : 'Pokaż historię'
     }
   }
 
@@ -645,7 +892,10 @@ export function createReportsFeature(ctx) {
     reportGeoCloseModal()
     reportHistoryCollapseAllSelects()
     document.querySelectorAll('[data-rep-history-tab]').forEach((button) => {
-      button.classList.toggle('active', button.getAttribute('data-rep-history-tab') === normalized)
+      const isActive = button.getAttribute('data-rep-history-tab') === normalized
+      button.classList.toggle('active', isActive)
+      button.setAttribute('aria-selected', isActive ? 'true' : 'false')
+      button.setAttribute('tabindex', isActive ? '0' : '-1')
     })
 
     reportSetVisible('repHistoryClientWrap', normalized === 'objects')
@@ -671,9 +921,18 @@ export function createReportsFeature(ctx) {
 
     const days = rows.length
     const events = rows.reduce((sum, row) => sum + Number(row.countAll ?? 0), 0)
-    const running = rows.reduce((sum, row) => sum + Number(row.runningCount ?? 0), 0)
+    const running = rows.reduce((sum, row) => sum + Number(row.openSessionCount ?? row.runningCount ?? 0), 0)
     const closedSec = rows.reduce((sum, row) => sum + Number(row.closedSec ?? 0), 0)
     const isWorkersTab = reportHistoryNormalizeTab(appState.reportHistoryTab) === 'workers'
+    const sessions = rows.reduce((sum, row) => sum + (Array.isArray(row.sessions) ? row.sessions.length : 0), 0)
+    const openDays = rows.filter((row) => String(row?.integrityState ?? 'COMPLETE').toUpperCase() === 'OPEN_SESSION').length
+    const issues = rows.filter((row) => {
+      const state = String(row?.integrityState ?? 'COMPLETE').toUpperCase()
+      if (state === 'OPEN_SESSION') {
+        return reportWorkerHistoryOpenState(row, todayYmd()).isMissingStop
+      }
+      return state !== 'COMPLETE'
+    }).length
     const selectedWorkerLabel = String(
       document.getElementById('repHistoryWorker')?.selectedOptions?.[0]?.textContent ??
         document.getElementById('repHistoryWorkerSearch')?.value ??
@@ -682,25 +941,66 @@ export function createReportsFeature(ctx) {
     const selectedLabel = isWorkersTab ? selectedWorkerLabel || '-' : 'Wybrany zakres'
     const selectedCaption = isWorkersTab ? 'Osoba' : 'Zestawienie'
 
+    if (isWorkersTab) {
+      summary.innerHTML = `
+        <div class="rep-history-summary-card is-worker-kpis" aria-label="Podsumowanie czasu pracy pracownika">
+          <article class="rep-history-summary-tile is-person">
+            <div><span>Pracownik</span><strong>${escapeHtml(selectedLabel)}</strong><small>Wybrana osoba</small></div>
+            <i class="ph ph-users-three" aria-hidden="true"></i>
+          </article>
+          <article class="rep-history-summary-tile is-days">
+            <div><span>Dni</span><strong>${escapeHtml(String(days))}</strong><small>W wybranym zakresie</small></div>
+            <i class="ph ph-calendar-blank" aria-hidden="true"></i>
+          </article>
+          <article class="rep-history-summary-tile is-sessions">
+            <div><span>Sesje</span><strong>${escapeHtml(String(sessions))}</strong><small>Zamknięte i otwarte</small></div>
+            <i class="ph ph-list-checks" aria-hidden="true"></i>
+          </article>
+          <article class="rep-history-summary-tile is-open">
+            <div><span>Otwarte dni</span><strong>${escapeHtml(String(openDays))}</strong><small>Bez zamknięcia dnia</small></div>
+            <i class="ph ph-clock-countdown" aria-hidden="true"></i>
+          </article>
+          <article class="rep-history-summary-tile is-review">
+            <div><span>Do weryfikacji</span><strong>${escapeHtml(String(issues))}</strong><small>Braki i niespójności</small></div>
+            <i class="ph ph-warning" aria-hidden="true"></i>
+          </article>
+          <article class="rep-history-summary-tile is-total">
+            <div><span>Czas pracy</span><strong>${escapeHtml(durationSecondsToHms(closedSec))}</strong><small>Suma zamkniętych sesji</small></div>
+            <i class="ph ph-timer" aria-hidden="true"></i>
+          </article>
+        </div>
+      `
+      reportSetVisible('repHistorySummary', true)
+      return
+    }
+
     summary.innerHTML = `
       <div class="rep-history-summary-card">
         <div class="rep-history-summary-person">
           <span>${escapeHtml(selectedCaption)}</span>
           <strong>${escapeHtml(selectedLabel)}</strong>
         </div>
-        <div class="rep-history-summary-grid">
+        <div class="rep-history-summary-grid${isWorkersTab ? ' is-workers' : ''}">
           <div class="rep-history-summary-kpi">
             <span>Dni</span>
             <strong>${escapeHtml(String(days))}</strong>
           </div>
           <div class="rep-history-summary-kpi">
-            <span>Wpisy</span>
-            <strong>${escapeHtml(String(events))}</strong>
+            <span>${isWorkersTab ? 'Sesje' : 'Wpisy'}</span>
+            <strong>${escapeHtml(String(isWorkersTab ? sessions : events))}</strong>
           </div>
           <div class="rep-history-summary-kpi">
-            <span>Otwarte</span>
-            <strong>${escapeHtml(String(running))}</strong>
+            <span>${isWorkersTab ? 'Otwarte dni' : 'Otwarte'}</span>
+            <strong>${escapeHtml(String(isWorkersTab ? openDays : running))}</strong>
           </div>
+          ${
+            isWorkersTab
+              ? `<div class="rep-history-summary-kpi">
+                  <span>Do weryfikacji</span>
+                  <strong>${escapeHtml(String(issues))}</strong>
+                </div>`
+              : ''
+          }
           <div class="rep-history-summary-kpi is-total">
             <span>Czas pracy</span>
             <strong>${escapeHtml(durationSecondsToHms(closedSec))}</strong>
@@ -800,18 +1100,6 @@ export function createReportsFeature(ctx) {
     )
   }
 
-  function reportHistoryHasDayStart(row) {
-    return Boolean(toIso(row?.dayStartIso ?? row?.qrStartSourceItem?.dayStartAt ?? row?.qrStartSourceItem?.startAt))
-  }
-
-  function reportHistoryHasDayStop(row) {
-    return reportHistoryIsDayStopSource(row?.qrStopSourceItem)
-  }
-
-  function reportHistoryHasOpenWorkerDay(row) {
-    return reportHistoryHasDayStart(row) && !reportHistoryHasDayStop(row)
-  }
-
   function reportHistoryDayStartCloseSource(row) {
     const source = row?.qrStartSourceItem
     if (!source || typeof source !== 'object') {
@@ -825,6 +1113,165 @@ export function createReportsFeature(ctx) {
 
     const startIso = toIso(source?.startAt ?? source?.dayStartAt ?? row?.dayStartIso)
     return startIso ? source : null
+  }
+
+  function reportWorkerHistoryStatusMeta(row = {}) {
+    const state = String(row?.integrityState ?? 'COMPLETE').trim().toUpperCase()
+    if (state === 'OPEN_SESSION') {
+      const openState = reportWorkerHistoryOpenState(row, todayYmd())
+      return {
+        state,
+        label: openState.label,
+        tone: openState.tone,
+        icon: openState.isMissingStop ? 'ph-warning-circle' : 'ph-clock',
+      }
+    }
+    if (state === 'INCONSISTENT') return { state, label: 'Do weryfikacji', tone: 'warning', icon: 'ph-warning' }
+    if (state === 'INVALID') return { state, label: 'Błąd danych', tone: 'danger', icon: 'ph-warning-octagon' }
+    return { state: 'COMPLETE', label: 'Kompletny', tone: 'complete', icon: 'ph-check-circle' }
+  }
+
+  function reportWorkerHistoryIssueLabel(entry = {}) {
+    const labels = {
+      WORKDAY_MISSING: 'Brak dnia pracy dla zarejestrowanych aktywności.',
+      WORKDAY_START_MISSING: 'Brak poprawnego znacznika START.',
+      WORKDAY_END_BEFORE_START: 'STOP występuje przed START.',
+      WORKDAY_ENVELOPE_EXCEEDED: 'Sesja przekracza dozwoloną długość.',
+      WORKDAY_FUTURE_TIMESTAMP: 'Dzień zawiera datę z przyszłości.',
+      OPEN_SESSION: 'Sesja pozostaje otwarta.',
+      CLOSED_WORKDAY_WITH_OPEN_SESSION: 'Zamknięty dzień zawiera otwartą sesję.',
+      CLOSED_WORKDAY_WITH_OPEN_ACTIVITY: 'Zamknięty dzień zawiera otwartą aktywność.',
+      OVERLAPPING_WORK_SESSIONS: 'Sesje nakładają się — czas został policzony bez duplikowania.',
+      DUPLICATE_WORKDAY_ID: 'Wykryto zduplikowany dzień pracy.',
+      DUPLICATE_EVENT_ID: 'Wykryto zduplikowane zdarzenie.',
+      ACTIVITY_OUTSIDE_SESSION: 'Aktywność znajduje się poza zakresem sesji.',
+      ACTIVITY_WORKER_MISMATCH: 'Aktywność jest przypisana do innego pracownika.',
+    }
+    const code = String(entry?.code ?? '').trim().toUpperCase()
+    return labels[code] || 'Dzień wymaga sprawdzenia danych.'
+  }
+
+  function reportWorkerHistoryEntityMeta(source = {}) {
+    const zoneSource = source?.zoneId ?? source?.utilityRoomId ?? source?.roomId ?? source?.zoneName ?? source?.strefa
+    const snapshot = resolveWorkIntervalZoneSnapshot(source, 'START', appState.zones)
+    const zoneLabel = String(
+      source?.zoneName ?? source?.strefa ?? source?.zoneLabel ?? snapshot?.zoneName ?? zoneSource ?? '-',
+    ).trim() || '-'
+    const qrCode = String(snapshot?.qrCode ?? source?.qrCode ?? source?.zoneQr ?? '').trim()
+    const zoneDisplay = qrCode && qrCode !== zoneLabel ? `${zoneLabel} (${qrCode})` : zoneLabel
+    const clientLabel = resolveClientLabelWithQrFallback(
+      String(source?.clientName ?? source?.klient ?? source?.clientLabel ?? snapshot?.clientName ?? '-').trim() || '-',
+      zoneSource,
+    )
+    return { clientLabel, zoneLabel, qrCode, zoneDisplay, zoneSource: zoneSource || source }
+  }
+
+  function reportWorkerHistoryGeoButton(source = {}, edge = 'start') {
+    const value = reportHistoryResolveDayGpsCoords(source, edge)
+    const parsed = reportHistoryParseGeoPair(value)
+    if (!parsed) return ''
+    return `
+      <button
+        class="rep-worker-geo"
+        type="button"
+        data-rep-geo-lat="${escapeHtml(parsed.lat)}"
+        data-rep-geo-lon="${escapeHtml(parsed.lon)}"
+        aria-label="Pokaż lokalizację na mapie"
+        title="Pokaż lokalizację na mapie"
+      ><i class="ph ph-map-pin" aria-hidden="true"></i></button>
+    `
+  }
+
+  function reportWorkerHistoryActivityHtml(activity = {}) {
+    const meta = reportWorkerHistoryEntityMeta(activity)
+    const type = String(activity?.activityType ?? activity?.eventType ?? activity?.type ?? 'CLEAN').trim().toUpperCase() || 'CLEAN'
+    const startLabel = formatTime(activity?.startAt)
+    const stopLabel = activity?.isOpen ? 'W toku' : formatTime(activity?.endAt)
+    const timeLabel = activity?.isOpen || !activity?.endAt ? startLabel : `${startLabel}–${stopLabel}`
+    return `
+      <div class="rep-worker-activity${activity?.isOpen ? ' is-open' : ''}">
+        <span class="rep-worker-activity__rail" aria-hidden="true"><i class="ph ph-arrow-bend-down-right"></i></span>
+        <div class="rep-worker-activity__copy">
+          <strong>${escapeHtml(type)}</strong>
+          <span>${escapeHtml(meta.clientLabel)} · ${escapeHtml(meta.zoneDisplay)}</span>
+        </div>
+        <time>${escapeHtml(timeLabel || '-')}</time>
+        ${reportWorkerHistoryGeoButton(activity, 'start')}
+      </div>
+    `
+  }
+
+  function reportWorkerHistorySessionHtml(session = {}, index = 0, { missingStop = false } = {}) {
+    const activities = Array.isArray(session?.activities) ? session.activities : []
+    const anchor = activities[0] ?? session
+    const meta = reportWorkerHistoryEntityMeta(anchor)
+    const sessionNumber = Number(session?.sessionNumber) || index + 1
+    const isOpen = Boolean(session?.isOpen || !session?.endAt)
+    const durationLabel = isOpen ? 'W toku' : durationSecondsToHms(session?.durationSec || 0)
+    return `
+      <article class="rep-worker-session${isOpen ? missingStop ? ' is-missing-stop' : ' is-open' : ''}">
+        <div class="rep-worker-session__marker">${escapeHtml(String(sessionNumber))}</div>
+        <div class="rep-worker-session__content">
+          <div class="rep-worker-code rep-worker-code--start">
+            <span class="rep-worker-code__icon" aria-hidden="true"><i class="ph ph-sign-in"></i></span>
+            <div class="rep-worker-code__copy">
+              <strong>START</strong>
+              <small>Sesja ${escapeHtml(String(sessionNumber))}</small>
+              <span>Klient: ${escapeHtml(meta.clientLabel)} · Strefa: ${escapeHtml(meta.zoneDisplay)}</span>
+            </div>
+            <time>${escapeHtml(formatTime(session?.startAt) || '-')}</time>
+            ${reportWorkerHistoryGeoButton(session, 'start')}
+          </div>
+          ${activities.length ? `<div class="rep-worker-activities">${activities.map(reportWorkerHistoryActivityHtml).join('')}</div>` : '<div class="rep-worker-activities-empty">Brak aktywności operacyjnych w tej sesji.</div>'}
+          <div class="rep-worker-code rep-worker-code--${isOpen ? missingStop ? 'missing-stop' : 'open' : 'stop'}">
+            <span class="rep-worker-code__icon" aria-hidden="true"><i class="ph ${isOpen ? missingStop ? 'ph-warning-circle' : 'ph-clock' : 'ph-sign-out'}"></i></span>
+            <div class="rep-worker-code__copy">
+              <strong>${isOpen ? missingStop ? 'BRAK STOP' : 'SESJA OTWARTA' : 'STOP'}</strong>
+              <small>Sesja ${escapeHtml(String(sessionNumber))}</small>
+              <span>${isOpen ? missingStop ? 'Dzień wymaga uzupełnienia STOP' : 'Oczekiwanie na zakończenie dnia' : `Czas sesji: ${escapeHtml(durationLabel)}`}</span>
+            </div>
+            <time>${escapeHtml(isOpen ? missingStop ? 'Brak STOP' : 'W toku' : formatTime(session?.endAt) || '-')}</time>
+            ${isOpen ? '' : reportWorkerHistoryGeoButton(session, 'stop')}
+          </div>
+        </div>
+      </article>
+    `
+  }
+
+  function reportWorkerHistoryUnassignedHtml(rows = []) {
+    if (!Array.isArray(rows) || !rows.length) return ''
+    return `
+      <section class="rep-worker-unassigned" aria-label="Aktywności poza sesją">
+        <header><i class="ph ph-warning" aria-hidden="true"></i><span><strong>Poza sesją</strong><small>${rows.length} ${rows.length === 1 ? 'aktywność' : 'aktywności'} bez powiązanego dnia pracy</small></span></header>
+        <div>${rows.map(reportWorkerHistoryActivityHtml).join('')}</div>
+      </section>
+    `
+  }
+
+  function reportWorkerHistoryDetailsHtml(row = {}, dayKey = '') {
+    const sessions = Array.isArray(row?.sessions) ? row.sessions : []
+    const issues = Array.isArray(row?.integrityIssues) ? row.integrityIssues : []
+    const openState = reportWorkerHistoryOpenState(row, todayYmd())
+    const reconciliationButton = canManageEvents() && dayKey
+      ? `<button class="rep-btn primary rep-worker-reconcile" type="button" data-rep-history-reconcile-day="${escapeHtml(dayKey)}"><i class="ph ph-wrench" aria-hidden="true"></i><span>Przegląd i naprawa dnia</span></button>`
+      : ''
+    const issuesHtml = issues.length
+      ? `<div class="rep-worker-issues">${issues.map((entry) => `<div><i class="ph ph-warning-circle" aria-hidden="true"></i><span>${escapeHtml(reportWorkerHistoryIssueLabel(entry))}</span></div>`).join('')}</div>`
+      : ''
+    return `
+      <div class="rep-worker-day-detail">
+        <div class="rep-worker-sessions">
+          ${sessions.length ? sessions.map((session, index) => reportWorkerHistorySessionHtml(session, index, { missingStop: openState.isMissingStop })).join('') : '<div class="rep-worker-no-sessions"><i class="ph ph-clock-countdown" aria-hidden="true"></i><div><strong>Brak sesji START/STOP</strong><span>Aktywności z tego dnia nie tworzą potwierdzonego czasu pracy.</span></div></div>'}
+        </div>
+        ${reportWorkerHistoryUnassignedHtml(row?.unassignedActivities)}
+        ${issuesHtml}
+        <footer class="rep-worker-day-total">
+          <div class="rep-worker-day-total__metric"><span><i class="ph ph-timer" aria-hidden="true"></i> Łączny czas pracy</span><strong>${escapeHtml(durationSecondsToHms(row?.closedSec || 0))}</strong></div>
+          <div class="rep-worker-day-total__secondary"><span>Przerwy</span><strong>${escapeHtml(durationSecondsToHms(row?.pauseSec || 0))}</strong></div>
+          ${reconciliationButton}
+        </footer>
+      </div>
+    `
   }
 
   function reportHistoryRenderDetails(row, tab, dayKey = '') {
@@ -869,83 +1316,8 @@ export function createReportsFeature(ctx) {
     }
 
     if (tab === 'workers') {
-      const hasDayStop = reportHistoryHasDayStop(row)
-      const reconciliationAction = canManageEvents() && dayKey
-        ? `<button class="btn2" type="button" data-rep-history-reconcile-day="${escapeHtml(dayKey)}">Przegląd</button>`
-        : '-'
-      const qrStartIsSystem = reportHistoryIsSystemEntrySource(row?.qrStartSourceItem)
-      const qrStopIsSystem = reportHistoryIsSystemEntrySource(row?.qrStopSourceItem)
-      const detailsBody = details
-        .map(
-          (detail) => {
-            const resolvedClient = resolveClientLabelWithQrFallback(detail.clientLabel || '-', detail.zoneLabel || '-')
-            return `
-            <tr>
-              <td>${escapeHtml(resolvedClient)}</td>
-              <td>${zoneNameWithQrHtml(detail.zoneLabel || '-', detail.sourceItem)}</td>
-              <td>${escapeHtml(detail.locationLabel || '-')}</td>
-              <td class="time-start">${escapeHtml(detail.startLabel || '-')}</td>
-              <td class="time-stop">${escapeHtml(detail.stopLabel || '-')}</td>
-              <td class="ta-right">${escapeHtml(detail.durationLabel || '-')}</td>
-              <td class="ta-right">${escapeHtml(detail.statusLabel || '-')}</td>
-              <td class="ta-right rep-history-edit-cell">${reconciliationAction}</td>
-            </tr>
-          `
-          },
-        )
-        .join('')
-      const qrStartClient = qrStartIsSystem
-        ? REPORT_HISTORY_SYSTEM_CLIENT_LABEL
-        : resolveClientLabelWithQrFallback(row.qrStartClientLabel || '-', row.qrStartZoneCode || '-')
-      const qrStopClient = qrStopIsSystem
-        ? REPORT_HISTORY_SYSTEM_CLIENT_LABEL
-        : resolveClientLabelWithQrFallback(row.qrStopClientLabel || '-', row.qrStopZoneCode || '-')
-      const qrStartZoneLabel = qrStartIsSystem ? REPORT_HISTORY_SYSTEM_ZONE_LABEL : String(row.qrStartZoneCode || '-')
-      const qrStopZoneLabel = qrStopIsSystem ? REPORT_HISTORY_SYSTEM_ZONE_LABEL : String(row.qrStopZoneCode || '-')
-      const qrStartLocationLabel = qrStartIsSystem ? REPORT_HISTORY_SYSTEM_ZONE_LABEL : String(row.qrStartGeoLabel || '-')
-      const qrStopLocationLabel = qrStopIsSystem ? REPORT_HISTORY_SYSTEM_ZONE_LABEL : String(row.qrStopGeoLabel || '-')
-      const qrStartZoneSource = row.qrStartZoneCode && row.qrStartZoneCode !== '-'
-        ? row.qrStartZoneCode
-        : (row?.qrStartSourceItem ?? qrStartZoneLabel)
-      const qrStopZoneSource = row.qrStopZoneCode && row.qrStopZoneCode !== '-'
-        ? row.qrStopZoneCode
-        : (row?.qrStopSourceItem ?? qrStopZoneLabel)
-      const qrStartRow = `
-        <tr class="rep-history-marker-row">
-          <td>${escapeHtml(qrStartClient)}</td>
-          <td>${zoneNameWithQrHtml(qrStartZoneLabel, qrStartZoneSource)}</td>
-          <td>${reportHistoryGeoCellHtml(qrStartLocationLabel)}</td>
-          <td class="time-start">${escapeHtml(row.qrStartLabel || '-')}</td>
-          <td class="time-stop">-</td>
-          <td class="ta-right">-</td>
-          <td class="ta-right">QR START</td>
-          <td class="ta-right rep-history-edit-cell">${reconciliationAction}</td>
-        </tr>
-      `
-      const qrStopRow = `
-        <tr class="rep-history-marker-row">
-          <td>${escapeHtml(qrStopClient)}</td>
-          <td>${zoneNameWithQrHtml(qrStopZoneLabel, qrStopZoneSource)}</td>
-          <td>${reportHistoryGeoCellHtml(qrStopLocationLabel)}</td>
-          <td class="time-start">-</td>
-          <td class="time-stop">${escapeHtml(row.qrStopLabel || '-')}</td>
-          <td class="ta-right">-</td>
-          <td class="ta-right">QR STOP</td>
-          <td class="ta-right rep-history-edit-cell">${reconciliationAction}</td>
-        </tr>
-      `
-      const body = `${hasDayStop ? qrStopRow : ''}${detailsBody}${qrStartRow}`
-
-      return `
-        <div class="rep-history-detail">
-          <table class="rep-history-detail-table">
-            <thead>
-              <tr><th>Klient</th><th>Strefa</th><th>Lok.</th><th class="time-start">Start</th><th class="time-stop">Stop</th><th class="ta-right">Czas</th><th class="ta-right">Status</th><th class="ta-right">Napraw dzień</th></tr>
-            </thead>
-            <tbody>${body}</tbody>
-          </table>
-        </div>
-      `
+      // The shared day-card renderer exposes data-rep-history-reconcile-day only for authorized users.
+      return reportWorkerHistoryDetailsHtml(row, dayKey)
     }
 
     const body = details
@@ -976,46 +1348,6 @@ export function createReportsFeature(ctx) {
           </thead>
           <tbody>${body}</tbody>
         </table>
-      </div>
-    `
-  }
-
-  function reportHistoryDayInfoHtml(row) {
-    const startValue = String(row?.qrStartLabel ?? '').trim() || '--:--:--'
-    const hasOpenDay = reportHistoryHasOpenWorkerDay(row)
-    const stopValue = hasOpenDay ? '--:--:--' : String(row?.qrStopLabel ?? '').trim() || '--:--:--'
-    const workValue = durationSecondsToHms(Number(row?.closedSec ?? 0))
-    const dayKey = String(row?.dayKey ?? '').trim()
-    const canReconcileDay = Boolean(dayKey) && canManageEvents()
-    const reconciliationButton = canReconcileDay
-      ? `
-        <button
-          class="btn2 rep-history-stopday-btn"
-          type="button"
-          data-rep-history-reconcile-day="${escapeHtml(dayKey)}"
-        >
-          Przegląd i naprawa dnia
-        </button>
-      `
-      : ''
-
-    return `
-      <div class="rep-history-day-info">
-        <div class="rep-history-day-metrics">
-          <div class="rep-history-time-pill is-start">
-            <span>Start</span>
-            <strong>${escapeHtml(startValue)}</strong>
-          </div>
-          <div class="rep-history-time-pill is-stop">
-            <span>Stop</span>
-            <strong>${escapeHtml(stopValue)}</strong>
-          </div>
-          <div class="rep-history-time-pill is-work">
-            <span>Czas</span>
-            <strong>${escapeHtml(workValue)}</strong>
-          </div>
-        </div>
-        ${reconciliationButton}
       </div>
     `
   }
@@ -1105,6 +1437,7 @@ export function createReportsFeature(ctx) {
     const dayStartSource = reportHistoryDayStartCloseSource(row)
     const source = runningDetail?.sourceItem
       ?? dayStartSource
+      ?? row?.sourceRows?.[0]
       ?? row?.qrStartSourceItem
       ?? details.find((detail) => detail?.sourceItem)?.sourceItem
       ?? row
@@ -1203,7 +1536,64 @@ export function createReportsFeature(ctx) {
     const tab = reportHistoryNormalizeTab(appState.reportHistoryTab)
     const rows = Array.isArray(appState.reportHistoryRows) ? appState.reportHistoryRows : []
     const isWorkersTab = tab === 'workers'
-    const detailLabel = isWorkersTab ? 'Godziny dnia' : 'Szczegóły'
+
+    if (isWorkersTab) {
+      if (!rows.length) {
+        table.innerHTML = `
+          <div class="rep-worker-history-empty" role="status">
+            <i class="ph ph-calendar-x" aria-hidden="true"></i>
+            <div><strong>Brak historii</strong><span>Wybierz pracownika i zakres dat, aby zobaczyć jego sesje.</span></div>
+          </div>
+        `
+        return
+      }
+
+      table.innerHTML = rows.map((row) => {
+        const dayKey = String(row?.dayKey ?? '').trim()
+        const expanded = Boolean(appState.reportHistoryExpanded?.[dayKey])
+        const dayDate = new Date(`${dayKey}T12:00:00`)
+        const weekday = Number.isNaN(dayDate.getTime())
+          ? ''
+          : new Intl.DateTimeFormat('pl-PL', { weekday: 'long' }).format(dayDate)
+        const dayLabel = formatDatePl(`${dayKey}T12:00:00.000Z`)
+        const status = reportWorkerHistoryStatusMeta(row)
+        const sessionsCount = Array.isArray(row?.sessions) ? row.sessions.length : 0
+        const openCount = Number(row?.openSessionCount ?? 0)
+        const openState = reportWorkerHistoryOpenState(row, todayYmd())
+        const stopLabel = openCount ? openState.label : String(row?.qrStopLabel ?? '').trim() || '--:--:--'
+        return `
+          <article class="rep-worker-day-card is-${escapeHtml(status.tone)}${expanded ? ' is-expanded' : ''}" role="listitem">
+            <header class="rep-worker-day-card__header">
+              <div class="rep-worker-day-card__date">
+                <span class="rep-worker-day-card__calendar" aria-hidden="true"><i class="ph ph-calendar-blank"></i></span>
+                <div><strong>${escapeHtml(dayLabel)}</strong><span>${escapeHtml(weekday)}</span></div>
+              </div>
+              <span class="rep-worker-status is-${escapeHtml(status.tone)}"><i class="ph ${escapeHtml(status.icon)}" aria-hidden="true"></i>${escapeHtml(status.label)}</span>
+              <div class="rep-worker-day-card__metrics">
+                <div><span>START</span><strong class="is-start">${escapeHtml(String(row?.qrStartLabel ?? '').trim() || '--:--:--')}</strong></div>
+                <div><span>STOP</span><strong class="is-stop">${escapeHtml(stopLabel)}</strong></div>
+                <div><span>SESJE</span><strong>${escapeHtml(String(sessionsCount))}</strong></div>
+                <div><span>OTWARTE</span><strong>${escapeHtml(String(openCount))}</strong></div>
+                <div class="is-total"><span>CZAS PRACY</span><strong>${escapeHtml(durationSecondsToHms(row?.closedSec || 0))}</strong></div>
+              </div>
+              <button
+                class="rep-worker-day-toggle"
+                type="button"
+                data-rep-history-toggle="${escapeHtml(dayKey)}"
+                aria-expanded="${expanded ? 'true' : 'false'}"
+                aria-label="${expanded ? 'Ukryj' : 'Pokaż'} szczegóły dnia ${escapeHtml(dayLabel)}"
+              ><span>${expanded ? 'Ukryj' : 'Pokaż dzień'}</span><i class="ph ph-caret-down" aria-hidden="true"></i></button>
+            </header>
+            <div class="rep-worker-day-card__detail"${expanded ? '' : ' hidden'}>
+              ${reportWorkerHistoryDetailsHtml(row, dayKey)}
+            </div>
+          </article>
+        `
+      }).join('')
+      return
+    }
+
+    const detailLabel = 'Szczegóły'
     const closedLabel = 'Czas pracy'
     const headHtml = `
       <thead>
@@ -1219,7 +1609,7 @@ export function createReportsFeature(ctx) {
     `
 
     if (!rows.length) {
-      table.innerHTML = `${headHtml}<tbody><tr><td colspan="6" style="text-align:center; padding:18px;">Brak danych</td></tr></tbody>`
+      table.innerHTML = `<div class="rep-table-scroll"><table class="rep-table">${headHtml}<tbody><tr><td colspan="6" style="text-align:center; padding:18px;">Brak danych</td></tr></tbody></table></div>`
       return
     }
 
@@ -1230,9 +1620,7 @@ export function createReportsFeature(ctx) {
         const actionLabel = expanded ? 'Ukryj' : 'Szczegóły'
         const dayLabel = formatDatePl(`${dayKey}T00:00:00.000Z`)
         const detailHtml = reportHistoryRenderDetails(row, tab, dayKey)
-        const detailValue = isWorkersTab
-          ? reportHistoryDayInfoHtml(row)
-          : escapeHtml(String((row.details || []).length))
+        const detailValue = escapeHtml(String((row.details || []).length))
 
         return `
           <tr class="rep-history-main-row">
@@ -1241,7 +1629,7 @@ export function createReportsFeature(ctx) {
             <td class="ta-right">${escapeHtml(String(row.countAll ?? 0))}</td>
             <td class="ta-right">${escapeHtml(durationSecondsToHms(row.closedSec || 0))}</td>
             <td class="ta-right">${escapeHtml(String(row.runningCount ?? 0))}</td>
-            <td class="${isWorkersTab ? 'rep-history-day-info-cell' : 'ta-right'}">${detailValue}</td>
+            <td class="ta-right">${detailValue}</td>
           </tr>
           <tr class="rep-history-detail-row"${expanded ? '' : ' style="display:none;"'}>
             <td colspan="6">${detailHtml}</td>
@@ -1250,15 +1638,17 @@ export function createReportsFeature(ctx) {
       })
       .join('')
 
-    table.innerHTML = `${headHtml}<tbody>${bodyHtml}</tbody>`
+    table.innerHTML = `<div class="rep-table-scroll"><table class="rep-table">${headHtml}<tbody>${bodyHtml}</tbody></table></div>`
   }
 
   function reportHistoryResetResults({ clearStatus = true } = {}) {
     appState.reportHistoryRows = []
     appState.reportHistoryExpanded = {}
     appState.reportHistoryEditableMap = {}
+    appState.reportLastCsv = ''
     reportHistorySetSummaryRows([])
     reportHistoryRenderTable()
+    reportUpdateExportButtons()
 
     if (clearStatus) {
       reportHistorySetStatus('')
@@ -1592,16 +1982,6 @@ export function createReportsFeature(ctx) {
       lat: String(Math.round(lat * 1000000) / 1000000),
       lon: String(Math.round(lon * 1000000) / 1000000),
     }
-  }
-
-  function reportHistoryGeoCellHtml(value) {
-    const parsed = reportHistoryParseGeoPair(value)
-    if (!parsed) {
-      return escapeHtml(String(value ?? '').trim() || '-')
-    }
-
-    const label = `${parsed.lat}, ${parsed.lon}`
-    return `<button class="rep-geo-link" type="button" data-rep-geo-lat="${escapeHtml(parsed.lat)}" data-rep-geo-lon="${escapeHtml(parsed.lon)}" title="Podglad satelitarny">${escapeHtml(label)}</button>`
   }
 
   function reportGeoMapEmbedUrl(lat, lon, zoom = 18) {
@@ -2077,6 +2457,7 @@ export function createReportsFeature(ctx) {
       })
 
       let filtered = items
+      let workerHistoryRows = null
       if (filters.tab === 'objects') {
         filtered = items.filter((item) =>
           reportMatchesPanelSelection(item, { clientId: filters.clientId, zoneId: '', workerLogin: '' }),
@@ -2087,31 +2468,33 @@ export function createReportsFeature(ctx) {
             reportIsWorkerHistoryDetailItem(item) &&
             reportMatchesPanelSelection(item, { clientId: '', zoneId: '', workerLogin: filters.workerLogin }),
         )
-
-        let markerRows = []
+        let workerDayItems
         try {
-          const workerDayItems = await reportFetchEventsPaged(appState.session.orgId, {
+          workerDayItems = await reportFetchEventsPaged(appState.session.orgId, {
             source: 'workdays',
             workerLogin: filters.workerLogin,
             fromIso: ymdToIsoRangeStart(filters.from),
             toIso: ymdToIsoRangeEnd(filters.to),
           })
-
-          markerRows = workerDayItems
-            .filter((item) =>
-              reportMatchesPanelSelection(item, { clientId: '', zoneId: '', workerLogin: filters.workerLogin }),
-            )
-            .map((item) => ({
-              ...item,
-              historyMarkerOnly: true,
-              dayStartAt: toIso(item?.dayStartAt ?? item?.startAt),
-              dayEndAt: toIso(item?.dayEndAt ?? item?.endAt),
-            }))
-        } catch {
-          markerRows = []
+        } catch (error) {
+          throw new Error('Nie udało się pobrać dni pracy. Czas nie został wyliczony — spróbuj ponownie.', { cause: error })
         }
 
-        filtered = markerRows.length ? [...filteredEvents, ...markerRows] : filteredEvents
+        const filteredWorkdays = workerDayItems.filter((item) =>
+          reportMatchesPanelSelection(item, { clientId: '', zoneId: '', workerLogin: filters.workerLogin }),
+        )
+        filtered = filteredEvents
+        workerHistoryRows = buildReportWorkerHistoryDays({
+          workdays: filteredWorkdays,
+          events: filteredEvents,
+        }).map((row) => ({
+          ...row,
+          qrStartLabel: formatTime(row.dayStartIso),
+          qrStopLabel: row.openSessionCount ? '-' : formatTime(row.dayEndIso),
+          qrStartSourceItem: row.sourceRows?.[0] ?? null,
+          qrStopSourceItem: row.sourceRows?.at?.(-1) ?? row.sourceRows?.[0] ?? null,
+          workdayId: String(row.sourceRows?.[0]?.workdayId ?? row.sourceRows?.[0]?.id ?? '').trim(),
+        }))
       } else if (filters.tab === 'zones') {
         filtered = items.filter((item) =>
           reportMatchesPanelSelection(item, { clientId: '', zoneId: filters.zoneId, workerLogin: '' }),
@@ -2135,7 +2518,9 @@ export function createReportsFeature(ctx) {
         })
       }
 
-      appState.reportHistoryRows = reportHistoryBuildRows(filtered, filters.tab)
+      appState.reportHistoryRows = filters.tab === 'workers'
+        ? (workerHistoryRows ?? [])
+        : reportHistoryBuildRows(filtered, filters.tab)
       appState.reportHistoryExpanded = {}
       appState.reportHistoryEditableMap = {}
       reportHistorySetSummaryRows(appState.reportHistoryRows)
@@ -2148,6 +2533,43 @@ export function createReportsFeature(ctx) {
 
       const rowsCount = appState.reportHistoryRows.length
       const eventsCount = appState.reportHistoryRows.reduce((sum, row) => sum + Number(row.countAll ?? 0), 0)
+      const isWorkerHistory = filters.tab === 'workers'
+      const historyHeaders = isWorkerHistory
+        ? ['Data', 'Sesja', 'START', 'STOP', 'Czas', 'Aktywności', 'Status dnia']
+        : ['Data', 'START', 'STOP', 'Wpisy', 'Czas zamknięty', 'Otwarte']
+      const historyCsvRows = isWorkerHistory
+        ? appState.reportHistoryRows.flatMap((row) => {
+            const sessions = Array.isArray(row.sessions) ? row.sessions : []
+            if (!sessions.length) {
+              return [[row.dayKey, '-', '-', '-', '00:00:00', row.countAll ?? 0, row.integrityState || 'INVALID']]
+            }
+            return sessions.map((session, index) => [
+              row.dayKey,
+              session.sessionNumber ?? index + 1,
+              formatTime(session.startAt),
+              session.isOpen ? 'W toku' : formatTime(session.endAt),
+              session.isOpen ? 'W toku' : durationSecondsToHms(session.durationSec || 0),
+              Array.isArray(session.activities) ? session.activities.length : 0,
+              row.integrityState || 'COMPLETE',
+            ])
+          })
+        : appState.reportHistoryRows.map((row) => [
+            row.dayKey,
+            row.qrStartLabel || '-',
+            row.qrStopLabel || '-',
+            row.countAll ?? 0,
+            durationSecondsToHms(row.closedSec || 0),
+            row.runningCount ?? 0,
+          ])
+      appState.reportLastCsv = [
+        reportToCsvLine([reportCurrentDefinition?.label || 'Historia czasu pracy']),
+        reportToCsvLine(['Zakres', `${filters.from} - ${filters.to}`]),
+        '',
+        reportToCsvLine(historyHeaders),
+        ...historyCsvRows.map(reportToCsvLine),
+      ].join('\n')
+      reportUpdateExportButtons()
+      reportRememberRecentReport()
       reportHistorySetStatus(`Historia gotowa. Dni: ${rowsCount} · wpisy: ${eventsCount}.`)
     } catch (error) {
       reportHistorySetStatus(error instanceof Error ? error.message : 'Blad pobierania historii.', true)
@@ -2532,37 +2954,95 @@ export function createReportsFeature(ctx) {
     reportHistoryRenderTable()
   }
 
-  function openReportBuilder(kind) {
+  function reportDefaultDefinitionForKind(kind) {
+    const preferredIds = {
+      eventsOperational: 'event-register',
+      events: 'zones',
+      workerTime: 'workers',
+      clients: 'clients-objects',
+      history: 'workers',
+    }
+    return getReportDefinition(preferredIds[kind])
+      ?? reportDefinitionsBySection('zestawienia').find((definition) => definition.builderKind === kind)
+      ?? null
+  }
+
+  function reportSetBuilderPresentation(kind, definition = null) {
+    const presentation = REPORT_BUILDER_PRESENTATION[kind] || REPORT_BUILDER_PRESENTATION.audits
+    const eyebrow = document.getElementById('repEyebrow')
+    const icon = document.querySelector('#repSectionIcon i')
+    const breadcrumbSection = document.getElementById('repBreadcrumbSection')
+    const backLabel = document.getElementById('repBackLabel')
+
+    if (eyebrow) {
+      eyebrow.textContent = definition ? reportSectionLabel(definition.section) : presentation.eyebrow
+    }
+    if (icon) {
+      icon.className = `ph ${definition?.icon || presentation.icon}`
+    }
+    if (breadcrumbSection) {
+      breadcrumbSection.textContent = reportSectionLabel(reportBuilderParentSection)
+    }
+    if (backLabel) {
+      const backLabels = {
+        podsumowanie: 'Wróć do podsumowania',
+        zestawienia: 'Wróć do zestawień',
+        'raporty-gotowe': 'Wróć do raportów gotowych',
+      }
+      backLabel.textContent = backLabels[reportBuilderParentSection] || 'Wróć do Raportów'
+    }
+  }
+
+  function reportApplyBuilderPreset(definition) {
+    const preset = definition?.preset
+    if (!preset) {
+      return
+    }
+    const status = document.getElementById('repEventsStatus')
+    const groupBy = document.getElementById('repEventsGroupBy')
+    if (status && preset.status) status.value = preset.status
+    if (groupBy && preset.groupBy) groupBy.value = preset.groupBy
+  }
+
+  function openReportBuilder(kind, options = {}) {
     const title = document.getElementById('repTitle')
     const subtitle = document.getElementById('repSubtitle')
     const historyConfig = reportHistoryBuilderConfig(kind)
-    reportSetVisible('repHome', false)
-    reportSetVisible('repBuilder', true)
+    const definition = options.definition || reportDefaultDefinitionForKind(kind)
+    reportCurrentDefinition = definition
+    reportBuilderParentSection = options.parentSection || definition?.section || 'zestawienia'
+    reportLastDetailTrigger = options.trigger || null
+    reportSetBuilderPresentation(kind, definition)
+    reportShowScreen('detail')
     reportResetResults()
+    window.requestAnimationFrame(() => {
+      title?.focus({ preventScroll: true })
+    })
 
     if (historyConfig) {
-      if (title) title.textContent = historyConfig.title
-      if (subtitle) subtitle.textContent = historyConfig.subtitle
+      if (title) title.textContent = definition?.label || historyConfig.title
+      if (subtitle) subtitle.textContent = definition?.description || historyConfig.subtitle
       reportSetVisible('repEvents', false)
       reportSetVisible('repHistory', true)
       reportSetVisible('repSoon', false)
       reportHistorySetTabsVisible(historyConfig.showTabs)
       reportHistoryApplyAllSelectFilters()
       reportHistorySetTab(historyConfig.tab)
-      reportHistoryApplyRangeMode(reportHistoryReadRangeMode(), { force: false })
+      reportHistoryEnsureDateRange()
       reportHistoryResetResults({ clearStatus: false })
       reportHistorySetStatus(historyConfig.status)
       return
     }
 
     if (kind === 'eventsOperational') {
-      if (title) title.textContent = 'Zestawienie zdarzeń'
-      if (subtitle) subtitle.textContent = 'Operacyjne podsumowanie zdarzeń według klientów, stref, pracowników i typów.'
+      if (title) title.textContent = definition?.label || 'Zestawienie zdarzeń'
+      if (subtitle) subtitle.textContent = definition?.description || 'Operacyjne podsumowanie zdarzeń według klientów, stref, pracowników i typów.'
       reportSetVisible('repEvents', true)
       reportSetVisible('repHistory', false)
       reportSetVisible('repSoon', false)
       reportEventsDefaultDates()
       reportRefreshEventsZoneOptions()
+      reportApplyBuilderPreset(definition)
       reportSetStatus('Ustaw filtry i kliknij "Generuj zestawienie".')
       return
     }
@@ -2575,9 +3055,19 @@ export function createReportsFeature(ctx) {
     reportHistorySetTabsVisible(true)
   }
 
+  function openReportDefinition(reportId, trigger = null) {
+    const definition = getReportDefinition(reportId)
+    if (!definition?.available || !definition.builderKind) {
+      return
+    }
+    openReportBuilder(definition.builderKind, {
+      definition,
+      parentSection: reportActiveScreen === 'podsumowanie' ? 'podsumowanie' : definition.section,
+      trigger,
+    })
+  }
+
   function closeReportBuilder() {
-    reportSetVisible('repBuilder', false)
-    reportSetVisible('repHome', true)
     reportSetVisible('repEvents', false)
     reportSetVisible('repHistory', false)
     reportSetVisible('repSoon', false)
@@ -2585,6 +3075,14 @@ export function createReportsFeature(ctx) {
     reportGeoHidePreview()
     reportGeoCloseModal()
     reportResetResults()
+    reportShowScreen(reportBuilderParentSection)
+    window.requestAnimationFrame(() => {
+      if (reportLastDetailTrigger?.isConnected) {
+        reportLastDetailTrigger.focus({ preventScroll: true })
+      } else {
+        document.querySelector(`#${REPORT_SCREEN_IDS[reportBuilderParentSection]} h2`)?.focus({ preventScroll: true })
+      }
+    })
   }
 
   async function reportFetchEventsSourcePaged(orgId, baseFilters, maxPages) {
@@ -2963,10 +3461,8 @@ export function createReportsFeature(ctx) {
       ]
       appState.reportLastCsv = csvLines.join('\n')
 
-      const downloadButton = document.getElementById('repDownloadCsv')
-      if (downloadButton) {
-        downloadButton.disabled = !appState.reportLastCsv
-      }
+      reportUpdateExportButtons()
+      reportRememberRecentReport()
 
       reportSetStatus(`Gotowe. Zdarzenia: ${rows.length} · grupy: ${groupRows.length}.`)
     } catch (error) {
@@ -3214,11 +3710,76 @@ export function createReportsFeature(ctx) {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `zestawienie-zdarzen-${todayYmd()}.csv`
+    link.download = `${reportCurrentDefinition?.id || 'raport'}-${todayYmd()}.csv`
     document.body.appendChild(link)
     link.click()
     link.remove()
     URL.revokeObjectURL(url)
+  }
+
+  function reportSetActiveStatus(message, isError = false) {
+    if (document.getElementById('repHistory')?.style.display !== 'none') {
+      reportHistorySetStatus(message, isError)
+      return
+    }
+    reportSetStatus(message, isError)
+  }
+
+  async function reportDownloadPdf() {
+    if (!appState.reportLastCsv || typeof ensureJsPdfLoaded !== 'function') {
+      return
+    }
+
+    const exportButtons = [...document.querySelectorAll('[data-rep-export]')]
+    exportButtons.forEach((button) => { button.disabled = true })
+    reportSetActiveStatus('Przygotowywanie pliku PDF...')
+
+    try {
+      const JsPdf = await ensureJsPdfLoaded()
+      const pdf = new JsPdf({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+      if (typeof ensurePdfUnicodeFont === 'function') {
+        await ensurePdfUnicodeFont(pdf)
+      }
+      if (typeof setPdfUnicodeFont === 'function') {
+        setPdfUnicodeFont(pdf, 'bold')
+      }
+
+      const pageWidth = pdf.internal.pageSize.getWidth()
+      const pageHeight = pdf.internal.pageSize.getHeight()
+      const left = 12
+      const right = pageWidth - 12
+      const title = reportCurrentDefinition?.label || document.getElementById('repTitle')?.textContent || 'Raport'
+      pdf.setFontSize(15)
+      pdf.text(String(title), left, 15)
+      if (typeof setPdfUnicodeFont === 'function') {
+        setPdfUnicodeFont(pdf, 'normal')
+      }
+      pdf.setFontSize(8.5)
+      pdf.text(`Wygenerowano: ${new Intl.DateTimeFormat('pl-PL', { dateStyle: 'long', timeStyle: 'short' }).format(new Date())}`, left, 21)
+
+      let y = 29
+      const maxWidth = right - left
+      const lines = String(appState.reportLastCsv).split(/\r?\n/).slice(0, 1200)
+      lines.forEach((rawLine) => {
+        const readableLine = rawLine.replaceAll('","', '  ·  ').replace(/^"|"$/g, '').replaceAll('""', '"')
+        const wrapped = pdf.splitTextToSize(readableLine || ' ', maxWidth)
+        wrapped.forEach((line) => {
+          if (y > pageHeight - 12) {
+            pdf.addPage()
+            y = 14
+          }
+          pdf.text(line, left, y)
+          y += 4.2
+        })
+      })
+
+      pdf.save(`${reportCurrentDefinition?.id || 'raport'}-${todayYmd()}.pdf`)
+      reportSetActiveStatus('Plik PDF jest gotowy.')
+    } catch (error) {
+      reportSetActiveStatus(error instanceof Error ? error.message : 'Nie udało się przygotować pliku PDF.', true)
+    } finally {
+      reportUpdateExportButtons()
+    }
   }
 
   async function _runEventsReportComparison() {
@@ -3461,10 +4022,8 @@ export function createReportsFeature(ctx) {
         appState.reportLastCsv = csvLines.join('\n')
       }
 
-      const downloadButton = document.getElementById('repDownloadCsv')
-      if (downloadButton) {
-        downloadButton.disabled = !appState.reportLastCsv
-      }
+      reportUpdateExportButtons()
+      reportRememberRecentReport()
 
       reportSetStatus(`Porównanie gotowe. A: ${rowsA.length} · B: ${rowsB.length}.`)
     } catch (error) {
@@ -3473,8 +4032,11 @@ export function createReportsFeature(ctx) {
   }
 
   async function initializeReportsView() {
+    reportRenderNavigationCatalogs()
     await prepareReportsView()
-    closeReportBuilder()
+    reportShowScreen('home')
+    reportCurrentDefinition = null
+    reportLastDetailTrigger = null
   }
 
   async function ensureReportsViewReady() {
@@ -3496,6 +4058,51 @@ export function createReportsFeature(ctx) {
     const reportsRoot = document.getElementById('view-reports')
 
     binding.add(reportsRoot, 'click', (event) => {
+      const goHomeButton = event.target.closest('[data-rep-go-home]')
+      if (goHomeButton) {
+        reportSetVisible('repEvents', false)
+        reportSetVisible('repHistory', false)
+        reportSetVisible('repSoon', false)
+        reportResetResults()
+        reportBackToHome()
+        return
+      }
+
+      const backHomeButton = event.target.closest('[data-rep-back-home]')
+      if (backHomeButton) {
+        reportBackToHome()
+        return
+      }
+
+      const sectionTile = event.target.closest('[data-rep-section]')
+      if (sectionTile) {
+        const sectionId = String(sectionTile.getAttribute('data-rep-section') ?? '').trim()
+        if (sectionId) {
+          void reportOpenSection(sectionId, { trigger: sectionTile })
+        }
+        return
+      }
+
+      const reportCard = event.target.closest('[data-report-id]')
+      if (reportCard) {
+        const reportId = String(reportCard.getAttribute('data-report-id') ?? '').trim()
+        if (reportId) {
+          openReportDefinition(reportId, reportCard)
+        }
+        return
+      }
+
+      const exportButton = event.target.closest('[data-rep-export]')
+      if (exportButton) {
+        const format = String(exportButton.getAttribute('data-rep-export') ?? '').trim()
+        if (format === 'pdf') {
+          void reportDownloadPdf()
+        } else if (format === 'csv') {
+          reportDownloadCsv()
+        }
+        return
+      }
+
       const geoButton = event.target.closest('[data-rep-geo-lat][data-rep-geo-lon]')
       if (geoButton) {
         event.preventDefault()
@@ -3562,7 +4169,33 @@ export function createReportsFeature(ctx) {
         return
       }
 
+      reportLastTrigger = tile
       openReportBuilder(kind)
+    })
+    binding.add(reportsRoot, 'keydown', (event) => {
+      const currentTab = event.target.closest('[data-rep-history-tab]')
+      const supportedKeys = ['ArrowLeft', 'ArrowRight', 'Home', 'End']
+      if (!currentTab || !supportedKeys.includes(event.key)) {
+        return
+      }
+
+      const tabs = [...reportsRoot.querySelectorAll('[data-rep-history-tab]')]
+      const currentIndex = tabs.indexOf(currentTab)
+      if (currentIndex < 0 || !tabs.length) {
+        return
+      }
+
+      let nextIndex = currentIndex
+      if (event.key === 'Home') nextIndex = 0
+      if (event.key === 'End') nextIndex = tabs.length - 1
+      if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
+      if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length
+
+      event.preventDefault()
+      const nextTab = tabs[nextIndex]
+      reportHistorySetTab(nextTab.getAttribute('data-rep-history-tab'))
+      reportHistorySetStatus('Wybierz filtr i kliknij "Pokaż historię".')
+      nextTab.focus()
     })
     binding.add(reportsRoot, 'mouseover', (event) => {
       const geoButton = event.target.closest('[data-rep-geo-lat][data-rep-geo-lon]')
@@ -3614,10 +4247,12 @@ export function createReportsFeature(ctx) {
     })
 
     binding.add(document.getElementById('repBack'), 'click', closeReportBuilder)
+    binding.add(document.getElementById('repCreateReport'), 'click', (event) => {
+      void reportOpenSection('zestawienia', { trigger: event.currentTarget, focusCatalog: true })
+    })
     binding.add(document.getElementById('repRun'), 'click', () => {
       void runEventsOperationalReport()
     })
-    binding.add(document.getElementById('repDownloadCsv'), 'click', reportDownloadCsv)
     binding.add(document.getElementById('repA_client'), 'change', () => reportRefreshZoneOptions('A'))
     binding.add(document.getElementById('repB_client'), 'change', () => reportRefreshZoneOptions('B'))
     binding.add(document.getElementById('repEventsClient'), 'change', reportRefreshEventsZoneOptions)
@@ -3649,10 +4284,15 @@ export function createReportsFeature(ctx) {
       { inputId: 'repHistoryZoneSearch', selectId: 'repHistoryZone', kind: 'zone' },
     ].forEach(({ inputId, selectId, kind }) => {
       binding.add(document.getElementById(inputId), 'input', () => {
-        reportHistoryApplySelectFilter(kind, { expandOnEmpty: true })
+        reportHistoryCollapseOtherSelects(kind)
+        reportHistoryApplySelectFilter(kind, { expandOnEmpty: true, open: true })
+      })
+      binding.add(document.getElementById(inputId), 'pointerdown', () => {
+        reportHistoryCollapseOtherSelects(kind)
       })
       binding.add(document.getElementById(inputId), 'focus', () => {
-        reportHistoryApplySelectFilter(kind, { expandOnEmpty: true })
+        reportHistoryCollapseOtherSelects(kind)
+        reportHistoryApplySelectFilter(kind, { expandOnEmpty: true, open: true })
       })
       binding.add(document.getElementById(inputId), 'blur', () => {
         window.setTimeout(() => {
@@ -3660,11 +4300,33 @@ export function createReportsFeature(ctx) {
         }, 120)
       })
       binding.add(document.getElementById(inputId), 'keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          reportHistoryCollapseSelect(kind)
+          return
+        }
+
+        if (event.key === 'ArrowDown') {
+          event.preventDefault()
+          document.getElementById(selectId)?.focus()
+          return
+        }
+
         if (event.key !== 'Enter') {
           return
         }
 
-        void runReportHistory()
+        const select = document.getElementById(selectId)
+        if (select && select.options.length > 1) {
+          const firstMatch = select.options[1]
+          select.value = String(firstMatch?.value ?? '')
+          select.dispatchEvent(new Event('change', { bubbles: true }))
+        }
+        reportHistoryCollapseSelect(kind)
+      })
+      binding.add(document.getElementById(selectId), 'focus', () => {
+        reportHistoryCollapseOtherSelects(kind)
+        reportHistoryApplySelectFilter(kind, { expandOnEmpty: true, open: true })
       })
       binding.add(document.getElementById(selectId), 'change', () => {
         const select = document.getElementById(selectId)
@@ -3675,17 +4337,20 @@ export function createReportsFeature(ctx) {
         }
         reportHistoryCollapseSelect(kind)
       })
+      binding.add(document.getElementById(selectId), 'keydown', (event) => {
+        if (event.key !== 'Escape') {
+          return
+        }
+
+        event.preventDefault()
+        reportHistoryCollapseSelect(kind)
+        document.getElementById(inputId)?.focus()
+      })
       binding.add(document.getElementById(selectId), 'blur', () => {
         window.setTimeout(() => {
           reportHistoryMaybeCollapseSelect(kind)
         }, 120)
       })
-    })
-    binding.add(document.getElementById('repHistoryRangeMonth'), 'change', () => {
-      reportHistoryApplyRangeMode('month', { force: true })
-    })
-    binding.add(document.getElementById('repHistoryRangeWeek'), 'change', () => {
-      reportHistoryApplyRangeMode('week', { force: true })
     })
     ;['repHistoryFrom', 'repHistoryTo'].forEach((id) => {
       binding.add(document.getElementById(id), 'keydown', (event) => {
@@ -3705,6 +4370,7 @@ export function createReportsFeature(ctx) {
   return {
     bind: bindReportsViewFunctions,
     ensureReady: ensureReportsViewReady,
+    openSection: reportOpenSection,
     filterHistoryOptions: reportHistoryFilterOptions,
     refreshHistoryAfterEventSave: reportHistoryRefreshAfterEventSave,
     openEventHistoryFromRow,

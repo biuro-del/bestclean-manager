@@ -1,0 +1,39 @@
+<section class="reports-screen" id="repSectionSummary" data-rep-screen="podsumowanie" style="display:none;">
+  <header class="reports-subpage-header">
+    <button class="reports-back" type="button" data-rep-back-home>
+      <i class="ph ph-arrow-left" aria-hidden="true"></i>
+      <span>Wróć do Raportów</span>
+    </button>
+    <div class="reports-subpage-header__copy">
+      <nav class="reports-breadcrumb" aria-label="Ścieżka nawigacji"><span>Raporty</span><i class="ph ph-caret-right" aria-hidden="true"></i><strong>Podsumowanie</strong></nav>
+      <h2 tabindex="-1">Podsumowanie</h2>
+      <p>Najważniejsze dane, braki wymagające uwagi i raporty użyte w tej sesji.</p>
+    </div>
+  </header>
+
+  <div class="reports-summary-layout">
+    <section class="reports-content-card reports-content-card--wide" aria-labelledby="repSummaryKpiTitle">
+      <header class="reports-panel-heading">
+        <span class="reports-panel-heading__icon" aria-hidden="true"><i class="ph ph-gauge"></i></span>
+        <div><h3 id="repSummaryKpiTitle">Najważniejsze wskaźniki</h3><p>Aktualny stan danych referencyjnych organizacji.</p></div>
+      </header>
+      <div class="reports-summary-kpis" id="repSummaryKpis" aria-live="polite"></div>
+    </section>
+
+    <section class="reports-content-card" aria-labelledby="repSummaryAlertsTitle">
+      <header class="reports-panel-heading">
+        <span class="reports-panel-heading__icon reports-panel-heading__icon--amber" aria-hidden="true"><i class="ph ph-warning-circle"></i></span>
+        <div><h3 id="repSummaryAlertsTitle">Alerty i braki danych</h3><p>Elementy, które mogą wpływać na kompletność raportów.</p></div>
+      </header>
+      <div class="reports-state-list" id="repSummaryAlerts" aria-live="polite"></div>
+    </section>
+
+    <section class="reports-content-card" aria-labelledby="repSummaryRecentTitle">
+      <header class="reports-panel-heading">
+        <span class="reports-panel-heading__icon reports-panel-heading__icon--cyan" aria-hidden="true"><i class="ph ph-clock-counter-clockwise"></i></span>
+        <div><h3 id="repSummaryRecentTitle">Ostatnio używane raporty</h3><p>Historia działa wyłącznie w bieżącej sesji.</p></div>
+      </header>
+      <div class="reports-state-list" id="repSummaryRecent" aria-live="polite"></div>
+    </section>
+  </div>
+</section>

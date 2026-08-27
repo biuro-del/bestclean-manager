@@ -70,6 +70,45 @@ test('linked operational events are nested but never increase attendance time', 
   assert.equal(result.sessions[0].activities[0].clientName, 'Best Clean')
 })
 
+test('a CLEAN code mistakenly stored as STOP recovers attendance through the last linked activity', () => {
+  const result = buildWorkTimeDay({
+    businessDateYmd: DAY,
+    now: new Date('2026-08-03T00:00:00Z'),
+    workdays: [workday('WD-CLEAN-STOP', '2026-08-01T16:03:06Z', '2026-08-01T16:04:00Z', {
+      stop_object: 'BC0326',
+      stop_zone_function: 'clean (spoza listy)',
+    })],
+    events: [
+      event('EV-CLEAN-1', 'WD-CLEAN-STOP', '2026-08-01T16:09:00Z', '2026-08-01T16:38:00Z'),
+      event('EV-CLEAN-2', 'WD-CLEAN-STOP', '2026-08-01T16:38:00Z', '2026-08-01T18:26:00Z'),
+    ],
+  })
+
+  assert.equal(result.workedSec, 2 * 3600 + 22 * 60 + 54)
+  assert.equal(result.lastStopAt, '2026-08-01T18:26:00.000Z')
+  assert.equal(result.sessions[0].recordedEndAt, '2026-08-01T16:04:00.000Z')
+  assert.equal(result.sessions[0].stopRecoveredFromActivity, true)
+  assert.equal(result.issues.some((entry) => entry.code === 'ACTIVITY_OUTSIDE_SESSION'), false)
+  assert.equal(result.integrityState, WORK_TIME_DAY_STATE.COMPLETE)
+})
+
+test('a real STOP keeps the recorded end and still reports later activities as inconsistent', () => {
+  const result = buildWorkTimeDay({
+    businessDateYmd: DAY,
+    now: new Date('2026-08-03T00:00:00Z'),
+    workdays: [workday('WD-REAL-STOP', '2026-08-01T16:03:06Z', '2026-08-01T16:04:00Z', {
+      stop_object: 'STOP-1',
+      stop_zone_function: 'STOP',
+    })],
+    events: [event('EV-AFTER-STOP', 'WD-REAL-STOP', '2026-08-01T16:09:00Z', '2026-08-01T18:26:00Z')],
+  })
+
+  assert.equal(result.workedSec, 54)
+  assert.equal(result.sessions[0].stopRecoveredFromActivity, undefined)
+  assert.ok(result.issues.some((entry) => entry.code === 'ACTIVITY_OUTSIDE_SESSION'))
+  assert.equal(result.integrityState, WORK_TIME_DAY_STATE.INVALID)
+})
+
 test('session exposes its editable zone and zone changes affect the optimistic version', () => {
   const source = workday('WD-ZONE', '2026-08-01T06:00:00Z', '2026-08-01T08:00:00Z', {
     utility_room_id: 'Z-1',

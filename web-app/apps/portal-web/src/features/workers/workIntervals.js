@@ -11,6 +11,104 @@ function intervalMinuteTimestamp(value) {
   return valueMs ? Math.floor(valueMs / 60000) * 60000 : 0
 }
 
+function intervalQrFunctionToken(value) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  let normalized = raw
+  try {
+    normalized = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  } catch {
+    normalized = raw
+  }
+  return normalized.toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function isOperationalQrFunction(value) {
+  const token = intervalQrFunctionToken(value)
+  if (!token || token === 'START' || token.startsWith('STOP')) return false
+  return token.includes('CLEAN') || token.includes('SPRZAT') || token.includes('STREFA') || token.includes('SPECIAL')
+}
+
+function workIntervalZoneCode(zone = {}) {
+  return String(zone?.id ?? zone?.zoneId ?? zone?.qr ?? zone?.code ?? '').trim()
+}
+
+function workIntervalPhaseQrCandidates(interval = {}, codeType = 'START') {
+  const phase = String(codeType ?? '').trim().toUpperCase() === 'STOP' ? 'STOP' : 'START'
+  const phaseCandidates = phase === 'STOP'
+    ? [interval?.stopObject, interval?.workdayStopObject, interval?.stopQrCode, interval?.qrStopObject]
+    : [interval?.startObject, interval?.workdayStartObject, interval?.startQrCode, interval?.qrStartObject]
+  return [
+    ...phaseCandidates,
+    interval?.qrCode,
+    interval?.scannedQrCode,
+    interval?.zoneQrCode,
+    interval?.zoneId,
+    interval?.utilityRoomId,
+    interval?.roomId,
+  ].map((value) => String(value ?? '').trim()).filter(Boolean)
+}
+
+function workIntervalQrCandidateMatchesZone(candidate, zoneCode) {
+  const rawCandidate = String(candidate ?? '').trim()
+  const rawZoneCode = String(zoneCode ?? '').trim()
+  if (!rawCandidate || !rawZoneCode) return false
+  if (rawCandidate.toLocaleLowerCase('pl') === rawZoneCode.toLocaleLowerCase('pl')) return true
+  const phasePrefixRemoved = rawCandidate.replace(
+    /^(?:QR[\s_-]*)?(?:WORKDAY[\s_-]*)?(?:START|STOP)[\s:|_-]*/i,
+    '',
+  ).trim()
+  const candidateToken = intervalQrFunctionToken(phasePrefixRemoved)
+  const zoneToken = intervalQrFunctionToken(rawZoneCode)
+  if (!candidateToken || !zoneToken) return false
+  return candidateToken === zoneToken
+}
+
+function fallbackWorkIntervalQrCode(candidates = []) {
+  const raw = String(candidates[0] ?? '').trim()
+  if (!raw) return ''
+  return raw.replace(/^(?:QR[\s_-]*)?(?:WORKDAY[\s_-]*)?(?:START|STOP)[\s:|_-]*/i, '').trim() || raw
+}
+
+/**
+ * Resolves the phase-specific QR code against the current zone catalog. The
+ * catalog is authoritative for labels and function; START/STOP is never used
+ * as a substitute for a missing zone function.
+ */
+export function resolveWorkIntervalZoneSnapshot(interval = {}, codeType = 'START', zones = []) {
+  const phase = String(codeType ?? '').trim().toUpperCase() === 'STOP' ? 'STOP' : 'START'
+  const candidates = workIntervalPhaseQrCandidates(interval, phase)
+  const currentZone = (Array.isArray(zones) ? zones : []).find((zone) => {
+    const zoneCode = workIntervalZoneCode(zone)
+    return candidates.some((candidate) => workIntervalQrCandidateMatchesZone(candidate, zoneCode))
+  }) ?? null
+  const qrCode = currentZone ? workIntervalZoneCode(currentZone) : fallbackWorkIntervalQrCode(candidates)
+  const phaseFunction = phase === 'STOP'
+    ? interval?.stopZoneFunction ?? interval?.stopFunction
+    : interval?.startZoneFunction ?? interval?.startFunction
+
+  return {
+    zone: currentZone,
+    qrCode,
+    clientName: String(
+      currentZone?.clientName ?? currentZone?.client?.name ?? interval?.clientName ??
+      interval?.klient ?? interval?.clientLabel ?? interval?.clientId ?? '',
+    ).trim(),
+    functionName: String(
+      currentZone?.function ?? currentZone?.functionName ?? phaseFunction ?? interval?.functionName ??
+      interval?.zoneFunction ?? interval?.function ?? interval?.qrFunction ?? '',
+    ).trim(),
+    isSpecialZone: currentZone?.isSpecialZone === true || interval?.isSpecialZone === true,
+    location: String(
+      currentZone?.location ?? interval?.lokalizacja ?? interval?.location ?? interval?.zoneLocation ?? '',
+    ).trim(),
+    zoneName: String(
+      currentZone?.name ?? currentZone?.zone ?? currentZone?.zoneName ?? interval?.zoneName ??
+      interval?.strefa ?? interval?.zoneLabel ?? interval?.zoneId ?? interval?.utilityRoomId ?? interval?.roomId ?? '',
+    ).trim(),
+  }
+}
+
 function normalizedGpsPair(latValue, lonValue) {
   const lat = Number(latValue)
   const lon = Number(lonValue)
@@ -121,6 +219,64 @@ export const WORKDAY_INTEGRITY_STATES = Object.freeze({
   INCONSISTENT: 'INCONSISTENT',
   INVALID: 'INVALID',
 })
+
+function workTimeIssueCode(value) {
+  const direct = String(typeof value === 'string' ? value : value?.code ?? value?.message ?? '').trim()
+  return /^[A-Z][A-Z0-9_]*$/.test(direct) ? direct.toUpperCase() : ''
+}
+
+function workTimeIssueListHasAlert(value, { isCurrentBusinessDay = false } = {}) {
+  return (Array.isArray(value) ? value : []).some((entry) => {
+    const code = workTimeIssueCode(entry)
+    return !(isCurrentBusinessDay && code === 'OPEN_SESSION')
+  })
+}
+
+function workTimeActivityHasHistoryAlert(activity = {}) {
+  return (
+    activity?.isOpen === true ||
+    Boolean(activity?.startAt && !activity?.endAt) ||
+    activity?.isValid === false ||
+    workTimeIssueListHasAlert(activity?.integrityIssues) ||
+    workTimeIssueListHasAlert(activity?.issues) ||
+    workTimeIssueListHasAlert(activity?.problems)
+  )
+}
+
+/**
+ * Mirrors the warnings visible in work-time history. A normal OPEN_SESSION
+ * for the current Warsaw business day is not a warning on its own.
+ */
+export function workTimeDayHasHistoryAlert(day = {}, options = {}) {
+  const dayKey = String(day?.businessDateYmd ?? day?.dayKey ?? '').trim()
+  const today = String(options?.today ?? '').trim()
+  const isCurrentBusinessDay = Boolean(today && dayKey === today)
+  const issueOptions = { isCurrentBusinessDay }
+  if (
+    workTimeIssueListHasAlert(day?.integrityIssues, issueOptions) ||
+    workTimeIssueListHasAlert(day?.issues, issueOptions) ||
+    workTimeIssueListHasAlert(day?.problems, issueOptions)
+  ) return true
+
+  const activities = [
+    ...(Array.isArray(day?.activities) ? day.activities : []),
+    ...(Array.isArray(day?.unassignedActivities) ? day.unassignedActivities : []),
+    ...(Array.isArray(day?.sessions) ? day.sessions.flatMap((session) => session?.activities ?? []) : []),
+  ]
+  if (activities.some(workTimeActivityHasHistoryAlert)) return true
+  if (Array.isArray(day?.unassignedActivities) && day.unassignedActivities.length) return true
+
+  const sessionAlert = (Array.isArray(day?.sessions) ? day.sessions : []).some((session) => (
+    session?.isValid === false ||
+    workTimeIssueListHasAlert(session?.integrityIssues, issueOptions) ||
+    workTimeIssueListHasAlert(session?.issues, issueOptions) ||
+    workTimeIssueListHasAlert(session?.problems, issueOptions)
+  ))
+  if (sessionAlert) return true
+
+  const integrityState = String(day?.integrityState ?? '').trim().toUpperCase()
+  return integrityState === WORKDAY_INTEGRITY_STATES.INVALID || integrityState === WORKDAY_INTEGRITY_STATES.INCONSISTENT
+}
 
 export function formatWorkDurationHms(value) {
   const seconds = Math.max(0, Math.floor(Number(value) || 0))
@@ -482,6 +638,37 @@ function normalizeActivity(row = {}, options = {}) {
   }
 }
 
+function recoverOperationalStopFromActivities(session = {}) {
+  if (!isOperationalQrFunction(session?.stopZoneFunction)) return false
+  const startTs = Number(session?.startTs) || intervalTimestamp(session?.startAt)
+  const recordedEndTs = Number(session?.endTs) || intervalTimestamp(session?.endAt)
+  if (!startTs || !recordedEndTs) return false
+
+  const latestActivityEndTs = (Array.isArray(session?.activities) ? session.activities : []).reduce((latest, activity) => {
+    const activityStartTs = Number(activity?.startTs) || intervalTimestamp(activity?.startAt)
+    const activityEndTs = Number(activity?.endTs) || intervalTimestamp(activity?.endAt)
+    if (
+      activity?.isValid === false ||
+      !activityStartTs ||
+      activityStartTs < startTs ||
+      activityEndTs <= recordedEndTs ||
+      activityEndTs <= activityStartTs ||
+      (activityEndTs - startTs) / 1000 > MAX_SESSION_SECONDS
+    ) return latest
+    return Math.max(latest, activityEndTs)
+  }, 0)
+  if (!latestActivityEndTs) return false
+
+  session.recordedEndAt = session.endAt
+  session.recordedEndTs = session.endTs
+  session.recordedDurationSec = session.durationSec
+  session.endTs = latestActivityEndTs
+  session.endAt = new Date(latestActivityEndTs).toISOString()
+  session.durationSec = Math.floor((latestActivityEndTs - startTs) / 1000)
+  session.stopRecoveredFromActivity = true
+  return true
+}
+
 function dedupeActivities(rows = [], options = {}) {
   const byId = new Map()
   const withoutId = []
@@ -538,13 +725,16 @@ export function aggregateWorkSessions(workday = {}, events = [], options = {}) {
   attendanceSession.workerName = String(workday?.workerName ?? '').trim()
   attendanceSession.startObject = workday?.startObject ?? workday?.workdayStartObject ?? ''
   attendanceSession.stopObject = workday?.stopObject ?? workday?.workdayStopObject ?? ''
+  attendanceSession.stopZoneFunction = String(
+    workday?.stopZoneFunction ?? workday?.stopFunction ?? '',
+  ).trim()
   attendanceSession.dayGps = workday?.dayGps ?? workday?.gps ?? ''
   attendanceSession.dayComment = workday?.dayComment ?? workday?.comment ?? ''
 
   duplicateEventIds.forEach((eventId) => integrityIssues.push(issue('DUPLICATE_EVENT_ID', { eventId })))
   const workdayStatus = String(workday?.status ?? '').trim().toUpperCase()
   const workdayClosed = workdayStatus === 'CLOSED' || Boolean(workdayEndTs)
-  const workdayEnvelopeSec = workdayStartTs && workdayEndTs && workdayEndTs > workdayStartTs
+  let workdayEnvelopeSec = workdayStartTs && workdayEndTs && workdayEndTs > workdayStartTs
     ? Math.floor((workdayEndTs - workdayStartTs) / 1000)
     : 0
   if (!attendanceSession.startTs) {
@@ -581,6 +771,20 @@ export function aggregateWorkSessions(workday = {}, events = [], options = {}) {
       activity.isValid = false
       integrityIssues.push(issue('ACTIVITY_FUTURE_TIMESTAMP', { eventId: activity.eventId }))
     }
+    if (activity.isOpen && workdayClosed) {
+      integrityIssues.push(issue('CLOSED_WORKDAY_WITH_OPEN_ACTIVITY', { eventId: activity.eventId }))
+    }
+  })
+
+  const recoveredAttendanceSession = { ...attendanceSession, activities }
+  if (recoverOperationalStopFromActivities(recoveredAttendanceSession)) {
+    Object.assign(attendanceSession, recoveredAttendanceSession)
+  }
+  workdayEnvelopeSec = attendanceSession.startTs && attendanceSession.endTs > attendanceSession.startTs
+    ? Math.floor((attendanceSession.endTs - attendanceSession.startTs) / 1000)
+    : workdayEnvelopeSec
+
+  activities.forEach((activity) => {
     const activityStartMinute = intervalMinuteTimestamp(activity.startTs)
     const activityEndMinute = intervalMinuteTimestamp(activity.endTs)
     const sessionStartMinute = intervalMinuteTimestamp(attendanceSession.startTs)
@@ -595,9 +799,6 @@ export function aggregateWorkSessions(workday = {}, events = [], options = {}) {
     if (activityOutsideSession) {
       activity.isValid = false
       integrityIssues.push(issue('ACTIVITY_OUTSIDE_SESSION', { eventId: activity.eventId }))
-    }
-    if (activity.isOpen && workdayClosed) {
-      integrityIssues.push(issue('CLOSED_WORKDAY_WITH_OPEN_ACTIVITY', { eventId: activity.eventId }))
     }
   })
 

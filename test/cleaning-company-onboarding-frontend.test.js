@@ -136,7 +136,7 @@ test('company registration obtains the central gate grant before Firebase Auth a
   assert.match(auth, /providerId: 'emailLink'/)
   assert.match(auth, /VITE_CENTRAL_REGISTRATION_ISSUER_READY/)
   assert.match(auth, /VITE_CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID/)
-  assert.match(auth, /requireCleaningCompanyAppCheckToken\(\)/)
+  assert.match(auth, /requireRegistrationAppCheckToken\(\)/)
   assert.match(auth, /X-Firebase-AppCheck/)
   assert.equal((firebase.match(/initializeAppCheck\(/g) || []).length, 1)
   assert.match(firebase, /getFirebaseAppCheckToken/)

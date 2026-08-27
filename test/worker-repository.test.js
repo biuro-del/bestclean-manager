@@ -9,6 +9,7 @@ const {
   clearWorkerSchemaReadyCache,
   deleteWorkerAccessRows,
   insertWorkerAndMembership,
+  relinkWorkerAuth,
   reserveWorkerId,
 } = require('../worker-repository')
 
@@ -167,6 +168,38 @@ test('concurrent reservations receive different sequential IDs', async () => {
     [first.workerNumber, second.workerNumber].sort((left, right) => left - right),
     [1, 2],
   )
+})
+
+test('relink worker auth replaces the stale uid and recreates organization membership', async () => {
+  const calls = []
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params })
+      if (sql.includes('update public.worker')) {
+        return {
+          rowCount: 1,
+          rows: [{ login: 'u_org123_1', auth_uid: params[2] }],
+        }
+      }
+      return { rowCount: 1, rows: [] }
+    },
+  }
+
+  const worker = await relinkWorkerAuth(client, {
+    orgId: 'org123',
+    login: 'u_org123_1',
+    workerId: 'worker_org123_1',
+    role: 'WORKER',
+    previousAuthUid: 'deleted-firebase-uid',
+    authUid: 'new-firebase-uid',
+  })
+
+  assert.equal(worker.auth_uid, 'new-firebase-uid')
+  assert.deepEqual(calls[0].params, ['org123', 'u_org123_1', 'new-firebase-uid'])
+  assert.match(calls[1].sql, /delete from public\.organization_member/)
+  assert.deepEqual(calls[1].params, ['org123', 'deleted-firebase-uid'])
+  assert.match(calls[2].sql, /insert into public\.organization_member/)
+  assert.deepEqual(calls[2].params, ['org123', 'new-firebase-uid', 'WORKER', 'worker_org123_1'])
 })
 
 test('delete skips missing historical tables', async () => {

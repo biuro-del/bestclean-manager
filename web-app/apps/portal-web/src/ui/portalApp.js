@@ -167,8 +167,12 @@ const SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS = [
   { id: 'section-workers', kind: 'section', label: 'Pracownicy', meta: 'Sekcja', route: 'workerProfile' },
   { id: 'sub-worker-profile', kind: 'subsection', label: 'Lista pracowników', meta: 'Podsekcja dział "Pracownicy"', route: 'workerProfile' },
   { id: 'sub-workday-stop-proposals', kind: 'subsection', label: 'Godziny do weryfikacji', meta: 'Podsekcja dział "Pracownicy"', route: 'workdayStopProposals' },
-  { id: 'section-reports', kind: 'section', label: 'Raporty', meta: 'Sekcja', route: 'reports' },
-  { id: 'sub-reports-summary', kind: 'subsection', label: 'Zestawienia', meta: 'Podsekcja dział "Raporty"', route: 'reports' },
+  { id: 'section-reports', kind: 'section', label: 'Raporty', meta: 'Sekcja', route: 'reports', reportSection: 'home' },
+  { id: 'sub-reports-dashboard', kind: 'subsection', label: 'Podsumowanie', meta: 'Podsekcja dział "Raporty"', route: 'reports', reportSection: 'podsumowanie' },
+  { id: 'sub-reports-listings', kind: 'subsection', label: 'Zestawienia', meta: 'Podsekcja dział "Raporty"', route: 'reports', reportSection: 'zestawienia' },
+  { id: 'sub-reports-analyses', kind: 'subsection', label: 'Analizy', meta: 'Podsekcja dział "Raporty"', route: 'reports', reportSection: 'analizy' },
+  { id: 'sub-reports-ready', kind: 'subsection', label: 'Raporty gotowe', meta: 'Podsekcja dział "Raporty"', route: 'reports', reportSection: 'raporty-gotowe' },
+  { id: 'sub-reports-mine', kind: 'subsection', label: 'Moje raporty', meta: 'Podsekcja dział "Raporty"', route: 'reports', reportSection: 'moje-raporty' },
   { id: 'section-settings', kind: 'section', label: 'Ustawienia', meta: 'Sekcja', route: 'settings' },
   { id: 'sub-settings-profile', kind: 'subsection', label: 'Profil', meta: 'Ustawienia · Moje konto', route: 'settingsProfile' },
   { id: 'sub-settings-notifications', kind: 'subsection', label: 'Powiadomienia', meta: 'Ustawienia · Moje konto', route: 'settingsNotifications' },
@@ -5058,6 +5062,43 @@ function getReportsFeature() {
   return reportsFeature
 }
 
+const REPORTS_SECTION_IDS = new Set([
+  'home',
+  'podsumowanie',
+  'zestawienia',
+  'analizy',
+  'raporty-gotowe',
+  'moje-raporty',
+])
+
+function reportsNormalizeSection(value) {
+  const sectionId = String(value ?? '').trim().toLowerCase()
+  return REPORTS_SECTION_IDS.has(sectionId) ? sectionId : 'home'
+}
+
+function setReportsSidebarSection(sectionId) {
+  const normalized = String(sectionId ?? '').trim().toLowerCase()
+  document.querySelectorAll('#submenu-reports [data-report-section]').forEach((button) => {
+    const active = normalized && button.getAttribute('data-report-section') === normalized
+    button.classList.toggle('active', Boolean(active))
+    if (active) button.setAttribute('aria-current', 'page')
+    else button.removeAttribute('aria-current')
+  })
+}
+
+async function openReportsSection(sectionId, navigation, trigger = null) {
+  const normalized = reportsNormalizeSection(sectionId)
+  const ready = await navigation.go('reports')
+  if (!ready) return false
+  const opened = await getReportsFeature().openSection(normalized, { trigger })
+  if (opened) setReportsSidebarSection(normalized)
+  return Boolean(opened)
+}
+
+function handleReportsSectionChange(event) {
+  setReportsSidebarSection(event?.detail?.sectionId)
+}
+
 async function ensureReportsViewReady() {
   return getReportsFeature().ensureReady()
 }
@@ -5652,6 +5693,11 @@ async function sidebarGlobalSearchActivate(result, router) {
     return
   }
 
+  if (result.reportSection) {
+    await openReportsSection(result.reportSection, router)
+    return
+  }
+
   if (result.kanbanSection) {
     appState.kanbanSection = kanbanNormalizeSection(result.kanbanSection)
   }
@@ -5753,6 +5799,17 @@ function bindSidebarGlobalSearch(router) {
 
 function bindRouteButtons(router) {
   const handleRouteClick = (event) => {
+    const reportsSectionButton = eventTargetClosest(event, '[data-report-section]')
+    if (reportsSectionButton) {
+      event.preventDefault()
+      void openReportsSection(
+        reportsSectionButton.getAttribute('data-report-section'),
+        router,
+        reportsSectionButton,
+      )
+      return
+    }
+
     const kanbanMenuButton = eventTargetClosest(event, '[data-kanban-menu-section]')
     if (kanbanMenuButton) {
       appState.kanbanSection = kanbanNormalizeSection(kanbanMenuButton.getAttribute('data-kanban-menu-section'))
@@ -8590,6 +8647,9 @@ export function mountPortalApp() {
   const handleRouteShellChange = (route) => {
     appState.currentRoute = String(route ?? '').trim()
     writeStoredCurrentRoute(appState.currentRoute)
+    if (normalizeNavigationRoute(appState.currentRoute) !== 'reports') {
+      setReportsSidebarSection('')
+    }
     if (dashboardFeature && appState.currentRoute !== 'dashboard') {
       dashboardHideMetricPopover()
     }
@@ -8787,6 +8847,7 @@ export function mountPortalApp() {
   const handlePortalInteractionSettled = () => schedulePortalDeferredNotificationFlush(250)
   document.addEventListener('focusout', handlePortalInteractionSettled)
   document.addEventListener('change', handlePortalInteractionSettled)
+  window.addEventListener('reports-section-change', handleReportsSectionChange)
 
   portalNavigation = navigation
 
@@ -8807,6 +8868,7 @@ export function mountPortalApp() {
     () => window.removeEventListener('portal:workday-updated', handlePortalWorkdayUpdated),
     () => document.removeEventListener('focusout', handlePortalInteractionSettled),
     () => document.removeEventListener('change', handlePortalInteractionSettled),
+    () => window.removeEventListener('reports-section-change', handleReportsSectionChange),
     calendarStopTimelineWorkerStatusRefresh,
   ]
 

@@ -588,18 +588,32 @@ export const portalLayoutTemplate = `
 
           <div class="menu-group-title">RAPORTY</div>
 
-          <button class="menu-section" type="button" data-toggle="reports">
+          <button class="menu-section" type="button" data-toggle="reports" data-route="reports" data-report-section="home" aria-controls="submenu-reports">
             <span class="mi-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V9M10 19V5M16 19v-8M22 19V3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M3 20h19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
             </span>
             <span class="mi-label">Raporty</span><span class="chev">▼</span>
           </button>
           <div class="submenu" id="submenu-reports">
-            <button class="submenu-item" data-route="reports" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 10h8M8 14h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-              </span>
+            <button class="submenu-item" data-report-section="podsumowanie" type="button">
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-gauge"></i></span>
+              <span class="mi-label">Podsumowanie</span>
+            </button>
+            <button class="submenu-item" data-report-section="zestawienia" type="button">
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-table"></i></span>
               <span class="mi-label">Zestawienia</span>
+            </button>
+            <button class="submenu-item" data-report-section="analizy" type="button">
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-chart-line-up"></i></span>
+              <span class="mi-label">Analizy</span>
+            </button>
+            <button class="submenu-item" data-report-section="raporty-gotowe" type="button">
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-file-text"></i></span>
+              <span class="mi-label">Raporty gotowe</span>
+            </button>
+            <button class="submenu-item" data-report-section="moje-raporty" type="button">
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-folder-user"></i></span>
+              <span class="mi-label">Moje raporty</span>
             </button>
           </div>
 

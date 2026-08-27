@@ -32,6 +32,7 @@ import {
 } from '../work_time_evidence_export.js'
 import { resolveOperationalMapAvatarKind } from '../../dashboard/operationalMapModel.js'
 import { applyCurrentMonthMissingStopStatus } from './missingStopModel.js'
+import { getWorkTimeDays } from '../../../services/workTimeDayService.js'
 
 export const route = 'workerProfile'
 export const viewId = 'view-workerProfile'
@@ -84,6 +85,7 @@ const OPTIMISTIC_WORKER_PROFILE_TTL_MS = 15000
 const OPTIMISTIC_WORKER_PROFILE_DELETE_TTL_MS = 60000
 const DASHBOARD_LOCAL_CACHE_PREFIX = 'portal.dashboard.snapshot.'
 const WORKER_PROFILE_MISSING_STOP_PAGE_SIZE = 2000
+const WORKER_PROFILE_WORK_TIME_ALERT_PAGE_SIZE = 200
 
 export function createWorkerProfileFeature(ctx) {
   const {
@@ -145,6 +147,28 @@ export function createWorkerProfileFeature(ctx) {
   const optimisticWorkerProfilePatches = new Map()
   const optimisticWorkerProfileDeletes = new Map()
   let workerProfileDeleteConfirmResolve = null
+  let workerProfileWorkTimeAlertRequestId = 0
+
+  async function fetchCurrentMonthWorkTimeAlertDays(orgId, { monthStart, today }) {
+    const firstPage = await getWorkTimeDays(orgId, {
+      fromYmd: monthStart,
+      toYmd: today,
+      page: 1,
+      pageSize: WORKER_PROFILE_WORK_TIME_ALERT_PAGE_SIZE,
+    })
+    const rows = Array.isArray(firstPage?.items) ? [...firstPage.items] : []
+    const totalPages = Math.max(1, Number(firstPage?.totalPages) || 1)
+    for (let page = 2; page <= totalPages; page += 1) {
+      const response = await getWorkTimeDays(orgId, {
+        fromYmd: monthStart,
+        toYmd: today,
+        page,
+        pageSize: WORKER_PROFILE_WORK_TIME_ALERT_PAGE_SIZE,
+      })
+      if (Array.isArray(response?.items)) rows.push(...response.items)
+    }
+    return rows
+  }
 
   function pruneOptimisticWorkerProfilePatches(now = Date.now()) {
     optimisticWorkerProfilePatches.forEach((record, key) => {
@@ -1215,9 +1239,16 @@ export function createWorkerProfileFeature(ctx) {
           const active = workerProfileBoolean(worker, 'active')
           const online = workerProfileBoolean(worker, 'online')
           const hasMissingStop = worker?.hasCurrentMonthMissingStop === true
+          const hasHistoryAlert = worker?.hasCurrentMonthWorkTimeAlert === true
+          const hasWorkTimeWarning = hasMissingStop || hasHistoryAlert
+          const workTimeWarningTitle = hasMissingStop && hasHistoryAlert
+            ? 'Brak STOP lub alert w historii czasu pracy w bieżącym miesiącu'
+            : hasMissingStop
+              ? 'Brak STOP w bieżącym miesiącu'
+              : 'Alert w historii czasu pracy w bieżącym miesiącu'
 
           return `
-        <div class="workers-row${selected ? ' is-selected' : ''}${hasMissingStop ? ' has-missing-stop' : ''}"${hasMissingStop ? ' title="Brak STOP w bieżącym miesiącu"' : ''}>
+        <div class="workers-row${selected ? ' is-selected' : ''}${hasWorkTimeWarning ? ' has-missing-stop' : ''}"${hasWorkTimeWarning ? ` title="${escapeHtml(workTimeWarningTitle)}"` : ''}>
           <div class="worker-profile-select-cell">
             <input type="checkbox" data-worker-profile-select="${index}" ${selected ? 'checked' : ''} aria-label="Zaznacz ${escapeHtml(name)}" />
           </div>
@@ -1847,6 +1878,7 @@ export function createWorkerProfileFeature(ctx) {
     const root = document.getElementById('wkRows')
 
     if (!appState.session?.orgId) {
+      workerProfileWorkTimeAlertRequestId += 1
       appState.workerProfileRows = []
       appState.workerProfileViewRows = []
       updateWorkerProfileKpis()
@@ -1875,18 +1907,20 @@ export function createWorkerProfileFeature(ctx) {
     }
 
     try {
+      const orgId = String(appState.session.orgId ?? '').trim()
+      const workTimeAlertRequestId = ++workerProfileWorkTimeAlertRequestId
       const workerOptions = force ? { force: true, fetchPolicy: 'SERVER_ONLY' } : {}
       const monthStart = firstDayOfCurrentMonthYmd()
       const today = todayYmd()
       const [workers, activeWorkers, missingStopWorkdays] = await Promise.all([
-        getWorkers(appState.session.orgId, workerOptions),
+        getWorkers(orgId, workerOptions),
         typeof getTodayActiveWorkers === 'function'
-          ? getTodayActiveWorkers(appState.session.orgId).catch((error) => {
+          ? getTodayActiveWorkers(orgId).catch((error) => {
               console.warn('[worker-profile] active workers refresh failed', error)
               return { items: [] }
             })
           : Promise.resolve({ items: [] }),
-        getWorkdays(appState.session.orgId, {
+        getWorkdays(orgId, {
           source: 'workdays',
           status: 'RUNNING',
           fromIso: monthStart,
@@ -1909,6 +1943,30 @@ export function createWorkerProfileFeature(ctx) {
         resolveDateKey: workerDetailDateKeyFromIso,
       })
       applyWorkerProfileRows(rows, { clearSelection, resetPage })
+
+      window.setTimeout(() => {
+        void fetchCurrentMonthWorkTimeAlertDays(orgId, { monthStart, today })
+          .then((workTimeAlertDays) => {
+            if (
+              workerProfileWorkTimeAlertRequestId !== workTimeAlertRequestId ||
+              String(appState.session?.orgId ?? '').trim() !== orgId
+            ) return
+            const updatedRows = applyCurrentMonthMissingStopStatus(
+              appState.workerProfileRows,
+              missingStopWorkdays?.items,
+              {
+                alertRows: workTimeAlertDays,
+                today,
+                monthStart,
+                resolveDateKey: workerDetailDateKeyFromIso,
+              },
+            )
+            applyWorkerProfileRows(updatedRows, { clearSelection: false, resetPage: false })
+          })
+          .catch((error) => {
+            console.warn('[worker-profile] work-time alerts refresh failed', error)
+          })
+      }, 0)
     } catch (error) {
       if (silent && appState.workerProfileRows.length) {
         throw error

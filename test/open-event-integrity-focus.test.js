@@ -139,7 +139,7 @@ test('Events view uses the dashboard-aligned visual contract without dashboard s
   assert.match(template, /class="ph ph-caret-right"/)
   assert.match(styles, /--events-ui-accent:#5b52eb/)
   assert.match(styles, /#evAddBtn\{[\s\S]*background:#278f65 !important/)
-  assert.match(styles, /\.btn2\.danger\{[\s\S]*background:#dc4945 !important;[\s\S]*color:#fff !important/)
+  assert.match(styles, /\.events-delete-button\{[\s\S]*background:#DC0000 !important;[\s\S]*color:#fff !important/)
   assert.match(styles, /\.events-table-toolbar\{[\s\S]*display:flex !important/)
   assert.match(styles, /@media \(max-width:340px\)[\s\S]*grid-template-columns:1fr !important/)
   assert.doesNotMatch(styles, /#view-dashboard/)

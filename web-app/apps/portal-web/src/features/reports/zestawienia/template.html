@@ -1,0 +1,166 @@
+<div id="repEvents" style="display:none;">
+  <div class="rep-events-shell">
+    <section class="rep-panel rep-events-filter" aria-labelledby="repEventsFiltersTitle">
+      <header class="reports-panel-heading">
+        <span class="reports-panel-heading__icon" aria-hidden="true"><i class="ph ph-faders-horizontal"></i></span>
+        <div>
+          <h3 id="repEventsFiltersTitle">Filtry i zakres danych</h3>
+          <p>Ustaw kryteria zestawienia. Możesz łączyć filtry i zawęzić wynik wyszukiwaniem.</p>
+        </div>
+      </header>
+
+      <div class="rep-events-filter-grid">
+        <div class="rep-row rep-row--wide">
+          <span class="rep-row-label">Zakres dat</span>
+          <div class="rep-inline-range">
+            <label class="rep-date-control">
+              <span>Od</span>
+              <input id="repEventsFrom" type="date" />
+            </label>
+            <label class="rep-date-control">
+              <span>Do</span>
+              <input id="repEventsTo" type="date" />
+            </label>
+          </div>
+        </div>
+        <div class="rep-row">
+          <label for="repEventsClient">Klient</label>
+          <select id="repEventsClient"></select>
+        </div>
+        <div class="rep-row">
+          <label for="repEventsZone">Strefa</label>
+          <select id="repEventsZone"></select>
+        </div>
+        <div class="rep-row">
+          <label for="repEventsWorker">Pracownik</label>
+          <select id="repEventsWorker"></select>
+        </div>
+        <div class="rep-row">
+          <label for="repEventsStatus">Status</label>
+          <select id="repEventsStatus">
+            <option value="all">Wszystkie</option>
+            <option value="closed">Zamknięte</option>
+            <option value="running">Otwarte</option>
+          </select>
+        </div>
+        <div class="rep-row">
+          <label for="repEventsType">Typ zdarzenia</label>
+          <select id="repEventsType">
+            <option value="">Wszystkie typy</option>
+          </select>
+        </div>
+        <div class="rep-row">
+          <label for="repEventsGroupBy">Grupuj według</label>
+          <select id="repEventsGroupBy">
+            <option value="client">Klient</option>
+            <option value="zone">Strefa</option>
+            <option value="worker">Pracownik</option>
+            <option value="type">Typ zdarzenia</option>
+            <option value="day">Dzień</option>
+          </select>
+        </div>
+        <div class="rep-row rep-row--search">
+          <label for="repEventsSearch">Szukaj w wynikach</label>
+          <div class="rep-search-control">
+            <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
+            <input id="repEventsSearch" type="text" placeholder="Klient, strefa, lokalizacja lub komentarz" />
+          </div>
+        </div>
+      </div>
+
+      <div class="rep-filter-footer">
+        <div id="repStatus" class="rep-note" role="status" aria-live="polite"></div>
+        <div class="rep-actions">
+          <button class="rep-btn" type="button" id="repDownloadPdf" data-rep-export="pdf" disabled>
+            <i class="ph ph-file-pdf" aria-hidden="true"></i>
+            <span>Pobierz PDF</span>
+          </button>
+          <button class="rep-btn" type="button" id="repDownloadCsv" data-rep-export="csv" disabled>
+            <i class="ph ph-download-simple" aria-hidden="true"></i>
+            <span>Pobierz CSV</span>
+          </button>
+          <button class="rep-btn primary" type="button" id="repRun">
+            <i class="ph ph-chart-bar" aria-hidden="true"></i>
+            <span>Generuj zestawienie</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <div class="rep-kpi-grid rep-events-kpis" aria-label="Podsumowanie zestawienia">
+      <article class="rep-kpi-card rep-kpi-card--violet">
+        <div>
+          <span class="k">Zdarzenia</span>
+          <strong class="v" id="repKpiCountA">0</strong>
+          <span class="rep-kpi-caption">Liczba wpisów</span>
+        </div>
+        <i class="rep-kpi-icon ph ph-activity" aria-hidden="true"></i>
+      </article>
+      <article class="rep-kpi-card rep-kpi-card--cyan">
+        <div>
+          <span class="k">Łączny czas</span>
+          <strong class="v" id="repKpiTimeA">00:00:00</strong>
+          <span class="rep-kpi-caption">Zamknięte zdarzenia</span>
+        </div>
+        <i class="rep-kpi-icon ph ph-timer" aria-hidden="true"></i>
+      </article>
+      <article class="rep-kpi-card rep-kpi-card--green">
+        <div>
+          <span class="k">Pracownicy</span>
+          <strong class="v" id="repKpiCountB">0</strong>
+          <span class="rep-kpi-caption">Osoby w zestawieniu</span>
+        </div>
+        <i class="rep-kpi-icon ph ph-users-three" aria-hidden="true"></i>
+      </article>
+      <article class="rep-kpi-card rep-kpi-card--amber">
+        <div>
+          <span class="k">Średni czas</span>
+          <strong class="v" id="repKpiTimeB">00:00:00</strong>
+          <span class="rep-kpi-caption">Na zamknięte zdarzenie</span>
+        </div>
+        <i class="rep-kpi-icon ph ph-chart-line-up" aria-hidden="true"></i>
+      </article>
+    </div>
+
+    <div id="repSummary" class="rep-summary" style="display:none;"></div>
+
+    <div class="rep-events-grid">
+      <section class="rep-tablewrap" id="repTableAWrap" style="display:none;" aria-labelledby="repSummaryTableTitle">
+        <header class="reports-result-heading">
+          <span class="reports-result-heading__icon" aria-hidden="true"><i class="ph ph-table"></i></span>
+          <div>
+            <h3 id="repSummaryTableTitle">Podsumowanie</h3>
+            <p>Wynik pogrupowany według wybranego kryterium.</p>
+          </div>
+        </header>
+        <div class="rep-table-scroll">
+          <table class="rep-table" id="repTableA"></table>
+        </div>
+      </section>
+
+      <section class="rep-chart-panel" id="repDiffWrap" style="display:none;" aria-labelledby="repChartTitle">
+        <header class="reports-result-heading">
+          <span class="reports-result-heading__icon" aria-hidden="true"><i class="ph ph-chart-bar-horizontal"></i></span>
+          <div>
+            <h3 id="repChartTitle">Najwięcej czasu</h3>
+            <p>Najważniejsze grupy według łącznego czasu.</p>
+          </div>
+        </header>
+        <div class="rep-bars" id="repChartA"></div>
+      </section>
+    </div>
+
+    <section class="rep-tablewrap" id="repTableBWrap" style="display:none;" aria-labelledby="repDetailsTableTitle">
+      <header class="reports-result-heading">
+        <span class="reports-result-heading__icon" aria-hidden="true"><i class="ph ph-list-bullets"></i></span>
+        <div>
+          <h3 id="repDetailsTableTitle">Szczegóły zdarzeń</h3>
+          <p>Pełna lista wpisów spełniających wybrane kryteria.</p>
+        </div>
+      </header>
+      <div class="rep-table-scroll">
+        <table class="rep-table" id="repTableB"></table>
+      </div>
+    </section>
+  </div>
+</div>

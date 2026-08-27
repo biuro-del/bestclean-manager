@@ -21,6 +21,8 @@ import {
   workIntervalVisibleComment,
   workIntervalsFromRow,
   workIntervalsTotalSeconds,
+  resolveWorkIntervalZoneSnapshot,
+  workTimeDayHasHistoryAlert,
   workSessionAccountingFromRow,
   workTimeCycleRowsFromDays,
   warsawBusinessDateKey,
@@ -129,6 +131,7 @@ export function createWorkerAccountFeature(ctx) {
     getWorkdays,
     getWorkers,
     getWorkerTime,
+    getZones,
     normalizeSearchText,
     ordersListSourceOrders,
     ordersSyncRemoteTimelineOrders,
@@ -2770,24 +2773,12 @@ export function createWorkerAccountFeature(ctx) {
     return value || 'Brak danych'
   }
 
-  function workerAccountTimeIntervalQrCode(interval = {}) {
-    return workerAccountTimeIntervalInfoValue(
-      interval?.qrCode,
-      interval?.scannedQrCode,
-      interval?.zoneQrCode,
-      interval?.zoneId,
-      interval?.utilityRoomId,
-      interval?.roomId,
-    )
-  }
-
-  function workerAccountTimeIntervalFunction(interval = {}, codeType = '') {
+  function workerAccountTimeIntervalFunction(interval = {}) {
     const rawValue = workerAccountTimeIntervalInfoValue(
       interval?.functionName,
       interval?.zoneFunction,
       interval?.function,
       interval?.qrFunction,
-      codeType,
     )
     const normalized = rawValue.toUpperCase().replace(/[\s_-]+/g, ' ').trim()
     const isSpecial = interval?.isSpecialZone === true || /SPECJAL|SPECIAL/.test(normalized)
@@ -2801,15 +2792,15 @@ export function createWorkerAccountFeature(ctx) {
 
   function workerAccountTimeCodeZoneIndicator(code = {}, index = 0) {
     const interval = code?.interval ?? {}
-    const clientLabel = workerAccountTimeIntervalClient(interval)
-    const zoneLabel = workerAccountTimeIntervalZone(interval)
-    const qrCode = workerAccountTimeIntervalQrCode(interval)
-    const functionInfo = workerAccountTimeIntervalFunction(interval, code?.type)
-    const locationLabel = workerAccountTimeIntervalInfoValue(
-      interval?.lokalizacja,
-      interval?.location,
-      interval?.zoneLocation,
-    )
+    const zoneSnapshot = resolveWorkIntervalZoneSnapshot(interval, code?.type, appState.zones)
+    const clientLabel = zoneSnapshot.clientName || workerAccountTimeIntervalClient(interval)
+    const zoneLabel = zoneSnapshot.zoneName || workerAccountTimeIntervalZone(interval)
+    const qrCode = workerAccountTimeIntervalInfoValue(zoneSnapshot.qrCode)
+    const functionInfo = workerAccountTimeIntervalFunction({
+      functionName: zoneSnapshot.functionName,
+      isSpecialZone: zoneSnapshot.isSpecialZone,
+    })
+    const locationLabel = workerAccountTimeIntervalInfoValue(zoneSnapshot.location)
     const tooltipId = `waTimeCodeZoneTooltip-${Math.max(0, Number(index) || 0)}`
     const label = `Informacje o strefie ${zoneLabel}`
     return `
@@ -2964,6 +2955,13 @@ export function createWorkerAccountFeature(ctx) {
 
   function renderTimeTable() {
     const root = document.getElementById('waTimeRows')
+    const businessToday = warsawBusinessDateKey(Date.now())
+    const alertDayKeys = new Set(
+      (Array.isArray(appState.workerAccountTimeRows) ? appState.workerAccountTimeRows : [])
+        .filter((day) => workTimeDayHasHistoryAlert(day, { today: businessToday }))
+        .map((day) => timeRowDayKey(day))
+        .filter(Boolean),
+    )
     const rows = workTimeCycleRowsFromDays(appState.workerAccountTimeRows)
     const paged = paginate(rows, appState.workerAccountTimePage, WORKER_ACCOUNT_TIME_PAGE_SIZE)
     appState.workerAccountTimePage = paged.page
@@ -2973,7 +2971,6 @@ export function createWorkerAccountFeature(ctx) {
       root.innerHTML = paged.items.length
         ? paged.items.map((row) => {
             const integrityState = String(row?.integrityState ?? 'COMPLETE').trim().toUpperCase()
-            const businessToday = warsawBusinessDateKey(Date.now())
             const isCurrentBusinessDay = timeRowDayKey(row) === businessToday
             const hasOpenSession = Array.isArray(row?.openSessions) && row.openSessions.length > 0
             const isCurrentOpenDay = isCurrentBusinessDay && integrityState === 'OPEN_SESSION' && hasOpenSession
@@ -2984,8 +2981,10 @@ export function createWorkerAccountFeature(ctx) {
             )
             const openActivityCount = Math.max(Number(row?.openActivityCount) || 0, openActivityCountForDay(row))
             const hasMissingStop = !isCurrentBusinessDay && (openSessionCount > 0 || openActivityCount > 0)
+            const hasHistoryAlert = alertDayKeys.has(timeRowDayKey(row))
+            const hasWorkTimeWarning = hasMissingStop || hasHistoryAlert || hasIntegrityProblem
             return `
-              <div class="events-row worker-account-time-row${hasMissingStop ? ' has-missing-stop' : ''}${hasIntegrityProblem ? ' has-integrity-problem' : ''}">
+              <div class="events-row worker-account-time-row${hasWorkTimeWarning ? ' has-missing-stop' : ''}${hasIntegrityProblem ? ' has-integrity-problem' : ''}">
                 <div>${workerTablePersonMarkup(row)}</div>
                 <div class="mono">${escapeHtml(dateKeyToLabel(row.dayKey))}</div>
                 <div class="mono time-start">${escapeHtml(isoToHm(row.startAt))}</div>
@@ -3160,6 +3159,7 @@ export function createWorkerAccountFeature(ctx) {
     appState.workerAccountTimeLoadingKey = loadKey
     setTimeLoading()
     try {
+      const orgId = String(appState.session.orgId ?? '').trim()
       const canonicalWorkerLogin = String(workerLogin(worker) ?? '').trim()
       const canonicalDaysPromise = canonicalWorkerLogin && range.from && range.to
         ? getWorkTimeDays(appState.session.orgId, {
@@ -3173,9 +3173,21 @@ export function createWorkerAccountFeature(ctx) {
             return { items: [] }
           })
         : Promise.resolve({ items: [] })
+      const zoneCatalogPromise = typeof getZones === 'function' && orgId && (options.force === true || appState.zonesLoaded !== true)
+        ? getZones(orgId, { forceRefresh: options.force === true })
+            .then((zones) => {
+              if (String(appState.session?.orgId ?? '').trim() !== orgId) return
+              appState.zones = Array.isArray(zones) ? zones : []
+              appState.zonesLoaded = true
+            })
+            .catch((error) => {
+              console.warn('[worker-account/time] current zone catalog unavailable', error)
+            })
+        : Promise.resolve()
       const [compatibilityRows, canonicalDaysResponse] = await Promise.all([
-        fetchWorkerTimeRows(appState.session.orgId, worker, range, { allowBroadFallback: options.allowBroadFallback }),
+        fetchWorkerTimeRows(orgId, worker, range, { allowBroadFallback: options.allowBroadFallback }),
         canonicalDaysPromise,
+        zoneCatalogPromise,
       ])
       const sourceRows = sortRowsByLatest(compatibilityRows).map((row) => stampWorkerIdentity(row, worker))
       if (!isWorkerAccountLoadContextCurrent(context) || appState.workerAccountTimeLoadingKey !== loadKey) return false
@@ -3489,7 +3501,8 @@ export function createWorkerAccountFeature(ctx) {
       console.warn('[worker-account] background WorkersForOrg refresh failed after successful save', error)
     })
     if (successMessage && options.silent !== true) {
-      showTransientNotice(successMessage, 'success')
+      const authWarning = String(persisted?.authWarning ?? '').trim()
+      showTransientNotice(authWarning ? `${successMessage} ${authWarning}` : successMessage, 'success')
     }
     return nextWorker
   }
@@ -3555,11 +3568,16 @@ export function createWorkerAccountFeature(ctx) {
 
     if (button) button.disabled = true
     try {
-      await setWorkerPassword(appState.session.orgId, currentLogin, newPassword)
+      const passwordResult = await setWorkerPassword(appState.session.orgId, currentLogin, newPassword)
       setInputValue('waNewPassword', '')
       setInputValue('waNewPassword2', '')
       resetNewPasswordVisibility()
-      showTransientNotice('Zapisano nowe haslo pracownika.', 'success')
+      showTransientNotice(
+        passwordResult?.authCreated
+          ? 'Odtworzono konto Firebase Auth i ustawiono nowe haslo.'
+          : 'Zapisano nowe haslo pracownika.',
+        'success',
+      )
       exitEditMode('security')
       return true
     } catch (error) {

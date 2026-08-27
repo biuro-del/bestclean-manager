@@ -74,6 +74,7 @@ test('read-only day works before the additive migration and exposes all activiti
   const workdayRead = fixture.calls.find((call) => call.sql.startsWith('select w.*'))
   assert.ok(workdayRead)
   assert.doesNotMatch(workdayRead.sql, /business_date_ymd/)
+  assert.match(workdayRead.sql, /stop_zone\.function as stop_zone_function/)
 })
 
 function repositoryFor(fixture) {

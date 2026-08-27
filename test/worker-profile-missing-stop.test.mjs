@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   applyCurrentMonthMissingStopStatus,
   currentMonthMissingStopWorkerKeys,
+  currentMonthWorkTimeAlertWorkerKeys,
 } from '../web-app/apps/portal-web/src/features/workers/worker_list_profile/missingStopModel.js'
 
 const range = {
@@ -34,4 +35,42 @@ test('dopasowuje login email do loginu Workday bez domeny', () => {
   const result = applyCurrentMonthMissingStopStatus(workers, rows, range)
   assert.equal(result[0].hasCurrentMonthMissingStop, true)
   assert.equal(result[1].hasCurrentMonthMissingStop, false)
+})
+
+test('oznacza pracownika, gdy dowolny dzien biezacego miesiaca ma alert historii', () => {
+  const alertRows = [
+    {
+      workerLogin: 'agata',
+      businessDateYmd: '2026-08-21',
+      integrityState: 'INVALID',
+      issues: [{ code: 'ACTIVITY_OUTSIDE_SESSION' }],
+    },
+    {
+      workerLogin: 'inna',
+      businessDateYmd: '2026-07-31',
+      integrityState: 'INVALID',
+      issues: [{ code: 'ACTIVITY_OUTSIDE_SESSION' }],
+    },
+  ]
+
+  assert.deepEqual([...currentMonthWorkTimeAlertWorkerKeys(alertRows, range)], ['agata'])
+
+  const [worker] = applyCurrentMonthMissingStopStatus(
+    [{ login: 'agata@bestclean.pl' }],
+    [],
+    { ...range, alertRows },
+  )
+  assert.equal(worker.hasCurrentMonthMissingStop, false)
+  assert.equal(worker.hasCurrentMonthWorkTimeAlert, true)
+})
+
+test('zwykla otwarta sesja z dzisiaj nie tworzy alertu pracownika', () => {
+  const rows = [{
+    workerLogin: 'agata',
+    businessDateYmd: '2026-08-26',
+    integrityState: 'OPEN_SESSION',
+    issues: [{ code: 'OPEN_SESSION' }],
+  }]
+
+  assert.deepEqual([...currentMonthWorkTimeAlertWorkerKeys(rows, range)], [])
 })

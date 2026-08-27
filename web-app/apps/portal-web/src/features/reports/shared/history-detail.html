@@ -1,0 +1,100 @@
+<!-- Shared history-based report detail -->
+<div id="repHistory" style="display:none;">
+  <div class="rep-history-wrap">
+    <div class="rep-history-top">
+      <div class="rep-history-tabs" id="repHistoryTabs" role="tablist" aria-label="Typ historii">
+        <button class="rep-history-tab active" type="button" role="tab" aria-selected="true" tabindex="0" data-rep-history-tab="objects">
+          <i class="ph ph-buildings" aria-hidden="true"></i><span>Klient</span>
+        </button>
+        <button class="rep-history-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-rep-history-tab="workers">
+          <i class="ph ph-user" aria-hidden="true"></i><span>Pracownik</span>
+        </button>
+        <button class="rep-history-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-rep-history-tab="zones">
+          <i class="ph ph-map-pin-area" aria-hidden="true"></i><span>Strefa</span>
+        </button>
+      </div>
+    </div>
+
+    <section class="rep-panel rep-history-panel" aria-labelledby="repHistoryFiltersTitle">
+      <header class="reports-panel-heading">
+        <span class="reports-panel-heading__icon" aria-hidden="true"><i class="ph ph-faders-horizontal"></i></span>
+        <div>
+          <h3 id="repHistoryFiltersTitle">Parametry historii</h3>
+          <p>Wybierz rekord, ustaw zakres dat i pobierz przebieg dzień po dniu.</p>
+        </div>
+      </header>
+
+      <div class="rep-history-filter-grid">
+        <div class="rep-row" id="repHistoryClientWrap">
+          <label for="repHistoryClientSearch">Klient</label>
+          <div class="rep-history-picker">
+            <input id="repHistoryClientSearch" type="text" placeholder="Wpisz lub wybierz klienta" autocomplete="off" aria-haspopup="listbox" aria-expanded="false" />
+            <i class="ph ph-caret-down rep-history-picker-caret" aria-hidden="true"></i>
+            <select id="repHistoryClient" class="rep-history-picker-list" aria-label="Lista klientów" aria-expanded="false"></select>
+          </div>
+        </div>
+        <div class="rep-row" id="repHistoryWorkerWrap" style="display:none;">
+          <label for="repHistoryWorkerSearch">Pracownik</label>
+          <div class="rep-history-picker">
+            <input id="repHistoryWorkerSearch" type="text" placeholder="Wpisz lub wybierz pracownika" autocomplete="off" aria-haspopup="listbox" aria-expanded="false" />
+            <i class="ph ph-caret-down rep-history-picker-caret" aria-hidden="true"></i>
+            <select id="repHistoryWorker" class="rep-history-picker-list" aria-label="Lista pracowników" aria-expanded="false"></select>
+          </div>
+        </div>
+        <div class="rep-row" id="repHistoryZoneWrap" style="display:none;">
+          <label for="repHistoryZoneSearch">Strefa</label>
+          <div class="rep-history-picker">
+            <input id="repHistoryZoneSearch" type="text" placeholder="Wpisz lub wybierz strefę" autocomplete="off" aria-haspopup="listbox" aria-expanded="false" />
+            <i class="ph ph-caret-down rep-history-picker-caret" aria-hidden="true"></i>
+            <select id="repHistoryZone" class="rep-history-picker-list" aria-label="Lista stref" aria-expanded="false"></select>
+          </div>
+        </div>
+        <div class="rep-row">
+          <label for="repHistoryFrom">Data od</label>
+          <input id="repHistoryFrom" type="date" />
+        </div>
+        <div class="rep-row">
+          <label for="repHistoryTo">Data do</label>
+          <input id="repHistoryTo" type="date" />
+        </div>
+      </div>
+
+      <div class="rep-filter-footer">
+        <div id="repHistoryStatus" class="rep-note" role="status" aria-live="polite"></div>
+        <div class="rep-actions">
+          <button class="rep-btn" type="button" id="repHistoryDownloadPdf" data-rep-export="pdf" disabled>
+            <i class="ph ph-file-pdf" aria-hidden="true"></i>
+            <span>Pobierz PDF</span>
+          </button>
+          <button class="rep-btn" type="button" id="repHistoryDownloadCsv" data-rep-export="csv" disabled>
+            <i class="ph ph-download-simple" aria-hidden="true"></i>
+            <span>Pobierz CSV</span>
+          </button>
+          <button class="rep-btn primary" type="button" id="repHistoryRun">
+            <i class="ph ph-magnifying-glass" aria-hidden="true"></i>
+            <span>Pokaż historię</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <div id="repHistorySummary" class="rep-summary" style="display:none;"></div>
+
+    <section class="rep-tablewrap rep-history-tablewrap" aria-labelledby="repHistoryTableTitle">
+      <header class="reports-result-heading">
+        <span class="reports-result-heading__icon" aria-hidden="true"><i class="ph ph-calendar-dots"></i></span>
+        <div>
+          <h3 id="repHistoryTableTitle">Historia</h3>
+          <p>Każdy dzień pokazuje sesje START/STOP, aktywności, lokalizacje oraz rzeczywisty czas pracy.</p>
+        </div>
+      </header>
+      <div id="repHistoryLoading" class="rep-history-loading" style="display:none;" aria-live="polite" aria-busy="true">
+        <div class="rep-history-loading-card">
+          <span class="rep-history-spinner" aria-hidden="true"></span>
+          <span data-rep-history-loading-text>Ładowanie historii...</span>
+        </div>
+      </div>
+      <div class="rep-history-days" id="repHistoryTable" role="list" aria-live="polite"></div>
+    </section>
+  </div>
+</div>

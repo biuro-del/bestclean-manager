@@ -1,225 +1,47 @@
-﻿<div class="reports-wrap reports-modern">
-  <header class="portal-page-hero">
-    <div class="portal-page-hero__copy">
-      <div class="portal-page-hero__title-row">
-        <h1>Zestawienia</h1>
-        <span class="portal-page-hero__badge">Raporty</span>
-      </div>
-      <p>Analizuj historię zdarzeń, czasy pracy i wyniki według klientów, osób oraz stref.</p>
-    </div>
-  </header>
+<div class="reports-wrap reports-modern">
+  <section class="reports-screen" id="repHome" data-rep-screen="home">
+    <!-- REPORTS_DASHBOARD -->
+  </section>
 
-  <div id="repHome">
-    <div class="reports-grid reports-grid--dashboard">
-      <button class="report-tile" type="button" data-rep-open="events">
-        <div class="rt-title">Zdarzenia</div>
-        <div class="rt-sub">Historia zdarzeń według stref z tygodnia albo miesiąca.</div>
+  <!-- REPORTS_PODSUMOWANIE -->
+  <!-- REPORTS_ZESTAWIENIA_OVERVIEW -->
+  <!-- REPORTS_ANALIZY -->
+  <!-- REPORTS_GOTOWE -->
+  <!-- REPORTS_MOJE -->
+
+  <section class="reports-screen" id="repBuilder" data-rep-screen="detail" style="display:none;">
+    <div class="reports-topbar reports-topbar--detail">
+      <button class="reports-back" type="button" id="repBack">
+        <i class="ph ph-arrow-left" aria-hidden="true"></i>
+        <span id="repBackLabel">Wróć do zestawień</span>
       </button>
-      <button class="report-tile" type="button" data-rep-open="workerTime">
-        <div class="rt-title">Czasy pracowników</div>
-        <div class="rt-sub">Historia pracy według osób z tygodnia albo miesiąca.</div>
-      </button>
-      <button class="report-tile" type="button" data-rep-open="clients">
-        <div class="rt-title">Klienci</div>
-        <div class="rt-sub">Historia pracy według klientów z tygodnia albo miesiąca.</div>
-      </button>
-      <button class="report-tile" type="button" data-rep-open="audits">
-        <div class="rt-title">Audyty</div>
-        <div class="rt-sub">Raporty kontrolne i porównania audytów (w kolejnym kroku).</div>
-      </button>
-    </div>
-  </div>
 
-  <div id="repBuilder" style="display:none;">
-    <div class="reports-topbar">
-      <button class="reports-back" type="button" id="repBack"><- Wróć</button>
-      <div>
-        <div class="welcome" style="margin:0" id="repTitle">Zestawienie</div>
-        <div class="subwelcome" style="margin:2px 0 0" id="repSubtitle">-</div>
-      </div>
-    </div>
-
-    <div id="repEvents" style="display:none;">
-      <div class="rep-events-shell">
-        <div class="rep-panel rep-events-filter">
-          <h3>Filtry</h3>
-          <div class="rep-events-filter-grid">
-            <div class="rep-row">
-              <label>Zakres dat</label>
-              <div class="rep-inline-range">
-                <input id="repEventsFrom" type="date" />
-                <input id="repEventsTo" type="date" />
-              </div>
-            </div>
-            <div class="rep-row">
-              <label>Klient</label>
-              <select id="repEventsClient"></select>
-            </div>
-            <div class="rep-row">
-              <label>Strefa</label>
-              <select id="repEventsZone"></select>
-            </div>
-            <div class="rep-row">
-              <label>Pracownik</label>
-              <select id="repEventsWorker"></select>
-            </div>
-            <div class="rep-row">
-              <label>Status</label>
-              <select id="repEventsStatus">
-                <option value="all">Wszystkie</option>
-                <option value="closed">Zamknięte</option>
-                <option value="running">Otwarte</option>
-              </select>
-            </div>
-            <div class="rep-row">
-              <label>Typ zdarzenia</label>
-              <select id="repEventsType">
-                <option value="">Wszystkie typy</option>
-              </select>
-            </div>
-            <div class="rep-row">
-              <label>Grupuj według</label>
-              <select id="repEventsGroupBy">
-                <option value="client">Klient</option>
-                <option value="zone">Strefa</option>
-                <option value="worker">Pracownik</option>
-                <option value="type">Typ zdarzenia</option>
-                <option value="day">Dzień</option>
-              </select>
-            </div>
-            <div class="rep-row">
-              <label>Szukaj</label>
-              <input id="repEventsSearch" type="text" placeholder="np. klient, strefa, lokalizacja, komentarz..." />
-            </div>
-          </div>
-
-          <div class="rep-actions">
-            <button class="rep-btn primary" type="button" id="repRun">Generuj zestawienie</button>
-            <button class="rep-btn" type="button" id="repDownloadCsv" disabled>Pobierz CSV</button>
-          </div>
-          <div id="repStatus" class="rep-note" style="margin-top:2px;"></div>
-        </div>
-
-        <div class="rep-kpi-grid rep-events-kpis">
-          <div class="rep-kpi-card">
-            <div class="k">Zdarzenia</div>
-            <div class="v" id="repKpiCountA">0</div>
-          </div>
-          <div class="rep-kpi-card">
-            <div class="k">Łączny czas</div>
-            <div class="v" id="repKpiTimeA">00:00:00</div>
-          </div>
-          <div class="rep-kpi-card">
-            <div class="k">Pracownicy</div>
-            <div class="v" id="repKpiCountB">0</div>
-          </div>
-          <div class="rep-kpi-card">
-            <div class="k">Średni czas</div>
-            <div class="v" id="repKpiTimeB">00:00:00</div>
-          </div>
-        </div>
-
-        <div id="repSummary" class="rep-summary" style="display:none;"></div>
-
-        <div class="rep-events-grid">
-          <div class="rep-tablewrap" id="repTableAWrap" style="display:none;">
-            <div class="rep-tabletitle">Podsumowanie</div>
-            <table class="rep-table" id="repTableA"></table>
-          </div>
-
-          <div class="rep-chart-panel" id="repDiffWrap" style="display:none;">
-            <div class="rep-chart-head">
-              <h3>Najwięcej czasu</h3>
-              <p class="rep-note">Top grup według łącznego czasu zdarzeń.</p>
-            </div>
-            <div class="rep-bars" id="repChartA"></div>
-          </div>
-        </div>
-
-        <div class="rep-tablewrap" id="repTableBWrap" style="display:none;">
-          <div class="rep-tabletitle">Szczegóły zdarzeń</div>
-          <table class="rep-table" id="repTableB"></table>
+      <div class="reports-section-heading">
+        <span class="reports-section-heading__icon" id="repSectionIcon" aria-hidden="true">
+          <i class="ph ph-chart-bar"></i>
+        </span>
+        <div>
+          <nav class="reports-breadcrumb" aria-label="Ścieżka nawigacji">
+            <button type="button" data-rep-go-home>Raporty</button>
+            <i class="ph ph-caret-right" aria-hidden="true"></i>
+            <span id="repBreadcrumbSection">Zestawienia</span>
+          </nav>
+          <span class="reports-section-eyebrow" id="repEyebrow">Raport</span>
+          <h2 id="repTitle" tabindex="-1">Zestawienie</h2>
+          <p id="repSubtitle">Wybierz parametry raportu.</p>
         </div>
       </div>
     </div>
 
-    <div id="repHistory" style="display:none;">
-      <div class="rep-history-wrap">
-        <div class="rep-history-top">
-          <div class="rep-history-tabs" id="repHistoryTabs">
-            <button class="rep-history-tab active" type="button" data-rep-history-tab="objects">Obiekty</button>
-            <button class="rep-history-tab" type="button" data-rep-history-tab="workers">Osoby</button>
-            <button class="rep-history-tab" type="button" data-rep-history-tab="zones">Strefy</button>
-          </div>
-          <div class="rep-history-range">
-            <label class="rep-chip">
-              <input type="radio" name="repHistoryRange" id="repHistoryRangeMonth" value="month" checked />
-              <span>Miesiąc</span>
-            </label>
-            <label class="rep-chip">
-              <input type="radio" name="repHistoryRange" id="repHistoryRangeWeek" value="week" />
-              <span>Tydzień</span>
-            </label>
-          </div>
-        </div>
-
-        <div class="rep-panel rep-history-panel">
-          <div class="rep-row" id="repHistoryClientWrap">
-            <label>Klient</label>
-            <div class="rep-history-picker">
-              <input id="repHistoryClientSearch" type="text" placeholder="Wpisz nazwę klienta..." autocomplete="off" />
-              <select id="repHistoryClient" class="rep-history-picker-list"></select>
-            </div>
-          </div>
-          <div class="rep-row" id="repHistoryWorkerWrap" style="display:none;">
-            <label>Osoba</label>
-            <div class="rep-history-picker">
-              <input id="repHistoryWorkerSearch" type="text" placeholder="Wpisz nazwę osoby..." autocomplete="off" />
-              <select id="repHistoryWorker" class="rep-history-picker-list"></select>
-            </div>
-          </div>
-          <div class="rep-row" id="repHistoryZoneWrap" style="display:none;">
-            <label>Strefa</label>
-            <div class="rep-history-picker">
-              <input id="repHistoryZoneSearch" type="text" placeholder="Wpisz nazwę strefy..." autocomplete="off" />
-              <select id="repHistoryZone" class="rep-history-picker-list"></select>
-            </div>
-          </div>
-          <div class="rep-row">
-            <label>Zakres dat</label>
-            <div class="rep-inline-range">
-              <input id="repHistoryFrom" type="date" />
-              <input id="repHistoryTo" type="date" />
-            </div>
-          </div>
-          <div class="rep-actions">
-            <button class="rep-btn primary" type="button" id="repHistoryRun">Pokaż historię</button>
-          </div>
-          <div id="repHistoryStatus" class="rep-note"></div>
-        </div>
-
-        <div id="repHistorySummary" class="rep-summary" style="display:none;"></div>
-
-        <div class="rep-tablewrap rep-history-tablewrap">
-          <div id="repHistoryLoading" class="rep-history-loading" style="display:none;" aria-live="polite" aria-busy="true">
-            <div class="rep-history-loading-card">
-              <span class="rep-history-spinner" aria-hidden="true"></span>
-              <span data-rep-history-loading-text>Ładowanie historii...</span>
-            </div>
-          </div>
-          <table class="rep-table" id="repHistoryTable"></table>
-        </div>
-      </div>
-    </div>
-
+    <!-- REPORTS_ZESTAWIENIA -->
+    <!-- REPORTS_HISTORIA -->
     <div id="repSoon" style="display:none;">
-      <div class="card">
-        <div class="card-body">
-          <h3 class="card-title">Wkrótce</h3>
-          <p class="card-text">Ten typ zestawienia dodamy w kolejnym kroku.</p>
-        </div>
-      </div>
+      <section class="reports-empty-state" aria-labelledby="reportsSoonTitle">
+        <span class="reports-empty-state__icon" aria-hidden="true"><i class="ph ph-clipboard-text"></i></span>
+        <span class="reports-empty-state__eyebrow">Niedostępny raport</span>
+        <h3 id="reportsSoonTitle">Ten raport nie ma jeszcze źródła danych</h3>
+        <p>Wróć do listy raportów i wybierz jedną z aktywnych pozycji.</p>
+      </section>
     </div>
-  </div>
+  </section>
 </div>
-

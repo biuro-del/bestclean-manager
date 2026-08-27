@@ -125,10 +125,13 @@ export function createWorkerCrudController({ gateway } = {}) {
       currentLogin,
       editedBy,
     )
-    let successNotice = 'Zmiany zapisano.'
+    const authWarning = String(updatedWorker?.authWarning ?? '').trim()
+    let successNotice = authWarning ? `Zmiany zapisano. ${authWarning}` : 'Zmiany zapisano.'
     if (password) {
-      await gateway.setPassword(orgId, optimisticWorker.login, password)
-      successNotice = 'Hasło ustawiono w Firebase Auth.'
+      const passwordResult = await gateway.setPassword(orgId, optimisticWorker.login, password)
+      successNotice = passwordResult?.authCreated
+        ? 'Odtworzono konto Firebase Auth i ustawiono hasło.'
+        : 'Hasło ustawiono w Firebase Auth.'
     }
 
     return {

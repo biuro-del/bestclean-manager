@@ -1575,6 +1575,8 @@ function mapWorkday(orgId, row, lookupMaps) {
     : null
 
   const currentQrMeta = resolveCurrentQrZoneMeta(authoritativeQrCode, lookupMaps)
+  const currentStartQrMeta = resolveCurrentQrZoneMeta(workdayStartQrCode, lookupMaps)
+  const currentStopQrMeta = resolveCurrentQrZoneMeta(workdayStopQrCode, lookupMaps)
   const fallbackZoneMeta = !authoritativeQrCode ? resolveCurrentQrZoneMeta(roomId, lookupMaps) : null
   const zoneFromLookup = currentQrMeta.zone || fallbackZoneMeta?.zone || null
   const zone = currentQrMeta.zone
@@ -1773,6 +1775,8 @@ function mapWorkday(orgId, row, lookupMaps) {
     zoneName: sanitizeTextValue(resolvedZoneName || '-'),
     zoneFunction: resolvedZoneFunction,
     functionName: resolvedZoneFunction,
+    startZoneFunction: currentStartQrMeta.functionName,
+    stopZoneFunction: currentStopQrMeta.functionName,
     isSpecialZone: resolvedIsSpecialZone,
     clientId: resolvedClientId,
     klient: sanitizeTextValue(resolvedClientName || '-'),

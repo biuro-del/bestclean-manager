@@ -248,6 +248,18 @@ test('tabela dnia pokazuje brak STOP przez etykiete i zolte tlo rekordu', () => 
   assert.match(style, /\.worker-account-time-row\.has-missing-stop\s*\{[\s\S]*background:\s*#fff8df/)
 })
 
+test('dowolny alert historii wyroznia caly dzien takim samym zoltym tlem', () => {
+  const source = read('web-app/apps/portal-web/src/features/workers/account/index.js')
+  const tableBlock = source.slice(
+    source.indexOf('function renderTimeTable'),
+    source.indexOf('function renderAllTables'),
+  )
+
+  assert.match(tableBlock, /workTimeDayHasHistoryAlert\(day, \{ today: businessToday \}\)/)
+  assert.match(tableBlock, /const hasWorkTimeWarning = hasMissingStop \|\| hasHistoryAlert \|\| hasIntegrityProblem/)
+  assert.match(tableBlock, /hasWorkTimeWarning \? ' has-missing-stop'/)
+})
+
 test('tabela czasu wzbogaca dane zgodnie z kanonicznym endpointem dni', () => {
   const source = read('web-app/apps/portal-web/src/features/workers/account/index.js')
 

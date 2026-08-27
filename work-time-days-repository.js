@@ -137,11 +137,13 @@ async function assertWorkerAccess(client, access, orgId, workerLogin) {
 
 async function readWorkdays(client, orgId, workerLogin, businessDateYmd, { businessDateColumnReady = false, forUpdate = false } = {}) {
   const result = await client.query(
-    `select w.*, z.id as zone_id, z.zone as zone_name, z.location as zone_location,
-            z.client_id, c.name as client_name
+    `select w.*, z.id as zone_id, z.zone as zone_name, z.function as zone_function,
+            z.location as zone_location, z.client_id, c.name as client_name,
+            stop_zone.function as stop_zone_function
        from public.workday w
        left join public.zone z on z.org_id = w.org_id and z.id = w.utility_room_id
        left join public.client c on c.org_id = z.org_id and c.client_id = z.client_id
+       left join public.zone stop_zone on stop_zone.org_id = w.org_id and lower(stop_zone.id) = lower(w.stop_object)
       where w.org_id = $1::text
         and lower(w.worker_login) = lower($2::text)
         and ${dayExpression('w', businessDateColumnReady)} = $3::text
@@ -153,7 +155,7 @@ async function readWorkdays(client, orgId, workerLogin, businessDateYmd, { busin
 
 async function readEvents(client, orgId, workerLogin, businessDateYmd, workdayIds = [], { forUpdate = false } = {}) {
   const result = await client.query(
-    `select e.*, z.zone as zone_name, z.location, z.client_id, c.name as client_name
+    `select e.*, z.zone as zone_name, z.function as zone_function, z.location, z.client_id, c.name as client_name
        from public.event e
        left join public.zone z on z.org_id = e.org_id and z.id = e.zone_id
        left join public.client c on c.org_id = z.org_id and c.client_id = z.client_id
@@ -257,8 +259,14 @@ function createWorkTimeDaysRepository(client, { authorize }) {
     if (from > to) throw error(400, 'DATE_RANGE_INVALID', 'fromYmd nie może być późniejsze niż toYmd.')
     const schemaState = await readSchemaState(client)
     const result = await client.query(
-      `select w.*, ${dayExpression('w', schemaState.businessDateColumnReady)} as computed_business_date_ymd
+      `select w.*, ${dayExpression('w', schemaState.businessDateColumnReady)} as computed_business_date_ymd,
+              z.id as zone_id, z.zone as zone_name, z.function as zone_function,
+              z.location as zone_location, z.client_id, c.name as client_name,
+              stop_zone.function as stop_zone_function
          from public.workday w
+         left join public.zone z on z.org_id = w.org_id and z.id = w.utility_room_id
+         left join public.client c on c.org_id = z.org_id and c.client_id = z.client_id
+         left join public.zone stop_zone on stop_zone.org_id = w.org_id and lower(stop_zone.id) = lower(w.stop_object)
         where w.org_id = $1::text
           and ($2::text = '' or lower(w.worker_login) = lower($2::text))
           and ${dayExpression('w', schemaState.businessDateColumnReady)} between $3::text and $4::text

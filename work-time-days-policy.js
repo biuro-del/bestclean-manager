@@ -67,6 +67,24 @@ function minuteTimestamp(value) {
   return valueMs ? Math.floor(valueMs / MILLISECONDS_PER_MINUTE) * MILLISECONDS_PER_MINUTE : 0
 }
 
+function qrFunctionToken(value) {
+  const raw = text(value, 200)
+  if (!raw) return ''
+  let normalized = raw
+  try {
+    normalized = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  } catch {
+    normalized = raw
+  }
+  return normalized.toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function isOperationalQrFunction(value) {
+  const token = qrFunctionToken(value)
+  if (!token || token === 'START' || token.startsWith('STOP')) return false
+  return token.includes('CLEAN') || token.includes('SPRZAT') || token.includes('STREFA') || token.includes('SPECIAL')
+}
+
 function secondsBetween(startValue, endValue) {
   const startMs = timestamp(startValue)
   const endMs = timestamp(endValue)
@@ -115,6 +133,8 @@ function workTimeDayVersion(workdays = [], events = []) {
       endAt: iso(row.end_at ?? row.endAt),
       startAt: iso(row.start_at ?? row.startAt),
       status: text(row.status, 40),
+      stopObject: text(row.stop_object ?? row.stopObject, 300),
+      stopZoneFunction: text(row.stop_zone_function ?? row.stopZoneFunction, 200),
       updatedAt: iso(row.updated_at ?? row.updatedAt),
       utilityRoomId: text(row.utility_room_id ?? row.utilityRoomId, 64),
       workdayId: text(row.workday_id ?? row.workdayId, 64),
@@ -143,6 +163,7 @@ function activityFromRow(row = {}) {
     workerName: text(row.worker_name ?? row.workerName, 300),
     zoneId: text(row.zone_id ?? row.zoneId, 64),
     zoneName: text(row.zone_name ?? row.zoneName, 300),
+    zoneFunction: text(row.zone_function ?? row.zoneFunction ?? row.functionName, 200),
   }
 }
 
@@ -164,6 +185,7 @@ function sessionFromRow(row = {}) {
     startObject: text(row.start_object ?? row.startObject, 300),
     status: text(row.status, 40).toUpperCase(),
     stopObject: text(row.stop_object ?? row.stopObject, 300),
+    stopZoneFunction: text(row.stop_zone_function ?? row.stopZoneFunction, 200),
     location: text(row.zone_location ?? row.location, 500),
     utilityRoomId: zoneId,
     updatedAt: iso(row.updated_at ?? row.updatedAt),
@@ -173,7 +195,37 @@ function sessionFromRow(row = {}) {
     workerName: text(row.worker_name ?? row.workerName, 300),
     zoneId,
     zoneName: text(row.zone_name ?? row.zoneName, 300),
+    zoneFunction: text(row.zone_function ?? row.zoneFunction ?? row.functionName, 200),
   }
+}
+
+function recoverOperationalStopFromActivities(session = {}) {
+  if (!isOperationalQrFunction(session.stopZoneFunction)) return false
+  const startMs = timestamp(session.startAt)
+  const recordedEndMs = timestamp(session.endAt)
+  if (!startMs || !recordedEndMs) return false
+
+  const latestActivityEndMs = (Array.isArray(session.activities) ? session.activities : []).reduce((latest, activity) => {
+    const activityStartMs = timestamp(activity.startAt)
+    const activityEndMs = timestamp(activity.endAt)
+    if (
+      activity.isValid === false ||
+      !activityStartMs ||
+      activityStartMs < startMs ||
+      activityEndMs <= recordedEndMs ||
+      activityEndMs <= activityStartMs ||
+      (activityEndMs - startMs) / 1000 > MAX_SESSION_SECONDS
+    ) return latest
+    return Math.max(latest, activityEndMs)
+  }, 0)
+  if (!latestActivityEndMs) return false
+
+  session.recordedEndAt = session.endAt
+  session.recordedDurationSec = session.durationSec
+  session.endAt = new Date(latestActivityEndMs).toISOString()
+  session.durationSec = secondsBetween(session.startAt, session.endAt)
+  session.stopRecoveredFromActivity = true
+  return true
 }
 
 function exactSessionKey(session = {}) {
@@ -335,27 +387,12 @@ function buildWorkTimeDay({ workdays = [], events = [], businessDateYmd, now = n
     const activityIssues = []
     const activityStart = timestamp(activity.startAt)
     const activityEnd = timestamp(activity.endAt)
-    const sessionStart = timestamp(parent.startAt)
-    const sessionEnd = timestamp(parent.endAt)
-    const activityStartMinute = minuteTimestamp(activity.startAt)
-    const activityEndMinute = minuteTimestamp(activity.endAt)
-    const sessionStartMinute = minuteTimestamp(parent.startAt)
-    const sessionEndMinute = minuteTimestamp(parent.endAt)
     if (activity.workerLogin && parent.workerLogin && activity.workerLogin.toLowerCase() !== parent.workerLogin.toLowerCase()) {
       activityIssues.push(issue('ACTIVITY_WORKER_MISMATCH', { eventId: activity.eventId, workdayId: parent.workdayId }))
     }
     if (!activityStart) activityIssues.push(issue('ACTIVITY_START_MISSING', { eventId: activity.eventId }))
     if (activityStart > nowMs || activityEnd > nowMs) activityIssues.push(issue('ACTIVITY_FUTURE_TIMESTAMP', { eventId: activity.eventId }))
     if (activityStart && activityEnd && activityEnd <= activityStart) activityIssues.push(issue('ACTIVITY_END_BEFORE_START', { eventId: activity.eventId }))
-    if (
-      activityStartMinute && sessionStartMinute &&
-      (
-        activityStartMinute < sessionStartMinute ||
-        (sessionEndMinute && (activityStartMinute > sessionEndMinute || activityEndMinute > sessionEndMinute))
-      )
-    ) {
-      activityIssues.push(issue('ACTIVITY_OUTSIDE_SESSION', { eventId: activity.eventId, workdayId: parent.workdayId }))
-    }
     if (activity.isOpen) {
       activityIssues.push(issue('OPEN_ACTIVITY', { eventId: activity.eventId }))
       if (!parent.isOpen) activityIssues.push(issue('CLOSED_SESSION_WITH_OPEN_ACTIVITY', { eventId: activity.eventId }))
@@ -366,9 +403,34 @@ function buildWorkTimeDay({ workdays = [], events = [], businessDateYmd, now = n
     issues.push(...activityIssues)
   })
 
-  sessions.forEach((session) => session.activities.sort(
-    (left, right) => timestamp(left.startAt) - timestamp(right.startAt) || left.eventId.localeCompare(right.eventId),
-  ))
+  sessions.forEach((session) => {
+    session.activities.sort(
+      (left, right) => timestamp(left.startAt) - timestamp(right.startAt) || left.eventId.localeCompare(right.eventId),
+    )
+    recoverOperationalStopFromActivities(session)
+
+    const sessionStartMinute = minuteTimestamp(session.startAt)
+    const sessionEndMinute = minuteTimestamp(session.endAt)
+    session.activities.forEach((activity) => {
+      const activityStartMinute = minuteTimestamp(activity.startAt)
+      const activityEndMinute = minuteTimestamp(activity.endAt)
+      const outsideSession = Boolean(
+        activityStartMinute && sessionStartMinute &&
+        (
+          activityStartMinute < sessionStartMinute ||
+          (sessionEndMinute && (activityStartMinute > sessionEndMinute || activityEndMinute > sessionEndMinute))
+        )
+      )
+      if (!outsideSession) return
+      const outsideIssue = issue('ACTIVITY_OUTSIDE_SESSION', {
+        eventId: activity.eventId,
+        workdayId: session.workdayId,
+      })
+      activity.issues.push(outsideIssue)
+      activity.isValid = false
+      issues.push(outsideIssue)
+    })
+  })
 
   const closedValidSessions = sessions.filter((session) => session.isValid && !session.isOpen && session.endAt)
   let furthest = null

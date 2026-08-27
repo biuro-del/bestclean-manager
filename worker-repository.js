@@ -331,7 +331,9 @@ async function readWorkerForPasswordReset(client, orgId, identifier) {
             login_email,
             email,
             auth_uid,
-            active
+            active,
+            role,
+            worker_type
        from public.worker
       where org_id = $1::text
         and (
@@ -550,6 +552,39 @@ async function upsertWorkerMembership(client, payload) {
     [payload.orgId, payload.authUid, payload.role, payload.workerId],
   )
   return result.rowCount
+}
+
+async function relinkWorkerAuth(client, payload) {
+  const result = await runQuery(
+    client,
+    'relink-worker-auth',
+    `update public.worker
+        set auth_uid = $3::text,
+            updated_at = now()
+      where org_id = $1::text
+        and lower(login) = lower($2::text)
+      returning *`,
+    [payload.orgId, payload.login, payload.authUid],
+  )
+  const worker = result.rows[0] ?? null
+  if (!worker) {
+    throw publicError(404, 'WORKER_NOT_FOUND', 'Nie znaleziono pracownika do polaczenia z Firebase Auth.')
+  }
+
+  const previousAuthUid = text(payload.previousAuthUid)
+  if (previousAuthUid && lower(previousAuthUid) !== lower(payload.authUid)) {
+    await runQuery(
+      client,
+      'delete-stale-worker-organization-member',
+      `delete from public.organization_member
+        where org_id = $1::text
+          and uid = $2::text`,
+      [payload.orgId, previousAuthUid],
+    )
+  }
+
+  await upsertWorkerMembership(client, payload)
+  return worker
 }
 
 async function updateWorkerRow(client, payload) {
@@ -1134,6 +1169,7 @@ module.exports = {
   readWorkerForPasswordReset,
   readWorkerForUpdate,
   readWorkerIdRows,
+  relinkWorkerAuth,
   renameWorker,
   reserveWorkerId,
   restoreWorkers,

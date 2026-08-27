@@ -113,6 +113,43 @@ test('kontroler edytuje profil i hasło, zachowując dane zdjęcia', async () =>
   assert.deepEqual(calls[1], ['password', 'org-1', 'anna@example.com', 'nowehaslo'])
 })
 
+test('kontroler informuje o odtworzeniu brakujacego konta Firebase Auth', async () => {
+  const { createWorkerCrudController } = await controllerModule
+  const controller = createWorkerCrudController({
+    gateway: {
+      create: async () => assert.fail('create nie powinien zostac wywolany'),
+      update: async () => ({
+        login: 'anna@example.com',
+        workerId: 'worker_org-1_2',
+        role: 'WORKER',
+        authWarning: 'Brak konta Firebase Auth.',
+      }),
+      remove: async () => assert.fail('remove nie powinien zostac wywolany'),
+      setPassword: async () => ({ passwordUpdated: true, authCreated: true }),
+    },
+  })
+
+  const result = await controller.save({
+    mode: 'edit',
+    orgId: 'org-1',
+    currentWorker: { login: 'anna@example.com', workerId: 'worker_org-1_2' },
+    editedBy: 'Admin',
+    canResetWorkerPasswords: true,
+    form: {
+      workerId: 'worker_org-1_2',
+      name: 'Anna Nowak',
+      email: 'anna@example.com',
+      role: 'WORKER',
+      workerType: 'Staly personel na obiekcie',
+      active: true,
+      password: 'nowehaslo',
+      repeatedPassword: 'nowehaslo',
+    },
+  })
+
+  assert.match(result.successNotice, /Odtworzono konto Firebase Auth/)
+})
+
 test('kontroler usuwa pracownika dopiero po poprawnej walidacji', async () => {
   const { createWorkerCrudController } = await controllerModule
   let deletePayload = null

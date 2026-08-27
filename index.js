@@ -4698,14 +4698,6 @@ function createWorkerProfilePublicError(statusCode, publicCode, publicMessage) {
 const WORKER_PROFILE_DB_ONLY_AUTH_WARNING =
   'Profil pracownika zapisano w bazie, ale nie znaleziono konta Firebase Auth; Firebase Auth nie zostal zmieniony.'
 
-function createWorkerProfileAuthRequiredError(actionLabel = 'tej operacji') {
-  return createWorkerProfilePublicError(
-    409,
-    'FIREBASE_AUTH_USER_MISSING',
-    `Ten pracownik nie ma konta Firebase Auth. Odtworz konto Firebase Auth przed wykonaniem operacji: ${actionLabel}.`,
-  )
-}
-
 async function runWorkerProfileDbQuery(client, label, queryText, params = []) {
   try {
     return await client.query(queryText, params)
@@ -5730,9 +5722,12 @@ async function handleAdminWorkerPasswordRevealRequest(req, res) {
 
 async function setWorkerPasswordDatabase(payload, decodedToken) {
   const client = await connectDbClient()
+  let createdAuthUser = null
+  let transactionStarted = false
+  let databaseCommitted = false
   try {
     await workerRepository.assertWorkerSchemaReady(client)
-    const membership = await getRequesterMembership(
+    let membership = await getRequesterMembership(
       client,
       payload.orgId,
       decodedToken.uid,
@@ -5756,22 +5751,108 @@ async function setWorkerPasswordDatabase(payload, decodedToken) {
     }
 
     const authMatch = await findFirebaseUserForWorker(worker, worker.auth_uid)
-    const authUid = normalizeText(authMatch.authUid)
+    let authUid = normalizeText(authMatch.authUid)
+    const previousAuthUid = normalizeText(worker.auth_uid)
+    let authCreated = false
+
     if (!authUid) {
-      throw createWorkerProfilePublicError(
-        409,
-        'FIREBASE_AUTH_USER_MISSING',
-        'Ten pracownik nie ma konta Firebase Auth. Nie mozna ustawic hasla.',
-      )
+      const email = normalizeEmail(worker.login_email || worker.email)
+      if (!email) {
+        throw createWorkerProfilePublicError(
+          409,
+          'WORKER_EMAIL_MISSING',
+          'Pracownik nie ma poprawnego emaila potrzebnego do odtworzenia konta Firebase Auth.',
+        )
+      }
+
+      createdAuthUser = await createFirebaseAuthUser({
+        email,
+        password: payload.password,
+        displayName: normalizeText(worker.full_name) || normalizeText(worker.login),
+        active: asPayloadBoolean(worker.active, true),
+      })
+      authUid = normalizeText(createdAuthUser?.uid)
+      authCreated = true
+      if (!authUid) {
+        throw createWorkerProfilePublicError(
+          500,
+          'FIREBASE_AUTH_UID_MISSING',
+          'Firebase Auth nie zwrocil UID odtworzonego konta pracownika.',
+        )
+      }
     }
 
-    await updateFirebaseAuthPassword(authUid, payload.password)
+    const authRelinked = normalizeLower(previousAuthUid) !== normalizeLower(authUid)
+    if (authRelinked) {
+      await client.query('begin')
+      transactionStarted = true
+      await client.query(
+        'select pg_advisory_xact_lock(hashtext($1::text))',
+        [`worker-update:${payload.orgId}:${payload.login}`],
+      )
+
+      membership = await getRequesterMembership(
+        client,
+        payload.orgId,
+        decodedToken.uid,
+      )
+      const currentRole = normalizeRoleCode(membership?.role)
+      if (!['ADMIN', 'ADMINISTRATOR', 'OWNER', 'SUPERADMIN', PLATFORM_ROLE].includes(currentRole)) {
+        throw workerProfileAccessError(membership, 'odtwarzania konta Firebase Auth pracownika')
+      }
+
+      const currentWorker = await workerRepository.readWorkerForPasswordReset(
+        client,
+        payload.orgId,
+        payload.login,
+      )
+      if (!currentWorker) {
+        throw createWorkerProfilePublicError(
+          404,
+          'WORKER_NOT_FOUND',
+          'Nie znaleziono rekordu pracownika podczas laczenia z Firebase Auth.',
+        )
+      }
+
+      await workerRepository.relinkWorkerAuth(client, {
+        orgId: payload.orgId,
+        login: currentWorker.login,
+        workerId: normalizeText(currentWorker.worker_id),
+        role: normalizeWorkerProfileRole(currentWorker.role),
+        previousAuthUid: normalizeText(currentWorker.auth_uid),
+        authUid,
+      })
+
+      await client.query('commit')
+      transactionStarted = false
+      databaseCommitted = true
+    }
+
+    if (!authCreated) {
+      await updateFirebaseAuthPassword(authUid, payload.password)
+    }
+
     return {
       passwordUpdated: true,
+      authCreated,
+      authRelinked,
+      authUid,
       login: normalizeText(worker.login),
       storage: 'database',
       persistenceVerified: true,
     }
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await client.query('rollback')
+      } catch {
+        // Ignore rollback failure; the original error remains authoritative.
+      }
+    }
+    if (createdAuthUser?.uid && !databaseCommitted) {
+      await deleteFirebaseUserQuietly(createdAuthUser)
+    }
+    throw error
   } finally {
     client.release()
   }
@@ -6314,12 +6395,12 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
         : Promise.resolve({ user: null, authUid: knownAuthUid, authWarning: '' }),
     ])
     authUid = normalizeText(authMatch.authUid)
-    authWarning = ''
+    authWarning = normalizeText(authMatch.authWarning)
     if (shouldResolveFirebaseUser && (!authUid || !authMatch.user)) {
-      throw createWorkerProfileAuthRequiredError('zmiana danych konta')
+      authWarning = WORKER_PROFILE_DB_ONLY_AUTH_WARNING
     }
 
-    if (shouldResolveFirebaseUser) {
+    if (shouldResolveFirebaseUser && authUid && authMatch.user) {
       authSnapshot = {
         displayName: normalizeText(authMatch.user.displayName) || null,
         disabled: Boolean(authMatch.user.disabled),

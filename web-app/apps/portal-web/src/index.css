@@ -173,6 +173,8 @@
     flex: 0 0 auto;
   }
   .mi-ico svg{ width: 18px; height: 18px; }
+  .mi-ico > i{ font-size:18px; line-height:1; }
+  .submenu-item .mi-ico > i{ font-size:16px; }
   .mi-label{ flex: 1 1 auto; min-width: 0; } 
 
   .menu-item:hover, .menu-section:hover, .submenu-item:hover{ background: rgba(37,99,235,.08); }
