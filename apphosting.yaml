@@ -84,8 +84,6 @@ env:
     value: "5"
     availability:
       - RUNTIME
-  - variable: API_PROXY_TARGET
-    secret: CLEANZI_API_PROXY_TARGET
   - variable: VITE_FIREBASE_API_KEY
     secret: CLEANZI_FIREBASE_WEB_API_KEY
     availability:
