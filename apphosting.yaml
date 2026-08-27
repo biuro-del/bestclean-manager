@@ -84,44 +84,46 @@ env:
     value: "5"
     availability:
       - RUNTIME
+  # Firebase Web App identifiers and Data Connect topology are public client
+  # configuration. Keep them as values instead of unresolved secret refs.
   - variable: VITE_FIREBASE_API_KEY
-    secret: CLEANZI_FIREBASE_WEB_API_KEY
+    value: "AIzaSyCdRVjbPWm6MueCHOwsmmbdkEKZoO6Dy-k"
     availability:
       - BUILD
   - variable: VITE_FIREBASE_AUTH_DOMAIN
-    secret: CLEANZI_FIREBASE_AUTH_DOMAIN
+    value: "iclean-room.firebaseapp.com"
     availability:
       - BUILD
   - variable: VITE_FIREBASE_PROJECT_ID
-    secret: CLEANZI_FIREBASE_PROJECT_ID
+    value: "iclean-room"
     availability:
       - BUILD
   - variable: VITE_FIREBASE_APP_ID
-    secret: CLEANZI_FIREBASE_APP_ID
+    value: "1:1080573912983:web:d64286e3776c009788c6d2"
     availability:
       - BUILD
   - variable: VITE_DATACONNECT_LOCATION
-    secret: CLEANZI_DATACONNECT_LOCATION
+    value: "europe-west3"
     availability:
       - BUILD
   - variable: VITE_DATACONNECT_SERVICE
-    secret: CLEANZI_DATACONNECT_SERVICE
+    value: "iclean-room-service"
     availability:
       - BUILD
   - variable: VITE_DATACONNECT_CONNECTOR
-    secret: CLEANZI_DATACONNECT_CONNECTOR
+    value: "example"
     availability:
       - BUILD
   - variable: FIREBASE_DATACONNECT_LOCATION
-    secret: CLEANZI_DATACONNECT_LOCATION
+    value: "europe-west3"
     availability:
       - RUNTIME
   - variable: FIREBASE_DATACONNECT_SERVICE
-    secret: CLEANZI_DATACONNECT_SERVICE
+    value: "iclean-room-service"
     availability:
       - RUNTIME
   - variable: FIREBASE_DATACONNECT_CONNECTOR
-    secret: CLEANZI_DATACONNECT_CONNECTOR
+    value: "example"
     availability:
       - RUNTIME
   - variable: FIREBASE_PROJECT_ID
@@ -136,30 +138,8 @@ env:
     value: "2026-08-01T00:00:00.000Z"
     availability:
       - RUNTIME
-  - variable: GUS_BIR1_API_KEY
-    secret: CLEANZI_GUS_BIR1_API_KEY
-    availability:
-      - RUNTIME
-  - variable: STRIPE_SECRET_KEY
-    secret: CLEANZI_STRIPE_SECRET_KEY
-    availability:
-      - RUNTIME
-  - variable: STRIPE_WEBHOOK_SECRET
-    secret: CLEANZI_STRIPE_WEBHOOK_SECRET
-    availability:
-      - RUNTIME
-  - variable: STRIPE_PRICE_GO_PLUS
-    secret: CLEANZI_STRIPE_PRICE_GO_PLUS
-    availability:
-      - RUNTIME
-  - variable: STRIPE_PRICE_PLUS
-    secret: CLEANZI_STRIPE_PRICE_PLUS
-    availability:
-      - RUNTIME
-  - variable: STRIPE_PRICE_PRO
-    secret: CLEANZI_STRIPE_PRICE_PRO
-    availability:
-      - RUNTIME
+  # Stripe remains disabled by BILLING_PROVIDER=NONE. GUS and Stripe secret
+  # references must be added only after their complete production setup exists.
   - variable: CLOUD_SQL_CONNECTION_NAME
     value: iclean-room:europe-west3:iclean-room-instance
     availability:
