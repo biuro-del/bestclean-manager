@@ -19,6 +19,10 @@ const appEntry = readPortalSource('App.jsx')
 const loginStyles = readPortalSource('ui', 'styles', 'login.css')
 const firebase = readPortalSource('firebase', 'firebaseClient.js')
 const server = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8')
+const onboardingService = fs.readFileSync(
+  path.join(__dirname, '..', 'cleaning-company-onboarding-service.js'),
+  'utf8',
+)
 const emailTemplateConfig = JSON.parse(fs.readFileSync(
   path.join(__dirname, '..', 'ops', 'firebase-auth', 'email-signin-template.pl.json'),
   'utf8',
@@ -186,10 +190,46 @@ test('production email template is branded, Polish, self-contained and keeps Fir
   assert.doesNotMatch(emailTemplateHtml, /https?:\/\//i)
 })
 
-test('company bootstrap requires the central registration provenance claim', () => {
+test('company bootstrap requires a trusted registration provenance or a short-lived existing-account enrollment', () => {
   assert.match(server, /hasCleaningCompanyRegistrationProvenance/)
   assert.match(server, /REGISTRATION_PROVENANCE_REQUIRED/)
+  assert.match(server, /CLEANING_COMPANY_ONBOARDING_RESUME_PATH/)
+  assert.match(server, /startExistingGoogleAccountEnrollment/)
+  assert.match(server, /findExistingAccountEnrollmentForProvision/)
+  assert.match(server, /findActiveExistingAccountEnrollment/)
   assert.match(auth, /getIdToken\(true\)/)
+})
+
+test('an existing verified Google account can explicitly open the same company-basics modal without creating an organization first', () => {
+  assert.match(auth, /CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_ENDPOINT/)
+  assert.match(auth, /\/registration\/cleaning-company\/resume/)
+  assert.match(auth, /resumeCleaningCompanyOnboardingForExistingGoogleAccount/)
+  assert.match(auth, /X-Firebase-AppCheck/)
+  assert.match(app, /resumeCleaningCompanyOnboardingForExistingGoogleAccount/)
+  assert.match(app, /Otwieranie formularza firmy/)
+  assert.match(app, /await continueResult\(await resumeCleaningCompanyOnboardingForExistingGoogleAccount\(\)\)/)
+  assert.match(app, /selectableOrganizations\.length/)
+  assert.match(onboardingService, /hasGoogleFirebaseIdentity/)
+  assert.match(server, /ACCOUNT_ALREADY_LINKED/)
+  assert.match(server, /CLEANING_COMPANY_ONBOARDING_REQUIRED/)
+})
+
+test('explicit company Google registration opens company basics immediately for an existing account', () => {
+  const googleStart = auth.indexOf('export async function startCleaningCompanyGoogleSignIn')
+  const googleEnd = auth.indexOf('function facilityManagerRegistrationError', googleStart)
+  const googleBody = auth.slice(googleStart, googleEnd)
+
+  assert.match(googleBody, /const context = await resolveFreshAuthenticatedUser\(credential\.user\)/)
+  assert.match(googleBody, /context\?\.status === 'ORGANIZATION_ONBOARDING_REQUIRED'/)
+  assert.match(googleBody, /return resumeCleaningCompanyOnboardingForExistingGoogleAccount\(\)/)
+})
+
+test('company-basics submission keeps using the organization Firebase session', () => {
+  const completionStart = auth.indexOf('export async function completeCleaningCompanyOnboarding')
+  const completionEnd = auth.indexOf('export async function resumeCleaningCompanyOnboardingForExistingGoogleAccount', completionStart)
+  const completionBody = auth.slice(completionStart, completionEnd)
+
+  assert.match(completionBody, /currentFirebaseUserWithToken\(AUTH_SCOPE_ORGANIZATION\)/)
 })
 
 test('public company-registration entry is fail-closed until the server enables it', () => {

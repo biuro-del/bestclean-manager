@@ -12,6 +12,13 @@ const migrationPath = path.join(
   'migrations',
   '20260822_cleaning_company_onboarding_v2_additive.sql',
 )
+const existingGoogleEnrollmentMigrationPath = path.join(
+  __dirname,
+  '..',
+  'dataconnect',
+  'migrations',
+  '20260827_cleaning_company_existing_google_enrollment_additive.sql',
+)
 
 test('migracja onboardingu firmy jest addytywna i nie laczy automatycznie po NIP', () => {
   const source = fs.readFileSync(migrationPath, 'utf8')
@@ -62,4 +69,27 @@ test('migracja zachowuje generic user_consent i jawnie audytuje wymagania subskr
   assert.match(source, /set local lock_timeout = '5s'/i)
   assert.match(source, /set local statement_timeout = '60s'/i)
   assert.match(source, /pg_advisory_xact_lock/i)
+})
+
+test('migracja wznowienia rejestracji Google jest addytywna, krótkożyjąca i nie daje dostępu do istniejącej firmy', () => {
+  const source = fs.readFileSync(existingGoogleEnrollmentMigrationPath, 'utf8')
+
+  assert.match(source, /create table if not exists public\.cleaning_company_onboarding_enrollment/i)
+  assert.match(source, /provider_id varchar\(40\) not null/i)
+  assert.match(source, /check \(provider_id = 'google\.com'\)/i)
+  assert.match(source, /status in \('ACTIVE', 'CONSUMED', 'EXPIRED'\)/i)
+  assert.match(source, /onboarding_command_id uuid/i)
+  assert.match(source, /foreign key \(onboarding_command_id\)[\s\S]*references public\.cleaning_company_onboarding_command\(command_id\)/i)
+  assert.match(source, /cleaning_company_onboarding_enrollment_active_uidx/i)
+  assert.match(source, /cleaning_company_onboarding_enrollment_active_email_uidx/i)
+  assert.match(source, /where status = 'ACTIVE'/i)
+  assert.match(source, /alter column actor_uid set not null/i)
+  assert.match(source, /validate constraint %I/i)
+  assert.match(source, /and not convalidated/i)
+  assert.match(source, /created only after an authenticated, verified Google user/i)
+  assert.match(source, /never creates a company, owner/i)
+  assert.match(source, /access to an existing organization/i)
+  assert.doesNotMatch(source, /\bdrop table\b/i)
+  assert.doesNotMatch(source, /\btruncate\b/i)
+  assert.doesNotMatch(source, /\bdelete\s+from\b/i)
 })

@@ -15,7 +15,11 @@ const {
 const CLEANING_COMPANY_ONBOARDING_REQUIRED = 'CLEANING_COMPANY_ONBOARDING_REQUIRED'
 const CLEANING_COMPANY_ONBOARDING_READY = 'READY'
 const CLEANING_COMPANY_ORGANIZATION_KIND = 'CLEANING_PROVIDER'
-const CLEANING_COMPANY_TRIAL_DAYS = 14
+const CLEANING_COMPANY_TRIAL_DAYS = 30
+const CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_PROVIDER = 'google.com'
+const CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_ACTIVE = 'ACTIVE'
+const CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_CONSUMED = 'CONSUMED'
+const CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_TTL_MS = 30 * 60 * 1000
 const MARKETING_CONSENT_COPY_VERSION = '2026-08-22'
 // These claims are written only by the central Firebase beforeCreate gate
 // after it has consumed a single-use cleaning-company registration grant.
@@ -197,7 +201,9 @@ function trialAlreadyRedeemedError() {
   )
 }
 
-function assertAuthenticatedVerifiedOwner(decodedToken) {
+function assertAuthenticatedVerifiedOwner(decodedToken, {
+  requireRegistrationProvenance = true,
+} = {}) {
   const uid = text(decodedToken?.uid || decodedToken?.user_id || decodedToken?.sub)
   const email = normalizeEmail(decodedToken?.email)
   if (!uid || !email || !hasVerifiedCompanyEmail(decodedToken)) {
@@ -207,7 +213,7 @@ function assertAuthenticatedVerifiedOwner(decodedToken) {
       403,
     )
   }
-  if (!hasCleaningCompanyRegistrationProvenance(decodedToken)) {
+  if (requireRegistrationProvenance && !hasCleaningCompanyRegistrationProvenance(decodedToken)) {
     throw new CleaningCompanyOnboardingError(
       'REGISTRATION_PROVENANCE_REQUIRED',
       'To konto nie zostało utworzone przez bezpieczną rejestrację firmy sprzątającej.',
@@ -215,6 +221,38 @@ function assertAuthenticatedVerifiedOwner(decodedToken) {
     )
   }
   return { uid, email }
+}
+
+function hasGoogleFirebaseIdentity(decodedToken) {
+  const provider = text(decodedToken?.firebase?.sign_in_provider).toLowerCase()
+  if (provider === CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_PROVIDER) return true
+  const identities = decodedToken?.firebase?.identities
+  return Array.isArray(identities?.[CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_PROVIDER]) &&
+    identities[CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_PROVIDER].length > 0
+}
+
+function existingAccountEnrollmentRequiredError() {
+  return new CleaningCompanyOnboardingError(
+    'REGISTRATION_ENROLLMENT_REQUIRED',
+    'Najpierw wybierz rejestrację firmy dla tego konta Google.',
+    403,
+  )
+}
+
+function existingAccountEnrollmentStorageError() {
+  return new CleaningCompanyOnboardingError(
+    'REGISTRATION_ENROLLMENT_UNAVAILABLE',
+    'Rejestracja firmy jest chwilowo przygotowywana. Spróbuj ponownie za chwilę.',
+    503,
+  )
+}
+
+function existingAccountGoogleIdentityRequiredError() {
+  return new CleaningCompanyOnboardingError(
+    'GOOGLE_IDENTITY_REQUIRED',
+    'Aby dokończyć tę rejestrację, zaloguj się kontem Google.',
+    403,
+  )
 }
 
 function isKnownDuplicateNipViolation(error) {
@@ -265,6 +303,212 @@ async function findTrialRedemption(client, actor) {
     [actor.uid, actor.email],
   )
   return result.rows[0] || null
+}
+
+function normalizeEnrollment(row) {
+  if (!row || typeof row !== 'object') return null
+  const enrollmentId = text(row.enrollment_id ?? row.enrollmentId)
+  const actorUid = text(row.actor_uid ?? row.actorUid)
+  const email = normalizeEmail(row.email_normalized ?? row.emailNormalized ?? row.email)
+  const providerId = text(row.provider_id ?? row.providerId).toLowerCase()
+  const status = text(row.status).toUpperCase()
+  const expiresAt = row.expires_at ?? row.expiresAt ?? null
+  if (!enrollmentId || !actorUid || !email || !providerId || !status || !expiresAt) return null
+  return {
+    enrollmentId,
+    actorUid,
+    email,
+    providerId,
+    status,
+    expiresAt,
+    onboardingCommandId: text(row.onboarding_command_id ?? row.onboardingCommandId),
+  }
+}
+
+function enrollmentIsActive(enrollment, now = new Date()) {
+  if (!enrollment || enrollment.status !== CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_ACTIVE) return false
+  const expiresAt = new Date(enrollment.expiresAt)
+  return Number.isFinite(expiresAt.getTime()) && expiresAt.getTime() > new Date(now).getTime()
+}
+
+function enrollmentStorageMissing(error) {
+  return error?.code === '42P01' || /cleaning_company_onboarding_enrollment/i.test(text(error?.message))
+}
+
+async function findActiveExistingAccountEnrollment(client, decodedToken, { now = new Date() } = {}) {
+  const actor = assertAuthenticatedVerifiedOwner(decodedToken, { requireRegistrationProvenance: false })
+  try {
+    const result = await client.query(
+      `select enrollment_id, actor_uid, email_normalized, provider_id, status,
+              expires_at, onboarding_command_id
+         from public.cleaning_company_onboarding_enrollment
+        where actor_uid = $1::text
+          and email_normalized = $2::text
+          and status = 'ACTIVE'
+          and expires_at > $3::timestamptz
+        order by created_at desc
+        limit 1`,
+      [actor.uid, actor.email, now],
+    )
+    return normalizeEnrollment(result.rows[0])
+  } catch (error) {
+    if (enrollmentStorageMissing(error)) return null
+    throw error
+  }
+}
+
+async function findExistingAccountEnrollmentForProvision(client, decodedToken) {
+  const actor = assertAuthenticatedVerifiedOwner(decodedToken, { requireRegistrationProvenance: false })
+  try {
+    const result = await client.query(
+      `select enrollment_id, actor_uid, email_normalized, provider_id, status,
+              expires_at, onboarding_command_id
+         from public.cleaning_company_onboarding_enrollment
+        where actor_uid = $1::text
+          and email_normalized = $2::text
+          and status in ('ACTIVE', 'CONSUMED')
+        order by created_at desc
+        limit 1`,
+      [actor.uid, actor.email],
+    )
+    return normalizeEnrollment(result.rows[0])
+  } catch (error) {
+    if (enrollmentStorageMissing(error)) return null
+    throw error
+  }
+}
+
+async function lockExistingAccountEnrollmentKey(client, actor) {
+  await client.query(
+    `select pg_advisory_xact_lock(hashtext($1::text)),
+            pg_advisory_xact_lock(hashtext($2::text))`,
+    [
+      `cleaning-company-enrollment-uid:${actor.uid}`,
+      `cleaning-company-enrollment-email:${actor.email}`,
+    ],
+  )
+}
+
+async function startExistingGoogleAccountEnrollment(client, {
+  decodedToken,
+  now = new Date(),
+  idFactory = crypto.randomUUID,
+} = {}) {
+  const actor = assertAuthenticatedVerifiedOwner(decodedToken, { requireRegistrationProvenance: false })
+  if (!hasGoogleFirebaseIdentity(decodedToken)) {
+    throw existingAccountGoogleIdentityRequiredError()
+  }
+
+  const startedAt = new Date(now)
+  if (!Number.isFinite(startedAt.getTime())) {
+    throw new CleaningCompanyOnboardingError('INVALID_ONBOARDING_CLOCK', 'Nie udało się przygotować rejestracji.', 500)
+  }
+  const expiresAt = new Date(startedAt.getTime() + CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_TTL_MS)
+  let committed = false
+
+  try {
+    await client.query('begin')
+    await lockExistingAccountEnrollmentKey(client, actor)
+
+    if (await findTrialRedemption(client, actor)) {
+      throw trialAlreadyRedeemedError()
+    }
+
+    const existing = await findActiveExistingAccountEnrollment(client, decodedToken, { now: startedAt })
+    if (existing) {
+      await client.query('commit')
+      committed = true
+      return { ...existing, replayed: true }
+    }
+
+    await client.query(
+      `update public.cleaning_company_onboarding_enrollment
+          set status = 'EXPIRED', expired_at = $3::timestamptz
+        where actor_uid = $1::text
+          and email_normalized = $2::text
+          and status = 'ACTIVE'`,
+      [actor.uid, actor.email, startedAt],
+    )
+
+    const enrollmentId = text(idFactory())
+    await client.query(
+      `insert into public.cleaning_company_onboarding_enrollment (
+         enrollment_id, actor_uid, email_normalized, provider_id, status,
+         expires_at, created_at, activated_at
+       ) values (
+         $1::uuid, $2::text, $3::text, $4::text, 'ACTIVE',
+         $5::timestamptz, $6::timestamptz, $6::timestamptz
+       )`,
+      [
+        enrollmentId,
+        actor.uid,
+        actor.email,
+        CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_PROVIDER,
+        expiresAt,
+        startedAt,
+      ],
+    )
+
+    await client.query('commit')
+    committed = true
+    return {
+      enrollmentId,
+      actorUid: actor.uid,
+      email: actor.email,
+      providerId: CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_PROVIDER,
+      status: CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_ACTIVE,
+      expiresAt,
+      onboardingCommandId: '',
+      replayed: false,
+    }
+  } catch (error) {
+    if (!committed) {
+      try {
+        await client.query('rollback')
+      } catch {
+        // Keep the original error; the caller must retry safely.
+      }
+    }
+    if (enrollmentStorageMissing(error)) {
+      throw existingAccountEnrollmentStorageError()
+    }
+    throw error
+  }
+}
+
+async function consumeExistingAccountEnrollment(client, enrollment, actor, commandId, now) {
+  const normalized = normalizeEnrollment(enrollment)
+  if (!normalized || normalized.status !== CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_ACTIVE) {
+    throw existingAccountEnrollmentRequiredError()
+  }
+
+  try {
+    const result = await client.query(
+      `update public.cleaning_company_onboarding_enrollment
+          set status = 'CONSUMED', consumed_at = $5::timestamptz,
+              onboarding_command_id = $4::uuid
+        where enrollment_id = $1::uuid
+          and actor_uid = $2::text
+          and email_normalized = $3::text
+          and provider_id = $6::text
+          and status = 'ACTIVE'
+          and expires_at > $5::timestamptz
+        returning enrollment_id`,
+      [
+        normalized.enrollmentId,
+        actor.uid,
+        actor.email,
+        commandId,
+        now,
+        CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_PROVIDER,
+      ],
+    )
+    if (!result.rows[0]) throw existingAccountEnrollmentRequiredError()
+  } catch (error) {
+    if (error instanceof CleaningCompanyOnboardingError) throw error
+    if (enrollmentStorageMissing(error)) throw existingAccountEnrollmentStorageError()
+    throw error
+  }
 }
 
 async function lockOnboardingKeys(client, commandId, nip, actor) {
@@ -490,10 +734,14 @@ async function provisionCleaningCompany(client, {
   decodedToken,
   payload,
   request = {},
+  existingAccountEnrollment = null,
   now = new Date(),
   idFactory = crypto.randomUUID,
 } = {}) {
-  const actor = assertAuthenticatedVerifiedOwner(decodedToken)
+  const usesExistingAccountEnrollment = Boolean(normalizeEnrollment(existingAccountEnrollment))
+  const actor = assertAuthenticatedVerifiedOwner(decodedToken, {
+    requireRegistrationProvenance: !usesExistingAccountEnrollment,
+  })
   let validated
   try {
     validated = assertCompanyOnboarding(payload)
@@ -567,6 +815,20 @@ async function provisionCleaningCompany(client, {
       idFactory,
     })
 
+    // insertCompanyRows writes the immutable onboarding command first.  The
+    // existing-account enrollment has a foreign key to that command, so it
+    // must be consumed afterwards, still inside the same transaction.  A
+    // failed or expired enrollment rolls back every just-created company row.
+    if (usesExistingAccountEnrollment) {
+      await consumeExistingAccountEnrollment(
+        client,
+        existingAccountEnrollment,
+        actor,
+        validated.commandId,
+        startedAt,
+      )
+    }
+
     await client.query('commit')
     committed = true
     return { replayed: false, orgId, trialEndsAt }
@@ -595,12 +857,20 @@ module.exports = Object.freeze({
   CLEANING_COMPANY_REGISTRATION_CHANNEL,
   CLEANING_COMPANY_REGISTRATION_GRANT_VERSION,
   CLEANING_COMPANY_TRIAL_DAYS,
+  CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_ACTIVE,
+  CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_CONSUMED,
+  CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_PROVIDER,
+  CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_TTL_MS,
   MARKETING_CONSENT_COPY_VERSION,
   CleaningCompanyOnboardingError,
   addTrialDays,
   assertAuthenticatedVerifiedOwner,
+  consumeExistingAccountEnrollment,
   createOrganizationId,
+  findActiveExistingAccountEnrollment,
+  findExistingAccountEnrollmentForProvision,
   getCleaningCompanyLegalDocuments,
+  hasGoogleFirebaseIdentity,
   hasCleaningCompanyRegistrationProvenance,
   hasVerifiedCompanyEmail,
   hashOnboardingPayload,
@@ -608,5 +878,6 @@ module.exports = Object.freeze({
   normalizeEmail,
   provisionCleaningCompany,
   requiresCleaningCompanyAppCheck,
+  startExistingGoogleAccountEnrollment,
   stableStringify,
 })

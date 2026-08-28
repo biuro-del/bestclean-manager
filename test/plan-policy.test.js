@@ -34,7 +34,7 @@ test('nowe zapisy przyjmują tylko cztery kody kanoniczne', () => {
 test('TRIAL ma dokładnie możliwości i limity GO_PLUS', () => {
   const trial = resolvePlanEntitlements('TRIAL')
   const goPlus = resolvePlanEntitlements('GO_PLUS')
-  assert.equal(resolvePlanDefinition('TRIAL').trialDays, 7)
+  assert.equal(resolvePlanDefinition('TRIAL').trialDays, 30)
   assert.deepEqual(trial.capabilities, goPlus.capabilities)
   assert.deepEqual(trial.limits, goPlus.limits)
   assert.equal(trial.capabilities.scheduling, false)

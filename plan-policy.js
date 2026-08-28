@@ -80,7 +80,7 @@ const PLAN_DEFINITIONS = Object.freeze({
     code: 'TRIAL',
     label: 'Trial',
     paid: false,
-    trialDays: 7,
+    trialDays: 30,
     capabilities: GO_PLUS_CAPABILITIES,
     limits: STANDARD_LIMITS,
   }),

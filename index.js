@@ -59,12 +59,15 @@ const { createFacilityManagerObjectApi } = require('./facility-manager-object-ap
 const {
   CLEANING_COMPANY_ONBOARDING_REQUIRED,
   CleaningCompanyOnboardingError,
+  findActiveExistingAccountEnrollment,
+  findExistingAccountEnrollmentForProvision,
   getCleaningCompanyLegalDocuments,
   hasCleaningCompanyRegistrationProvenance,
   hasVerifiedCompanyEmail,
   isCleaningCompanyOnboardingEnabled,
   provisionCleaningCompany,
   requiresCleaningCompanyAppCheck,
+  startExistingGoogleAccountEnrollment,
 } = require('./cleaning-company-onboarding-service')
 const { createProfitabilityApi } = require('./profitability-api')
 const { createWorkdayReconciliationApi } = require('./workday-reconciliation-api')
@@ -164,6 +167,7 @@ const PORTAL_ORGANIZATION_PROFILE_PATH = '/api/portal/organization-profile'
 const PORTAL_COMPANY_REGISTRY_PATH = '/api/portal/company-registry/lookup'
 const STRIPE_WEBHOOK_PATH = '/api/billing/stripe/webhook'
 const CLEANING_COMPANY_ONBOARDING_LEGAL_DOCUMENTS_PATH = '/api/registration/cleaning-company/legal-documents'
+const CLEANING_COMPANY_ONBOARDING_RESUME_PATH = '/api/registration/cleaning-company/resume'
 const CLEANING_COMPANY_ONBOARDING_PROVISION_PATH = '/api/registration/cleaning-company/provision'
 const FACILITY_MANAGER_REGISTRATION_PATH = '/api/registration/facility-manager'
 const FACILITY_MANAGER_OBJECTS_PATH = '/api/facility-manager/objects'
@@ -1427,14 +1431,17 @@ function isCustomerFirebaseToken(decodedToken) {
   return audiences.some((audience) => normalizeText(audience) === expectedProjectId)
 }
 
-function canStartCleaningCompanyOnboarding(decodedToken) {
+async function canStartCleaningCompanyOnboarding(client, decodedToken) {
   // Session context accepts the separate platform Firebase project for existing
   // operational users. Self-service onboarding is deliberately narrower: it
   // may be offered only to an account issued by the customer Firebase project.
-  return isCleaningCompanyOnboardingEnabled() &&
-    isCustomerFirebaseToken(decodedToken) &&
-    hasVerifiedCompanyEmail(decodedToken) &&
-    hasCleaningCompanyRegistrationProvenance(decodedToken)
+  if (!isCleaningCompanyOnboardingEnabled() ||
+      !isCustomerFirebaseToken(decodedToken) ||
+      !hasVerifiedCompanyEmail(decodedToken)) {
+    return false
+  }
+  if (hasCleaningCompanyRegistrationProvenance(decodedToken)) return true
+  return Boolean(await findActiveExistingAccountEnrollment(client, decodedToken))
 }
 
 async function assertFirebaseEmailAvailable(email) {
@@ -7389,6 +7396,111 @@ async function handleCleaningCompanyLegalDocumentsRequest(req, res) {
   })
 }
 
+async function handleCleaningCompanyExistingAccountEnrollmentRequest(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  if (String(req.method || '').toUpperCase() !== 'POST') {
+    sendApiError(res, 405, 'METHOD_NOT_ALLOWED', 'Dozwolona metoda to POST.')
+    return
+  }
+
+  if (!isCleaningCompanyOnboardingEnabled()) {
+    sendApiError(res, 404, 'REGISTRATION_NOT_AVAILABLE', 'Rejestracja firmy nie jest obecnie dostępna.')
+    return
+  }
+
+  const token = parseBearerToken(req)
+  if (!token) {
+    sendApiError(res, 401, 'UNAUTHENTICATED', 'Brak tokenu Firebase.')
+    return
+  }
+
+  let decodedToken
+  try {
+    decodedToken = await verifyFirebaseIdToken(token)
+  } catch (error) {
+    const mapped = mapFirebaseAdminError(error)
+    sendApiError(res, mapped.status, mapped.code, mapped.message)
+    return
+  }
+
+  if (!isCustomerFirebaseToken(decodedToken)) {
+    sendApiError(res, 403, 'CUSTOMER_ACCOUNT_REQUIRED', 'Użyj konta przeznaczonego do portalu Cleanzi.')
+    return
+  }
+
+  if (!hasVerifiedCompanyEmail(decodedToken)) {
+    sendApiError(
+      res,
+      403,
+      'EMAIL_VERIFICATION_REQUIRED',
+      'Najpierw potwierdź adres e-mail, a potem uzupełnij dane firmy.',
+    )
+    return
+  }
+
+  if (requiresCleaningCompanyAppCheck()) {
+    try {
+      await verifyCleaningCompanyAppCheckToken(onboardingAppCheckToken(req))
+    } catch (error) {
+      sendApiError(
+        res,
+        Number(error?.statusCode) || 401,
+        normalizeText(error?.publicCode) || 'APP_CHECK_INVALID',
+        normalizeText(error?.publicMessage) || 'Nie udało się potwierdzić bezpieczeństwa formularza.',
+      )
+      return
+    }
+  }
+
+  const ownerUid = normalizeText(decodedToken?.uid || decodedToken?.user_id || decodedToken?.sub)
+  let client = null
+  try {
+    client = await connectDbClient()
+    const existingMemberships = await getRequesterMemberships(client, ownerUid)
+    if (existingMemberships.length) {
+      sendApiError(
+        res,
+        409,
+        'ACCOUNT_ALREADY_LINKED',
+        'To konto jest już połączone z organizacją. Zaloguj się do istniejącego panelu.',
+      )
+      return
+    }
+
+    const enrollment = await startExistingGoogleAccountEnrollment(client, { decodedToken })
+    sendJson(res, 200, {
+      ok: true,
+      status: CLEANING_COMPANY_ONBOARDING_REQUIRED,
+      legalDocuments: getCleaningCompanyLegalDocuments(),
+      enrollment: {
+        expiresAt: enrollment.expiresAt || null,
+        replayed: enrollment.replayed === true,
+      },
+    })
+  } catch (error) {
+    if (error instanceof CleaningCompanyOnboardingError) {
+      sendApiError(res, error.statusCode, error.code, error.message, error.details)
+      return
+    }
+
+    const databaseError = mapDatabaseConnectionError(error)
+    if (databaseError) {
+      sendApiError(res, databaseError.status, databaseError.code, databaseError.message)
+      return
+    }
+
+    console.error('[cleaning-company-onboarding] existing-account enrollment failed', error)
+    sendApiError(res, 500, 'CLEANING_COMPANY_ENROLLMENT_FAILED', 'Nie udało się otworzyć formularza firmy. Spróbuj ponownie za chwilę.')
+  } finally {
+    client?.release()
+  }
+}
+
 async function handleCleaningCompanyProvisionRequest(req, res) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204)
@@ -7429,16 +7541,6 @@ async function handleCleaningCompanyProvisionRequest(req, res) {
       403,
       'EMAIL_VERIFICATION_REQUIRED',
       'Najpierw potwierdź adres e-mail, a potem uzupełnij dane firmy.',
-    )
-    return
-  }
-
-  if (!hasCleaningCompanyRegistrationProvenance(decodedToken)) {
-    sendApiError(
-      res,
-      403,
-      'REGISTRATION_PROVENANCE_REQUIRED',
-      'To konto nie zostało utworzone przez bezpieczną rejestrację firmy sprzątającej.',
     )
     return
   }
@@ -7484,10 +7586,25 @@ async function handleCleaningCompanyProvisionRequest(req, res) {
       return
     }
 
+    const hasRegistrationProvenance = hasCleaningCompanyRegistrationProvenance(decodedToken)
+    const existingAccountEnrollment = hasRegistrationProvenance
+      ? null
+      : await findExistingAccountEnrollmentForProvision(client, decodedToken)
+    if (!hasRegistrationProvenance && !existingAccountEnrollment) {
+      sendApiError(
+        res,
+        403,
+        'REGISTRATION_PROVENANCE_REQUIRED',
+        'To konto nie rozpoczęło bezpiecznej rejestracji firmy. Wybierz „Zarejestruj nową firmę”, aby otworzyć formularz.',
+      )
+      return
+    }
+
     const requestContext = getPlatformRequestContext()
     const result = await provisionCleaningCompany(client, {
       decodedToken,
       payload: body,
+      existingAccountEnrollment,
       request: {
         locale: normalizeText(req.headers['accept-language']).split(',')[0] || 'pl-PL',
         ipHash: hashCleaningCompanyOnboardingIp(requestContext?.ipAddress),
@@ -7857,7 +7974,7 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
     }
 
     if (!accessibleOrganizations.length) {
-      if (canStartCleaningCompanyOnboarding(decodedToken)) {
+      if (await canStartCleaningCompanyOnboarding(client, decodedToken)) {
         sendJson(res, 200, {
           ok: true,
           status: CLEANING_COMPANY_ONBOARDING_REQUIRED,
@@ -10570,6 +10687,13 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   if (requestUrl.pathname === CLEANING_COMPANY_ONBOARDING_LEGAL_DOCUMENTS_PATH) {
     handleCleaningCompanyLegalDocumentsRequest(req, res).catch((error) => {
       sendApiError(res, 500, 'CLEANING_COMPANY_LEGAL_DOCUMENTS_ERROR', error?.message || 'Unexpected legal documents error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === CLEANING_COMPANY_ONBOARDING_RESUME_PATH) {
+    handleCleaningCompanyExistingAccountEnrollmentRequest(req, res).catch((error) => {
+      sendApiError(res, 500, 'CLEANING_COMPANY_ENROLLMENT_ERROR', error?.message || 'Unexpected existing-account enrollment error.')
     })
     return
   }

@@ -93,7 +93,7 @@ test('onboarding firmy zbiera ownera, dane kanoniczne, adres i billing oraz otwi
   assert.match(app, /lookupRegistrationCompany\(/)
   assert.match(app, /bindRegistrationAccount\(pending\.registrationId, registrationOwnerPayload\(\)\)/)
   assert.match(app, /isSafeStripeCheckoutUrl\(result\.checkoutUrl\)/)
-  assert.match(app, /Trial 7 dni \(168 godzin\)/)
+  assert.match(app, /TRIAL: 'Okres próbny'/)
   assert.match(app, /PAYMENT_PENDING/)
 })
 

@@ -11,11 +11,15 @@
 - każde nowe konto przechodzi przez istniejącą centralną bramę Firebase: przed utworzeniem
   konta portal pobiera jednorazowy grant `CLEANING_COMPANY`, a serwer wymaga pochodzenia
   `registration_cleaning_company` w tokenie;
+- istniejące, zweryfikowane konto Google bez organizacji może jawnie wybrać
+  „Zarejestruj nową firmę”; serwer zapisuje krótkotrwałą autoryzację onboardingu,
+  a następnie portal otwiera ten sam formularz podstaw firmy. Nie zmienia to claimu
+  pierwszej rejestracji i nie daje dostępu do istniejącej organizacji;
 - po zweryfikowaniu adresu e-mail właściciel uzupełnia NIP, pełną nazwę firmy,
   deklarowaną liczbę pracowników oraz wymagane potwierdzenia dokumentów;
 - zgody marketingowe (e-mail, SMS i telefon) są niezależne, dobrowolne i domyślnie
   wyłączone;
-- serwer tworzy odizolowaną organizację `CLEANING_PROVIDER`, właściciela i 14-dniowy
+- serwer tworzy odizolowaną organizację `CLEANING_PROVIDER`, właściciela i 30-dniowy
   okres próbny. Nigdy nie dołącza konta do istniejącej firmy tylko dlatego, że NIP się zgadza.
 
 ## Warunek biznesowo-prawny przed aktywacją
@@ -64,8 +68,9 @@ VITE_CENTRAL_REGISTRATION_ISSUER_READY=true
 
 ## Kolejność wydania
 
-1. Migracja `CLZ-DB-20260822-CLEANING-COMPANY-ONBOARDING-V2-01` została wykonana wraz z
-   fundamentem `-01`; dla tego kandydata nie wykonuje się jej drugi raz. Zweryfikować jedynie
+1. Wykonać najpierw odczytowy audyt, a następnie addytywną migrację
+   `CLZ-DB-20260827-CLEANING-COMPANY-RESUME-01`. Zawiera ona również idempotentne sprawdzenie
+   fundamentu `-01`; nie usuwa ani nie zmienia danych istniejących firm. Zweryfikować
    odczytowy postflight:
 
    ```text
@@ -89,12 +94,16 @@ Natychmiastowa blokada nowych rejestracji to ustawienie obu przełączników rej
 się ani nie obniża wersji migracji, nie kasuje się utworzonych organizacji i nie odbiera się
 użytkownikom danych w ramach procedury rollbacku.
 
-## Bramka wdrożenia
+## Bramka bieżącego wydania
 
-Wdrożenie na produkcję wymaga dokładnego komunikatu właściciela produktu:
+Poprzednie zgody `CLZ-ONBOARDING-20260822-*` nie obejmują tej nowej migracji ani
+zmiany App Hosting. To wydanie wymaga dwóch oddzielnych, dokładnych zgód właściciela:
 
 ```text
-OK PRODUKCJA CLZ-ONBOARDING-20260822-03
+OK PRODUKCJA CLZ-DB-20260827-CLEANING-COMPANY-RESUME-01
+OK PRODUKCJA CLZ-PORTAL-EXISTING-GOOGLE-ONBOARDING-20260827-01
 ```
 
-Jeżeli wybierana jest automatyczna polityka potwierdzania, zgoda musi to wyraźnie obejmować.
+Pierwsza zgoda dotyczy wyłącznie addytywnej migracji. Druga dotyczy wyłącznie
+wdrożenia zweryfikowanego kandydata App Hosting po jej udanym postflighcie.
+Jeżeli zmieniana jest polityka automatycznego potwierdzania, zgoda musi to wyraźnie obejmować.

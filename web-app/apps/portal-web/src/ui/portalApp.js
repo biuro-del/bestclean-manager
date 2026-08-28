@@ -27,6 +27,7 @@ import {
   requestEmailVerification,
   requestPlatformEmailMfaCode,
   registerFacilityManagerWithGoogle,
+  resumeCleaningCompanyOnboardingForExistingGoogleAccount,
   retryFacilityManagerGoogleRegistration,
   requireAuth,
   saveOrganizationProfile,
@@ -4091,7 +4092,7 @@ function showLoginOrganizationCreate() {
   const copy = document.getElementById('loginCopy')
   if (panel) panel.hidden = false
   if (title) title.textContent = 'Zarejestruj nową firmę'
-  if (copy) copy.textContent = 'Nową organizację i 7-dniowy Trial można utworzyć wyłącznie z prawidłowej próby rejestracji.'
+  if (copy) copy.textContent = 'Nową organizację i okres próbny można utworzyć wyłącznie z prawidłowej próby rejestracji.'
   setLoginResetActionVisible(false)
 }
 
@@ -4202,7 +4203,10 @@ function startCompanyEmailRetryCooldown() {
 
 function registrationPlanLabel(attempt = activeRegistrationAttempt) {
   const planCode = String(attempt?.planCode ?? '').toUpperCase()
-  const labels = { TRIAL: 'Trial 7 dni (168 godzin)', GO_PLUS: 'GO+', PLUS: 'PLUS', PRO: 'PRO' }
+  // The separate Registration API remains the source of truth for the legacy
+  // password-registration trial. Keep this wording neutral until its own
+  // independently deployed broker is aligned with the 30-day policy.
+  const labels = { TRIAL: 'Okres próbny', GO_PLUS: 'GO+', PLUS: 'PLUS', PRO: 'PRO' }
   const plan = labels[planCode] || 'wybrany plan'
   const billingCycle = String(attempt?.billingCycle ?? '').toUpperCase()
   if (billingCycle === 'MONTHLY') return `${plan} · płatność miesięczna`
@@ -4281,7 +4285,7 @@ function showLoginRegistrationCompany(attempt = {}) {
   if (save) {
     save.textContent = activeRegistrationAttempt?.paid === true
       ? 'Utwórz firmę i przejdź do płatności'
-      : 'Utwórz firmę i rozpocznij Trial 7 dni'
+      : 'Utwórz firmę i rozpocznij okres próbny'
   }
   const existing = document.getElementById('loginRegistrationCompanyExisting')
   if (existing) existing.hidden = selectableOrganizations.length === 0
@@ -8091,13 +8095,26 @@ function bindPlatformLogin(router) {
       setLoginControlsBusy(false)
     }
   }
-  const openOrganizationCreate = () => {
+  const openOrganizationCreate = async () => {
     setLoginError('')
     if (pendingRegistration?.registrationId || getPendingRegistrationEntry()?.registrationId) {
       void continuePendingRegistration()
       return
     }
-    showLoginOrganizationCreate()
+
+    if (selectableOrganizations.length) {
+      showLoginOrganizationCreate()
+      return
+    }
+
+    setLoginControlsBusy(true, 'Otwieranie formularza firmy...')
+    try {
+      await continueResult(await resumeCleaningCompanyOnboardingForExistingGoogleAccount())
+    } catch (error) {
+      setLoginError(formatLoginError(error))
+    } finally {
+      setLoginControlsBusy(false)
+    }
   }
   const closeOrganizationCreate = () => {
     setLoginError('')

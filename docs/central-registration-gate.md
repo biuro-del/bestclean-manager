@@ -76,7 +76,7 @@ Docelowy przepływ musi co najmniej:
 - weryfikować e-mail wyłącznie przy nowej rejestracji;
 - po rejestracji administratora natychmiast utworzyć organizację
   `kind: cleaning_provider` i członkostwo ownera;
-- uruchomić dokładnie 14-dniowy trial bez wymagania karty;
+- uruchomić dokładnie 30-dniowy trial bez wymagania karty;
 - obsłużyć GO+, PLUS i PRO, rozliczenie miesięczne lub roczne z rabatem 20%;
 - zachować ENTERPRISE poza publicznym wyborem pakietu;
 - utworzyć sesję Stripe po zaufanej stronie serwera;
@@ -144,14 +144,17 @@ osobny panel firmy sprzątającej oraz kompletny onboarding `cleaning_provider`.
 
 Gałąź `Rejestracja-31-07-2026` zawiera lokalny portalowy onboarding organizacji,
 politykę planów, GUS i webhook Stripe, ale nie może być scalona bez korekty. Jej
-trial ma 7 dni zamiast zatwierdzonych 14 dni, a frontend nie pobiera jeszcze grantu
+trial ma 7 dni zamiast zatwierdzonych 30 dni, a frontend nie pobiera jeszcze grantu
 `CLEANING_COMPANY` przed utworzeniem nowego konta. Nie zawiera też produkcyjnego
 endpointu wydającego grant po poprawnej weryfikacji Turnstile.
 
-Lokalny adapter źródłowej próby, provisioner Cloud SQL, dokładny 14-dniowy trial,
-App Check, Resend, wdrażalny host brokera i worker outboxa są przygotowane w
-izolowanym codebase. Następny etap to selektywne podłączenie publicznego formularza
-i portalowego końca onboardingu oraz konfiguracja prawdziwego projektu testowego.
+Lokalny adapter źródłowej próby, provisioner Cloud SQL, App Check, Resend, wdrażalny
+host brokera i worker outboxa są przygotowane w izolowanym codebase. Bezpośredni
+onboarding portalu stosuje 30 dni; osobny broker rejestracji hasłowej musi zostać
+zaktualizowany z 14 do 30 dni wraz z nową addytywną migracją katalogu planów, zanim
+publiczny interfejs tego kanału zacznie deklarować konkretną długość okresu próbnego.
+Następny etap to selektywne podłączenie publicznego formularza i portalowego końca
+onboardingu oraz konfiguracja prawdziwego projektu testowego.
 Dopiero po testach obu frontendów, App Check/Turnstile, Stripe i rollbacku można
 zatwierdzić zakresowe wdrożenie testowe.
 Dokładny kontrakt między repozytoriami opisuje
@@ -162,7 +165,8 @@ Dokładny kontrakt między repozytoriami opisuje
 Izolowany codebase `registration-functions` zawiera obecnie:
 
 - `password-registration-contract.js` — kanoniczny payload, trzy publiczne plany,
-  dwa cykle, wersjonowane zgody, privacy-minimalny fingerprint i dokładne 14 dni;
+  dwa cykle, wersjonowane zgody i privacy-minimalny fingerprint; obecnie nadal 14 dni,
+  więc przed deklaracją 30 dni wymaga osobnego wydania brokera i migracji katalogu;
 - `password-registration-broker.js` — kolejność Turnstile → źródłowa próba i zgody
   → Firebase Admin → organizacja → e-mail weryfikacyjny;
 - `firestore-password-registration-operation-store.js` — transakcyjną rezerwację

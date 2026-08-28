@@ -11,9 +11,10 @@ const rootDir = path.resolve(__dirname, '..')
 const EXPECTED_PROJECT_ID = 'iclean-room'
 const EXPECTED_DATABASE_NAME = 'iclean-room-database'
 const PRODUCTION_CONFIRMATION =
-  'CLZ-DB-20260822-CLEANING-COMPANY-ONBOARDING-V2-01'
+  'CLZ-DB-20260827-CLEANING-COMPANY-RESUME-01'
 const MIGRATION_FILES = [
   '20260822_cleaning_company_onboarding_v2_additive.sql',
+  '20260827_cleaning_company_existing_google_enrollment_additive.sql',
 ]
 
 function text(value) {
@@ -68,9 +69,68 @@ function tableColumns(columns, tableName) {
   return columns.filter((column) => column.table_name === tableName)
 }
 
+function hasNonNullableColumns(columns, tableName, expected) {
+  const actual = new Map(
+    columns
+      .filter((column) => column.table_name === tableName)
+      .map((column) => [column.column_name, column]),
+  )
+  return expected.every((columnName) => actual.get(columnName)?.is_nullable === 'NO')
+}
+
+function normalizeSchemaDefinition(value) {
+  return text(value)
+    .replace(/::(?:[a-z_]+(?:\s+[a-z_]+)*)/gi, '')
+    .replace(/["'()\s]/g, '')
+    .toUpperCase()
+}
+
+function normalizedRelationName(value) {
+  return text(value).replaceAll('"', '').split('.').at(-1)
+}
+
+function enrollmentIndexIsExpected(index, columnName) {
+  return index?.is_unique === true &&
+    index?.is_valid === true &&
+    index?.is_ready === true &&
+    text(index?.columns_csv) === columnName &&
+    normalizeSchemaDefinition(index?.predicate) === 'STATUS=ACTIVE'
+}
+
+function enrollmentStatusConstraintIsExpected(constraint) {
+  const definition = normalizeSchemaDefinition(constraint?.definition)
+  return [
+    'CHECKSTATUSINACTIVE,CONSUMED,EXPIRED',
+    'CHECKSTATUS=ANYARRAY[ACTIVE,CONSUMED,EXPIRED]',
+    'CHECKSTATUS=ANYARRAY[ACTIVE,CONSUMED,EXPIRED][]',
+  ].includes(definition)
+}
+
+function enrollmentConstraintIsExpected(constraint, {
+  name,
+  type,
+  fragments = [],
+  columns = '',
+  foreignTable = '',
+  foreignColumns = '',
+}) {
+  if (
+    constraint?.constraint_name !== name ||
+    constraint?.constraint_type !== type ||
+    constraint?.is_validated !== true
+  ) {
+    return false
+  }
+  if (columns && text(constraint.columns_csv) !== columns) return false
+  if (foreignTable && normalizedRelationName(constraint.foreign_table) !== foreignTable) return false
+  if (foreignColumns && text(constraint.foreign_columns_csv) !== foreignColumns) return false
+  const definition = normalizeSchemaDefinition(constraint.definition)
+  return fragments.every((fragment) => definition.includes(normalizeSchemaDefinition(fragment)))
+}
+
 async function inspectSchema(client) {
-  const [targetResult, relationsResult, columnsResult, indexesResult, triggersResult,
-    subscriptionRequirementsResult] = await Promise.all([
+  const [targetResult, relationsResult, columnsResult, indexesResult, constraintsResult,
+    triggersResult, subscriptionRequirementsResult] = await Promise.all([
     client.query(
       `select current_database() as database_name,
               current_user as database_user,
@@ -87,7 +147,8 @@ async function inspectSchema(client) {
          to_regclass('public.user_consent')::text as user_consent,
          to_regclass('public.cleaning_company_onboarding_command')::text as onboarding_command,
          to_regclass('public.cleaning_company_onboarding_consent_audit')::text as onboarding_consent_audit,
-         to_regclass('public.cleaning_company_trial_redemption')::text as trial_redemption`,
+         to_regclass('public.cleaning_company_trial_redemption')::text as trial_redemption,
+         to_regclass('public.cleaning_company_onboarding_enrollment')::text as onboarding_enrollment`,
     ),
     client.query(
       `select table_name, column_name, data_type, udt_name, is_nullable,
@@ -107,6 +168,7 @@ async function inspectSchema(client) {
         'cleaning_company_onboarding_command',
         'cleaning_company_onboarding_consent_audit',
         'cleaning_company_trial_redemption',
+        'cleaning_company_onboarding_enrollment',
       ]],
     ),
     client.query(
@@ -114,17 +176,57 @@ async function inspectSchema(client) {
               x.indisunique as is_unique,
               x.indisvalid as is_valid,
               x.indisready as is_ready,
+              coalesce((
+                select string_agg(a.attname, ',' order by keys.ordinality)
+                  from unnest(x.indkey) with ordinality as keys(attnum, ordinality)
+                  join pg_attribute a on a.attrelid = x.indrelid and a.attnum = keys.attnum
+              ), '') as columns_csv,
+              coalesce(pg_get_expr(x.indpred, x.indrelid), '') as predicate,
               pg_get_indexdef(i.oid) as definition
          from pg_class i
          join pg_namespace n on n.oid = i.relnamespace
-         left join pg_index x on x.indexrelid = i.oid
-        where n.nspname = 'public'
-          and i.relname = any($1::text[])
-        order by i.relname`,
+         join pg_index x on x.indexrelid = i.oid
+         where n.nspname = 'public'
+           and i.relname = any($1::text[])
+         order by i.relname`,
       [[
         'organization_company_profile_nip_cleaning_provider_uidx',
         'user_consent_onboarding_command_type_uidx',
         'cleaning_company_trial_redemption_email_uidx',
+        'cleaning_company_onboarding_enrollment_active_uidx',
+        'cleaning_company_onboarding_enrollment_active_email_uidx',
+      ]],
+    ),
+    client.query(
+      `select c.conname as constraint_name,
+              c.contype as constraint_type,
+              c.convalidated as is_validated,
+              coalesce((
+                select string_agg(a.attname, ',' order by keys.ordinality)
+                  from unnest(c.conkey) with ordinality as keys(attnum, ordinality)
+                  join pg_attribute a on a.attrelid = c.conrelid and a.attnum = keys.attnum
+              ), '') as columns_csv,
+              case when c.contype = 'f' then c.confrelid::regclass::text else '' end as foreign_table,
+              coalesce((
+                select string_agg(a.attname, ',' order by keys.ordinality)
+                  from unnest(c.confkey) with ordinality as keys(attnum, ordinality)
+                  join pg_attribute a on a.attrelid = c.confrelid and a.attnum = keys.attnum
+              ), '') as foreign_columns_csv,
+              pg_get_constraintdef(c.oid) as definition
+         from pg_constraint c
+         join pg_class r on r.oid = c.conrelid
+         join pg_namespace n on n.oid = r.relnamespace
+        where n.nspname = 'public'
+          and r.relname = 'cleaning_company_onboarding_enrollment'
+          and c.conname = any($1::text[])
+        order by c.conname`,
+      [[
+        'cleaning_company_onboarding_enrollment_command_fk',
+        'cleaning_company_onboarding_enrollment_pkey',
+        'cleaning_company_onboarding_enrollment_provider_check',
+        'cleaning_company_onboarding_enrollment_status_check',
+        'cleaning_company_onboarding_enrollment_expiry_check',
+        'cleaning_company_onboarding_enrollment_lifecycle_check',
       ]],
     ),
     client.query(
@@ -158,6 +260,7 @@ async function inspectSchema(client) {
   const relations = relationsResult.rows[0]
   const columns = columnsResult.rows
   const indexes = indexesResult.rows
+  const constraints = constraintsResult.rows
   const triggers = triggersResult.rows
   const subscriptionRequirements = subscriptionRequirementsResult.rows
   const requiredRelations = [
@@ -171,6 +274,7 @@ async function inspectSchema(client) {
     'onboarding_command',
     'onboarding_consent_audit',
     'trial_redemption',
+    'onboarding_enrollment',
   ]
   const requiredColumnsByTable = {
     organizations: ['organization_kind'],
@@ -218,6 +322,16 @@ async function inspectSchema(client) {
       'email_normalized',
       'org_id',
     ],
+    cleaning_company_onboarding_enrollment: [
+      'enrollment_id',
+      'actor_uid',
+      'email_normalized',
+      'provider_id',
+      'status',
+      'expires_at',
+      'onboarding_command_id',
+      'activated_at',
+    ],
   }
   const expectedImmutableTriggers = [
     ['cleaning_company_onboarding_command', 'cleaning_company_onboarding_command_immutable'],
@@ -225,16 +339,81 @@ async function inspectSchema(client) {
     ['cleaning_company_trial_redemption', 'cleaning_company_trial_redemption_immutable'],
   ]
   const expectedIndexes = [
-    'organization_company_profile_nip_cleaning_provider_uidx',
-    'user_consent_onboarding_command_type_uidx',
-    'cleaning_company_trial_redemption_email_uidx',
+    { name: 'organization_company_profile_nip_cleaning_provider_uidx' },
+    { name: 'user_consent_onboarding_command_type_uidx' },
+    { name: 'cleaning_company_trial_redemption_email_uidx' },
+    {
+      name: 'cleaning_company_onboarding_enrollment_active_uidx',
+      enrollmentColumn: 'actor_uid',
+    },
+    {
+      name: 'cleaning_company_onboarding_enrollment_active_email_uidx',
+      enrollmentColumn: 'email_normalized',
+    },
   ]
   const columnsReady = Object.entries(requiredColumnsByTable).every(
     ([tableName, expected]) => hasColumns(columns, tableName, expected),
-  )
-  const indexesReady = expectedIndexes.every((indexName) => {
-    const index = indexes.find((candidate) => candidate.index_name === indexName)
+  ) && hasNonNullableColumns(columns, 'cleaning_company_onboarding_enrollment', [
+    'enrollment_id',
+    'actor_uid',
+    'email_normalized',
+    'provider_id',
+    'status',
+    'expires_at',
+    'created_at',
+    'activated_at',
+  ])
+  const indexesReady = expectedIndexes.every(({ name, enrollmentColumn = '' }) => {
+    const index = indexes.find((candidate) => candidate.index_name === name)
+    if (enrollmentColumn) return enrollmentIndexIsExpected(index, enrollmentColumn)
     return index?.is_unique === true && index?.is_valid === true && index?.is_ready === true
+  })
+  const expectedEnrollmentConstraints = [
+    {
+      name: 'cleaning_company_onboarding_enrollment_pkey',
+      type: 'p',
+      columns: 'enrollment_id',
+    },
+    {
+      name: 'cleaning_company_onboarding_enrollment_command_fk',
+      type: 'f',
+      columns: 'onboarding_command_id',
+      foreignTable: 'cleaning_company_onboarding_command',
+      foreignColumns: 'command_id',
+      fragments: ['FOREIGN KEY (onboarding_command_id)'],
+    },
+    {
+      name: 'cleaning_company_onboarding_enrollment_provider_check',
+      type: 'c',
+      fragments: ["provider_id = 'google.com'"],
+    },
+    {
+      name: 'cleaning_company_onboarding_enrollment_status_check',
+      type: 'c',
+      definitionMatches: enrollmentStatusConstraintIsExpected,
+    },
+    {
+      name: 'cleaning_company_onboarding_enrollment_expiry_check',
+      type: 'c',
+      fragments: ['expires_at > activated_at'],
+    },
+    {
+      name: 'cleaning_company_onboarding_enrollment_lifecycle_check',
+      type: 'c',
+      fragments: [
+        "status = 'ACTIVE'",
+        "status = 'CONSUMED'",
+        "status = 'EXPIRED'",
+        'onboarding_command_id is not null',
+      ],
+    },
+  ]
+  const constraintsReady = expectedEnrollmentConstraints.every((expected) => {
+    const constraint = constraints.find(
+      (candidate) => candidate.constraint_name === expected.name,
+    )
+    return enrollmentConstraintIsExpected(constraint, expected) &&
+      (!expected.definitionMatches || expected.definitionMatches(constraint))
   })
   const triggersReady = expectedImmutableTriggers.every(
     ([tableName, triggerName]) => triggers.some((trigger) =>
@@ -251,6 +430,7 @@ async function inspectSchema(client) {
     onboardingCommands: null,
     onboardingConsentAudits: null,
     trialRedemptions: null,
+    onboardingEnrollments: null,
   }
   if (relations.organization_company_profile) {
     const countsResult = await client.query(
@@ -288,6 +468,12 @@ async function inspectSchema(client) {
     )
     counts.trialRedemptions = result.rows[0].count
   }
+  if (relations.onboarding_enrollment) {
+    const result = await client.query(
+      'select count(*)::integer as count from public.cleaning_company_onboarding_enrollment',
+    )
+    counts.onboardingEnrollments = result.rows[0].count
+  }
 
   return {
     target: targetResult.rows[0],
@@ -295,6 +481,7 @@ async function inspectSchema(client) {
     requiredColumnsByTable,
     columns,
     indexes,
+    constraints,
     triggers,
     counts,
     subscriptionInsertRequirements: {
@@ -316,6 +503,7 @@ async function inspectSchema(client) {
       'cleaning_company_onboarding_command',
       'cleaning_company_onboarding_consent_audit',
       'cleaning_company_trial_redemption',
+      'cleaning_company_onboarding_enrollment',
     ].map((tableName) => {
       const table = tableColumns(columns, tableName)
       return [tableName, {
@@ -326,6 +514,7 @@ async function inspectSchema(client) {
     ready: requiredRelations.every((name) => Boolean(relations[name])) &&
       columnsReady &&
       indexesReady &&
+      constraintsReady &&
       triggersReady,
   }
 }
@@ -426,6 +615,7 @@ module.exports = {
   MIGRATION_FILES,
   PRODUCTION_CONFIRMATION,
   featureGateStatus,
+  enrollmentStatusConstraintIsExpected,
   inspectSchema,
   requiredColumns,
   tableColumns,

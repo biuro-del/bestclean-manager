@@ -14,6 +14,7 @@ const {
   isCleaningCompanyOnboardingEnabled,
   provisionCleaningCompany,
   requiresCleaningCompanyAppCheck,
+  startExistingGoogleAccountEnrollment,
 } = require('../cleaning-company-onboarding-service')
 
 const COMMAND_ID = '3bcd0d64-454d-4e8d-97da-23d90ce9fceb'
@@ -54,7 +55,13 @@ function uuidFactory() {
   }
 }
 
-function createClient({ command = null, registeredNip = null, trialRedemption = null } = {}) {
+function createClient({
+  command = null,
+  registeredNip = null,
+  trialRedemption = null,
+  activeEnrollment = null,
+  consumedEnrollment = null,
+} = {}) {
   const calls = []
   return {
     calls,
@@ -70,12 +77,18 @@ function createClient({ command = null, registeredNip = null, trialRedemption = 
       if (normalized.startsWith('select org_id from public.organization_company_profile')) {
         return { rows: registeredNip ? [registeredNip] : [] }
       }
+      if (normalized.startsWith('select enrollment_id, actor_uid, email_normalized, provider_id, status')) {
+        return { rows: activeEnrollment ? [activeEnrollment] : [] }
+      }
+      if (normalized.startsWith('update public.cleaning_company_onboarding_enrollment')) {
+        return { rows: consumedEnrollment ? [consumedEnrollment] : [{ enrollment_id: '00000000-0000-4000-8000-000000000099' }] }
+      }
       return { rows: [], rowCount: 1 }
     },
   }
 }
 
-test('creates one isolated cleaning company with a 14-day trial and independent consent audit rows', async () => {
+test('creates one isolated cleaning company with a 30-day trial and independent consent audit rows', async () => {
   const client = createClient()
   const result = await provisionCleaningCompany(client, {
     decodedToken: verifiedToken(),
@@ -87,8 +100,8 @@ test('creates one isolated cleaning company with a 14-day trial and independent 
 
   assert.equal(result.replayed, false)
   assert.match(result.orgId, /^cc_[a-f0-9]{32}$/)
-  assert.equal(result.trialEndsAt.toISOString(), '2026-09-05T10:30:00.000Z')
-  assert.equal(CLEANING_COMPANY_TRIAL_DAYS, 14)
+  assert.equal(result.trialEndsAt.toISOString(), '2026-09-21T10:30:00.000Z')
+  assert.equal(CLEANING_COMPANY_TRIAL_DAYS, 30)
   assert.equal(client.calls[0].sql, 'begin')
   assert.equal(client.calls.at(-1).sql, 'commit')
 
@@ -216,6 +229,67 @@ test('refuses a verified identity that was not issued through the cleaning-compa
   )
   assert.deepEqual(client.calls, [])
   assert.equal(CLEANING_COMPANY_REGISTRATION_CHANNEL, 'registration_cleaning_company')
+})
+
+test('uses a short-lived existing Google enrollment only when it is consumed with the company command', async () => {
+  const client = createClient()
+  const result = await provisionCleaningCompany(client, {
+    decodedToken: verifiedToken({
+      cleanziInitialRegistrationChannel: '',
+      cleanziRegistrationGrantVersion: 0,
+      firebase: { sign_in_provider: 'google.com' },
+    }),
+    payload: validPayload(),
+    existingAccountEnrollment: {
+      enrollmentId: '00000000-0000-4000-8000-000000000099',
+      actorUid: 'firebase-owner-1',
+      email: 'owner@example.test',
+      providerId: 'google.com',
+      status: 'ACTIVE',
+      expiresAt: '2026-08-22T11:00:00.000Z',
+    },
+    now: NOW,
+    idFactory: uuidFactory(),
+  })
+
+  assert.equal(result.replayed, false)
+  const enrollmentConsume = client.calls.find((call) =>
+    call.sql.startsWith('update public.cleaning_company_onboarding_enrollment') &&
+    call.sql.includes("set status = 'consumed'"),
+  )
+  assert.ok(enrollmentConsume)
+  assert.equal(enrollmentConsume.values[3], COMMAND_ID)
+  assert.equal(enrollmentConsume.values[5], 'google.com')
+  const commandInsertIndex = client.calls.findIndex((call) =>
+    call.sql.startsWith('insert into public.cleaning_company_onboarding_command'),
+  )
+  const enrollmentConsumeIndex = client.calls.findIndex((call) => call === enrollmentConsume)
+  assert.ok(commandInsertIndex >= 0 && commandInsertIndex < enrollmentConsumeIndex)
+})
+
+test('prepares a bounded enrollment only for a verified Google identity with no redeemed trial', async () => {
+  const client = createClient()
+  const result = await startExistingGoogleAccountEnrollment(client, {
+    decodedToken: verifiedToken({ firebase: { sign_in_provider: 'google.com' } }),
+    now: NOW,
+    idFactory: () => '00000000-0000-4000-8000-000000000099',
+  })
+
+  assert.equal(result.replayed, false)
+  assert.equal(result.status, 'ACTIVE')
+  assert.equal(result.providerId, 'google.com')
+  assert.equal(new Date(result.expiresAt).toISOString(), '2026-08-22T11:00:00.000Z')
+  assert.ok(client.calls.some((call) =>
+    call.sql.startsWith('insert into public.cleaning_company_onboarding_enrollment'),
+  ))
+
+  await assert.rejects(
+    startExistingGoogleAccountEnrollment(createClient(), {
+      decodedToken: verifiedToken({ firebase: { sign_in_provider: 'password' } }),
+      now: NOW,
+    }),
+    (error) => error instanceof CleaningCompanyOnboardingError && error.code === 'GOOGLE_IDENTITY_REQUIRED',
+  )
 })
 
 test('publishes fixed legal documents and requires App Check unless explicitly disabled', () => {

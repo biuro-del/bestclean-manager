@@ -49,6 +49,7 @@ const CENTRAL_REGISTRATION_FUNCTIONS_REGION = 'europe-west1'
 const CLEANING_COMPANY_REGISTRATION_ISSUER_NAME = 'issueCleaningCompanyRegistrationGrant'
 const FACILITY_MANAGER_REGISTRATION_ISSUER_NAME = 'issueFacilityManagerRegistrationGrant'
 const FACILITY_MANAGER_REGISTRATION_ENDPOINT = '/api/registration/facility-manager'
+const CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_ENDPOINT = '/registration/cleaning-company/resume'
 const AUTH_EMAIL_DELIVERY_MODE = String(import.meta.env.VITE_AUTH_EMAIL_DELIVERY_MODE ?? '')
   .trim()
   .toLowerCase()
@@ -951,7 +952,16 @@ export async function startCleaningCompanyGoogleSignIn() {
     googleNonce: nonce,
   })
   const credential = await signInWithCredential(firebase.auth, GoogleAuthProvider.credential(idToken))
-  return resolveFreshAuthenticatedUser(credential.user)
+  const context = await resolveFreshAuthenticatedUser(credential.user)
+  // A new Firebase account consumes the central registration grant and is
+  // already marked for company onboarding. An existing Google account cannot
+  // consume a beforeCreate grant, but the user has still explicitly selected
+  // the company-registration flow. Create the short-lived server enrollment
+  // now so the first screen after Google is the same company-basics modal.
+  if (context?.status === 'ORGANIZATION_ONBOARDING_REQUIRED') {
+    return resumeCleaningCompanyOnboardingForExistingGoogleAccount()
+  }
+  return context
 }
 
 function facilityManagerRegistrationError(response, body) {
@@ -1415,7 +1425,7 @@ function normalizeCompanyOnboardingPayload(input = {}) {
 }
 
 export async function completeCleaningCompanyOnboarding(input = {}) {
-  const { user } = await currentFirebaseUserWithToken()
+  const { user } = await currentFirebaseUserWithToken(AUTH_SCOPE_ORGANIZATION)
   const idToken = await user.getIdToken(true)
   const appCheckToken = await getFirebaseAppCheckToken()
   const response = await fetch(`${getAuthApiBase()}/registration/cleaning-company/provision`, {
@@ -1442,6 +1452,32 @@ export async function completeCleaningCompanyOnboarding(input = {}) {
     ...storeReadySession(user, payload.context),
     onboarding: payload?.onboarding && typeof payload.onboarding === 'object' ? payload.onboarding : {},
   }
+}
+
+export async function resumeCleaningCompanyOnboardingForExistingGoogleAccount() {
+  const user = await currentUserForScope(AUTH_SCOPE_ORGANIZATION)
+  if (!user) {
+    throw createPublicAuthError('AUTH_SESSION_REQUIRED', 'Sesja wygasła. Zaloguj się ponownie kontem Google.')
+  }
+
+  const idToken = await user.getIdToken()
+  const appCheckToken = await getFirebaseAppCheckToken()
+  const response = await fetch(`${getAuthApiBase()}${CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_ENDPOINT}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      Accept: 'application/json',
+      ...(appCheckToken ? { 'X-Firebase-AppCheck': appCheckToken } : {}),
+    },
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw createBackendError(response, body)
+
+  const payload = unwrapApiData(body)
+  if (toText(payload?.status).toUpperCase() !== 'CLEANING_COMPANY_ONBOARDING_REQUIRED') {
+    throw new Error('Serwer nie potwierdził bezpiecznego otwarcia formularza firmy.')
+  }
+  return resolveAuthenticatedContext(user)
 }
 
 function clearRecaptchaVerifier() {
@@ -1612,8 +1648,8 @@ export async function requestPasswordReset(emailValue, authScope = AUTH_SCOPE_OR
   }
 }
 
-async function currentFirebaseUserWithToken() {
-  const user = await currentUserForScope(AUTH_SCOPE_PLATFORM)
+async function currentFirebaseUserWithToken(scope = AUTH_SCOPE_PLATFORM) {
+  const user = await currentUserForScope(scope)
   if (!user) throw new Error('Sesja Firebase wygasła. Zaloguj się ponownie.')
   return { user, idToken: await user.getIdToken() }
 }
