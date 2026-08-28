@@ -135,6 +135,7 @@ function bindAccountPasswordSettings(content, ctx = {}) {
       password.value = ''
       confirmation.value = ''
       renderState(state)
+      document.getElementById('dashboardAccountPasswordPrompt')?.setAttribute('hidden', '')
       setAccountPasswordFeedback(
         feedback,
         'Hasło zostało ustawione. Od teraz możesz logować się e-mailem i hasłem albo przez Google.',

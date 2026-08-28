@@ -310,6 +310,10 @@ export const portalLayoutTemplate = `
 
       <div class="login-error" id="loginErr" aria-live="polite" aria-atomic="true" style="display:none;"></div>
       <button class="login-reset-open" id="loginResetOpen" type="button" hidden>Zresetuj hasło</button>
+      <p class="login-google-password-hint" id="loginGooglePasswordHint" hidden>
+        <i class="ph ph-google-logo" aria-hidden="true"></i>
+        <span>Konto utworzone przez Google? Zaloguj się przez Google, a następnie ustaw hasło w Ustawieniach → Bezpieczeństwo konta.</span>
+      </p>
       <p class="login-security-note"><i class="ph ph-lock-key" aria-hidden="true"></i><span>Bezpieczne logowanie do chronionego środowiska Cleanzi.</span></p>
       </form>
     </div>
@@ -713,6 +717,20 @@ export const portalLayoutTemplate = `
 
         <main class="main">
         <section id="view-dashboard">
+          <section
+            class="dashboard-account-password-prompt"
+            id="dashboardAccountPasswordPrompt"
+            aria-labelledby="dashboardAccountPasswordPromptTitle"
+            aria-live="polite"
+            hidden
+          >
+            <div class="dashboard-account-password-prompt__icon"><i class="ph ph-lock-key" aria-hidden="true"></i></div>
+            <div class="dashboard-account-password-prompt__copy">
+              <strong id="dashboardAccountPasswordPromptTitle">Dodaj hasło do swojego konta</strong>
+              <span>Aby logować się także przez formularz e-mail oraz w aplikacji mobilnej, ustaw hasło do tego samego konta Google.</span>
+            </div>
+            <button class="dashboard-account-password-prompt__action" type="button" data-route="settingsAccountSecurity">Ustaw hasło</button>
+          </section>
           <section class="dash-command-center" id="dashCommandCenter" aria-labelledby="dashCommandCenterTitle">
             <header class="dash-command-center__header">
               <div class="dash-command-center__heading">

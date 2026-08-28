@@ -3790,6 +3790,16 @@ function setLoginResetActionVisible(isVisible) {
   if (resetOpen) {
     resetOpen.hidden = !isVisible
   }
+  if (!isVisible) {
+    setLoginGooglePasswordHintVisible(false)
+  }
+}
+
+function setLoginGooglePasswordHintVisible(isVisible) {
+  const hint = document.getElementById('loginGooglePasswordHint')
+  if (hint) {
+    hint.hidden = !isVisible
+  }
 }
 
 function hideLoginTenantFlowPanels() {
@@ -3925,7 +3935,7 @@ function showLoginCompanyEmailLinkConfirmation(email = '') {
   if (copy) copy.textContent = 'Dokończ bezpieczne potwierdzenie linku, aby przejść do danych firmy.'
 }
 
-function showLoginCredentials({ showResetAction = true } = {}) {
+function showLoginCredentials({ showResetAction = true, showGooglePasswordHint = false } = {}) {
   hideLoginTenantFlowPanels()
   const credentialsPanel = document.getElementById('loginCredentialsPanel')
   const resetPanel = document.getElementById('loginResetPanel')
@@ -3949,6 +3959,7 @@ function showLoginCredentials({ showResetAction = true } = {}) {
   if (mfaChallengePanel) mfaChallengePanel.hidden = true
   if (mfaEnrollmentPanel) mfaEnrollmentPanel.hidden = true
   setLoginResetActionVisible(showResetAction)
+  setLoginGooglePasswordHintVisible(showGooglePasswordHint)
   if (loginTitle) {
     loginTitle.textContent = 'Zaloguj się'
   }
@@ -7237,8 +7248,34 @@ async function activatePortalSession(session, router, { restoreRoute = false } =
     await hydrateSections(activeOrgId)
   }
 
+  if (normalizeNavigationRoute(router.getCurrentRoute?.()) === 'dashboard') {
+    void syncDashboardAccountPasswordPrompt()
+  }
+
   if (dashboardFeature && normalizeNavigationRoute(appState.currentRoute) === 'dashboard') {
     startDashboardAutoRefresh()
+  }
+}
+
+function accountCanAddEmailPassword(state) {
+  return Boolean(
+    state?.email &&
+    state?.emailVerified &&
+    state?.hasGoogleProvider &&
+    !state?.hasPasswordProvider,
+  )
+}
+
+async function syncDashboardAccountPasswordPrompt() {
+  const prompt = document.getElementById('dashboardAccountPasswordPrompt')
+  if (!(prompt instanceof HTMLElement)) return
+
+  prompt.hidden = true
+  try {
+    const state = await getEmailPasswordLoginState()
+    prompt.hidden = !accountCanAddEmailPassword(state)
+  } catch {
+    prompt.hidden = true
   }
 }
 
@@ -7530,7 +7567,11 @@ function OLD_bindLogin(router) {
       logout()
       resetPortalState()
       showLoginScreen()
-      showLoginCredentials({ showResetAction: isPasswordResetEligibleLoginError(error) })
+      const passwordResetEligible = isPasswordResetEligibleLoginError(error)
+      showLoginCredentials({
+        showResetAction: passwordResetEligible,
+        showGooglePasswordHint: passwordResetEligible,
+      })
       setUserChip(null)
       setLoginError(formatLoginError(error))
     } finally {
@@ -7759,6 +7800,7 @@ function bindPlatformLogin(router) {
     if (platformHeading) platformHeading.setAttribute('aria-hidden', isPlatformLogin ? 'false' : 'true')
     if (googleButton) googleButton.hidden = isPlatformLogin
     if (googleDivider) googleDivider.hidden = isPlatformLogin
+    if (isPlatformLogin) setLoginGooglePasswordHintVisible(false)
     if (loginCopy && !byId('loginCredentialsPanel')?.hidden) {
       loginCopy.textContent = isPlatformLogin
         ? 'Zaloguj się do Panelu admina.'
@@ -7865,7 +7907,11 @@ function bindPlatformLogin(router) {
       logout()
       resetPortalState()
       showLoginScreen()
-      showLoginCredentials({ showResetAction: isPasswordResetEligibleLoginError(error) })
+      const passwordResetEligible = isPasswordResetEligibleLoginError(error)
+      showLoginCredentials({
+        showResetAction: passwordResetEligible,
+        showGooglePasswordHint: selectedAuthScope() === 'organization' && passwordResetEligible,
+      })
       setLoginError(formatLoginError(error))
     } finally {
       setLoginControlsBusy(false)

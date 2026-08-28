@@ -101,6 +101,7 @@ test('centrum ustawień jest stroną domyślną, a podstrony wracają do przegl�
   assert.doesNotMatch(template, /<main\b/)
   assert.doesNotMatch(template, /settings-hero|portal-page-hero/)
   assert.doesNotMatch(template, /Zarządzaj kontem, organizacją i sposobem działania portalu/)
+  assert.doesNotMatch(overview, /Wszystkie moduły są obecnie makietami/)
   assert.doesNotMatch(template, /settings-navigation|settings-mobile-navigation|settingsModuleSelect/)
   assert.match(feature, /backButton\.dataset\.settingsBack = 'true'/)
   assert.match(feature, /navigation\?\.go\?\.\('settings'\)/)

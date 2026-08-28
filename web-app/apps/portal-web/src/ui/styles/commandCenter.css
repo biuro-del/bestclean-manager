@@ -4,6 +4,83 @@
   display: none !important;
 }
 
+#portalRoot #view-dashboard .dashboard-account-password-prompt {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 18px;
+  padding: 15px 17px;
+  border: 1px solid rgba(37, 99, 235, 0.24);
+  border-radius: 16px;
+  background: linear-gradient(104deg, rgba(239, 246, 255, 0.96), rgba(255, 255, 255, 0.98));
+  box-shadow: 0 12px 28px rgba(30, 64, 175, 0.08);
+}
+
+#portalRoot #view-dashboard .dashboard-account-password-prompt[hidden] {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dashboard-account-password-prompt__icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 12px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 20px;
+}
+
+#portalRoot #view-dashboard .dashboard-account-password-prompt__copy {
+  display: grid;
+  gap: 3px;
+  color: #52657f;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+#portalRoot #view-dashboard .dashboard-account-password-prompt__copy strong {
+  color: #0f2b58;
+  font-size: 14px;
+}
+
+#portalRoot #view-dashboard .dashboard-account-password-prompt__action {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: #2563eb;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#portalRoot #view-dashboard .dashboard-account-password-prompt__action:hover {
+  background: #1d4ed8;
+}
+
+#portalRoot #view-dashboard .dashboard-account-password-prompt__action:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.28);
+  outline-offset: 3px;
+}
+
+@media (max-width: 640px) {
+  #portalRoot #view-dashboard .dashboard-account-password-prompt {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 12px;
+    padding: 14px;
+  }
+
+  #portalRoot #view-dashboard .dashboard-account-password-prompt__action {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
 #portalRoot #view-dashboard .dash-command-center {
   position: relative;
   display: grid;

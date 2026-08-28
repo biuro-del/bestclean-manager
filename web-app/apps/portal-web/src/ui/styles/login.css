@@ -440,6 +440,29 @@
   font-family: inherit !important;
 }
 
+#loginScreen .login-google-password-hint {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 8px !important;
+  width: 100% !important;
+  margin: 10px 0 0 !important;
+  color: #59708e !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  text-align: left !important;
+}
+
+#loginScreen .login-google-password-hint[hidden] {
+  display: none !important;
+}
+
+#loginScreen .login-google-password-hint i {
+  flex: 0 0 auto !important;
+  color: #1752ff !important;
+  font-size: 15px !important;
+  line-height: 1.25 !important;
+}
+
 #loginScreen .login-company-panel,
 #loginScreen .login-company-email-panel,
 #loginScreen .login-reset-panel,

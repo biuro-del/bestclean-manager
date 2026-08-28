@@ -154,3 +154,20 @@ test('backend dopuszcza wyłącznie stare niezweryfikowane konta po odczycie cz�
   assert.match(backend, /m\.created_at as membership_created_at/)
   assert.match(backend, /w\.created_at as worker_created_at/)
 })
+
+test('portal exposes a safe password setup path for Google-only accounts', () => {
+  const app = fs.readFileSync(path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'ui', 'portalApp.js'), 'utf8')
+  const layout = fs.readFileSync(path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'ui', 'layoutTemplate.js'), 'utf8')
+  const settings = fs.readFileSync(path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'features', 'settings', 'index.js'), 'utf8')
+
+  assert.match(layout, /id="loginGooglePasswordHint"/)
+  assert.match(app, /function setLoginGooglePasswordHintVisible/)
+  assert.match(app, /showGooglePasswordHint: selectedAuthScope\(\) === 'organization' && passwordResetEligible/)
+  assert.match(app, /if \(isPlatformLogin\) setLoginGooglePasswordHintVisible\(false\)/)
+  assert.match(layout, /id="dashboardAccountPasswordPrompt"/)
+  assert.match(layout, /data-route="settingsAccountSecurity">Ustaw hasło</)
+  assert.match(app, /function accountCanAddEmailPassword/)
+  assert.match(app, /state\?\.hasGoogleProvider/)
+  assert.match(app, /!state\?\.hasPasswordProvider/)
+  assert.match(settings, /dashboardAccountPasswordPrompt.*setAttribute\('hidden', ''\)/)
+})
