@@ -1,4 +1,5 @@
 import {
+  EmailAuthProvider,
   GoogleAuthProvider,
   PhoneAuthProvider,
   PhoneMultiFactorGenerator,
@@ -6,7 +7,9 @@ import {
   TotpMultiFactorGenerator,
   getMultiFactorResolver,
   isSignInWithEmailLink,
+  linkWithCredential,
   multiFactor,
+  reauthenticateWithCredential,
   reload,
   sendEmailVerification,
   sendSignInLinkToEmail,
@@ -76,6 +79,8 @@ let pendingMfaEnrollment = null
 let pendingRecaptchaVerifier = null
 let pendingAuthScope = ''
 let googleIdentityScriptPromise = null
+const PASSWORD_PROVIDER_ID = 'password'
+const GOOGLE_PROVIDER_ID = 'google.com'
 
 function toText(value) {
   return String(value ?? '').trim()
@@ -581,6 +586,175 @@ export async function login({
     localStorage.removeItem(AUTH_STORAGE_KEY)
     localStorage.removeItem(LAST_ORG_STORAGE_KEY)
     throw error
+  }
+}
+
+function providerIdsForAuthUser(user) {
+  return new Set(
+    (Array.isArray(user?.providerData) ? user.providerData : [])
+      .map((provider) => toText(provider?.providerId))
+      .filter(Boolean),
+  )
+}
+
+function emailPasswordLoginStateForUser(user) {
+  const email = normalizeAuthEmail(user?.email)
+  const providerIds = providerIdsForAuthUser(user)
+  return {
+    uid: toText(user?.uid),
+    email,
+    emailVerified: Boolean(user?.emailVerified),
+    hasGoogleProvider: providerIds.has(GOOGLE_PROVIDER_ID),
+    hasPasswordProvider: providerIds.has(PASSWORD_PROVIDER_ID),
+  }
+}
+
+async function currentOrganizationAuthUser() {
+  if (resolveAuthScope() !== AUTH_SCOPE_ORGANIZATION) {
+    throw createPublicAuthError(
+      'PASSWORD_LINK_ORGANIZATION_SESSION_REQUIRED',
+      'Ustawienie hasła jest dostępne po zalogowaniu do panelu firmy.',
+    )
+  }
+  if (!isFirebaseConfigured()) {
+    throw createPublicAuthError('FIREBASE_NOT_CONFIGURED', 'Brak konfiguracji Firebase.')
+  }
+
+  const firebase = ensureFirebase()
+  const user = firebase?.auth?.currentUser || (await waitForFirebaseAuthReady())
+  if (!firebase?.auth || !user) {
+    throw createPublicAuthError('PASSWORD_LINK_SESSION_REQUIRED', 'Twoja sesja wygasła. Zaloguj się ponownie przez Google.')
+  }
+  return { firebase, user }
+}
+
+export async function getEmailPasswordLoginState() {
+  const { user } = await currentOrganizationAuthUser()
+  await reload(user)
+  return emailPasswordLoginStateForUser(user)
+}
+
+function mapEmailPasswordLinkError(error) {
+  const code = toText(error?.code).toLowerCase()
+  if (
+    code === 'password_link_organization_session_required' ||
+    code === 'password_link_session_required' ||
+    code === 'password_link_email_required' ||
+    code === 'password_link_google_required' ||
+    code === 'password_link_email_verification_required' ||
+    code === 'password_link_uid_changed'
+  ) {
+    return error
+  }
+  if (code === 'auth/weak-password') {
+    return createPublicAuthError('PASSWORD_LINK_WEAK_PASSWORD', 'Hasło musi mieć co najmniej 6 znaków.')
+  }
+  if (code === 'auth/requires-recent-login') {
+    return createPublicAuthError(
+      'PASSWORD_LINK_RECENT_LOGIN_REQUIRED',
+      'Potwierdź ponownie konto Google i spróbuj jeszcze raz.',
+    )
+  }
+  if (code === 'auth/user-mismatch') {
+    return createPublicAuthError(
+      'PASSWORD_LINK_GOOGLE_ACCOUNT_MISMATCH',
+      'Wybierz w Google to samo konto, które jest zalogowane w portalu.',
+    )
+  }
+  if (code === 'auth/email-already-in-use' || code === 'auth/credential-already-in-use') {
+    return createPublicAuthError(
+      'PASSWORD_LINK_ACCOUNT_CONFLICT',
+      'Ten e-mail lub sposób logowania jest już przypisany do innego konta. Nie połączyliśmy kont automatycznie.',
+    )
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return createPublicAuthError(
+      'PASSWORD_LINK_NOT_CONFIGURED',
+      'Logowanie e-mailem i hasłem nie jest poprawnie skonfigurowane.',
+    )
+  }
+  if (code === 'auth/network-request-failed') {
+    return createPublicAuthError(
+      'PASSWORD_LINK_NETWORK_ERROR',
+      'Nie udało się połączyć z Firebase. Sprawdź internet i spróbuj ponownie.',
+    )
+  }
+  if (code === 'auth/too-many-requests') {
+    return createPublicAuthError(
+      'PASSWORD_LINK_RATE_LIMITED',
+      'Wysłano zbyt wiele żądań. Spróbuj ponownie później.',
+    )
+  }
+  if (code === 'google_account_selection_cancelled') {
+    return createPublicAuthError('PASSWORD_LINK_GOOGLE_CANCELLED', 'Wybór konta Google został anulowany.')
+  }
+  return createPublicAuthError('PASSWORD_LINK_FAILED', 'Nie udało się ustawić hasła. Spróbuj ponownie.')
+}
+
+export async function linkEmailPasswordToCurrentUser(passwordValue) {
+  const password = toText(passwordValue)
+  if (password.length < 6) {
+    throw createPublicAuthError('PASSWORD_LINK_WEAK_PASSWORD', 'Hasło musi mieć co najmniej 6 znaków.')
+  }
+
+  const { firebase, user } = await currentOrganizationAuthUser()
+  await reload(user)
+  const before = emailPasswordLoginStateForUser(user)
+
+  if (before.hasPasswordProvider) {
+    return { ...before, status: 'ALREADY_LINKED' }
+  }
+  if (!before.email) {
+    throw createPublicAuthError('PASSWORD_LINK_EMAIL_REQUIRED', 'Na tym koncie brakuje poprawnego adresu e-mail.')
+  }
+  if (!before.emailVerified) {
+    throw createPublicAuthError(
+      'PASSWORD_LINK_EMAIL_VERIFICATION_REQUIRED',
+      'Najpierw potwierdź adres e-mail przypisany do tego konta.',
+    )
+  }
+  if (!before.hasGoogleProvider) {
+    throw createPublicAuthError(
+      'PASSWORD_LINK_GOOGLE_REQUIRED',
+      'Aby ustawić pierwsze hasło, zaloguj się przez Google do tego konta.',
+    )
+  }
+
+  const originalUid = before.uid
+  try {
+    const { idToken } = await requestGoogleSignInCredential()
+    await reauthenticateWithCredential(user, GoogleAuthProvider.credential(idToken))
+
+    const reauthenticatedUser = firebase.auth.currentUser
+    if (!reauthenticatedUser || toText(reauthenticatedUser.uid) !== originalUid) {
+      throw createPublicAuthError(
+        'PASSWORD_LINK_UID_CHANGED',
+        'Nie potwierdziliśmy tego samego konta. Nie ustawiliśmy hasła.',
+      )
+    }
+
+    const credential = EmailAuthProvider.credential(before.email, password)
+    const result = await linkWithCredential(reauthenticatedUser, credential)
+    if (toText(result?.user?.uid) !== originalUid) {
+      throw createPublicAuthError(
+        'PASSWORD_LINK_UID_CHANGED',
+        'Nie potwierdziliśmy tego samego konta. Nie ustawiliśmy hasła.',
+      )
+    }
+
+    await reload(result.user)
+    const after = emailPasswordLoginStateForUser(result.user)
+    if (!after.hasGoogleProvider || !after.hasPasswordProvider) {
+      throw createPublicAuthError('PASSWORD_LINK_FAILED', 'Nie potwierdziliśmy dodania metody logowania.')
+    }
+    await result.user.getIdToken(true)
+    return { ...after, status: 'LINKED' }
+  } catch (error) {
+    if (toText(error?.code).toLowerCase() === 'auth/provider-already-linked') {
+      const after = await getEmailPasswordLoginState()
+      if (after.hasPasswordProvider) return { ...after, status: 'ALREADY_LINKED' }
+    }
+    throw mapEmailPasswordLinkError(error)
   }
 }
 

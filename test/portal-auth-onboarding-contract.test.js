@@ -18,7 +18,7 @@ test('zwykły panel logowania nie pokazuje logo karty ani wyboru obszaru', () =>
   assert.doesNotMatch(app, /authScopeField\.hidden/)
 })
 
-test('frontend obsługuje Google, weryfikację email i bezpieczny reset hasła Firebase', () => {
+test('frontend obsługuje Google, weryfikację email, reset oraz bezpieczne dołączenie pierwszego hasła', () => {
   const auth = fs.readFileSync(path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'auth', 'authService.js'), 'utf8')
   assert.match(auth, /requestGoogleSignInCredential\(\)/)
   assert.match(auth, /signInWithCredential\(firebase\.auth, GoogleAuthProvider\.credential\(idToken\)\)/)
@@ -28,6 +28,42 @@ test('frontend obsługuje Google, weryfikację email i bezpieczny reset hasła F
   assert.match(auth, /sendPasswordResetEmail\(firebase\.auth, email\)/)
   assert.match(auth, /EMAIL_VERIFICATION_REQUIRED/)
   assert.doesNotMatch(auth, /fetchSignInMethodsForEmail/)
+  assert.match(auth, /EmailAuthProvider\.credential\(before\.email, password\)/)
+  assert.match(auth, /reauthenticateWithCredential\(user, GoogleAuthProvider\.credential\(idToken\)\)/)
+  assert.match(auth, /linkWithCredential\(reauthenticatedUser, credential\)/)
+  assert.match(auth, /originalUid/)
+  assert.match(auth, /hasGoogleProvider/)
+  assert.match(auth, /hasPasswordProvider/)
+  assert.doesNotMatch(auth, /createUserWithEmailAndPassword/)
+})
+
+test('portal daje zalogowanemu kontu Google bezpieczny formularz ustawienia pierwszego hasła', () => {
+  const auth = fs.readFileSync(path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'auth', 'authService.js'), 'utf8')
+  const template = fs.readFileSync(
+    path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'features', 'settings', 'modules', 'my-account', 'account-security', 'template.html'),
+    'utf8',
+  )
+  const settings = fs.readFileSync(path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'features', 'settings', 'index.js'), 'utf8')
+
+  assert.match(template, /data-account-password-form/)
+  assert.match(template, /data-account-password-email/)
+  assert.match(template, /data-account-password-new/)
+  assert.match(template, /data-account-password-confirm/)
+  assert.match(template, /autocomplete="new-password"/)
+  assert.match(settings, /ctx\.getEmailPasswordLoginState/)
+  assert.match(settings, /ctx\.linkEmailPasswordToCurrentUser/)
+  assert.match(settings, /password\.value !== confirmation\.value/)
+  assert.match(settings, /Potwierdź teraz to samo konto Google/)
+
+  const accountLinkStart = auth.indexOf('export async function linkEmailPasswordToCurrentUser')
+  const accountLinkEnd = auth.indexOf('export async function loginWithGoogle', accountLinkStart)
+  const accountLink = auth.slice(accountLinkStart, accountLinkEnd)
+  assert.ok(accountLink.indexOf('if (before.hasPasswordProvider)') < accountLink.indexOf('if (!before.hasGoogleProvider)'))
+
+  const renderStateStart = settings.indexOf('const renderState = (state) =>')
+  const renderStateEnd = settings.indexOf('const loadState = async () =>', renderStateStart)
+  const renderState = settings.slice(renderStateStart, renderStateEnd)
+  assert.ok(renderState.indexOf('if (state?.hasPasswordProvider)') < renderState.indexOf('if (!state?.hasGoogleProvider)'))
 })
 
 test('portal zachowuje wybór istniejącej organizacji i finalizuje nową wyłącznie przez Registration API', () => {

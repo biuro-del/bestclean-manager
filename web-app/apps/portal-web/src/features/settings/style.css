@@ -110,6 +110,24 @@
   white-space: nowrap;
 }
 
+#portalRoot #view-settings .settings-status[data-tone='ready'] {
+  border-color: #d8dcff;
+  background: #f6f7ff;
+  color: var(--portal-quality-primary-hover);
+}
+
+#portalRoot #view-settings .settings-status[data-tone='success'] {
+  border-color: #bae7cf;
+  background: #f2fcf7;
+  color: #18744e;
+}
+
+#portalRoot #view-settings .settings-status[data-tone='error'] {
+  border-color: #f1c7ca;
+  background: #fff6f6;
+  color: var(--portal-quality-danger);
+}
+
 #portalRoot #view-settings .settings-permission-note {
   display: flex;
   align-items: center;
@@ -263,6 +281,77 @@
   font: inherit;
   font-size: 0.78rem;
   font-weight: 750;
+}
+
+#portalRoot #view-settings .settings-primary-button {
+  min-height: 40px;
+  border: 1px solid var(--portal-quality-primary);
+  border-radius: 9px;
+  padding: 9px 14px;
+  background: var(--portal-quality-primary);
+  color: #fff;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+#portalRoot #view-settings .settings-primary-button:hover:not(:disabled) {
+  background: var(--portal-quality-primary-hover);
+}
+
+#portalRoot #view-settings .settings-primary-button:focus-visible {
+  outline: 3px solid rgba(101, 103, 237, 0.24);
+  outline-offset: 2px;
+}
+
+#portalRoot #view-settings .settings-account-password-form {
+  display: grid;
+  gap: 15px;
+  margin-top: 18px;
+}
+
+#portalRoot #view-settings .settings-account-password-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+#portalRoot #view-settings .settings-account-password-actions p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--portal-quality-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+#portalRoot #view-settings .settings-account-password-feedback {
+  margin: 14px 0 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.8rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+#portalRoot #view-settings .settings-account-password-feedback[data-tone='neutral'] {
+  border-color: #e0e2fb;
+  background: #f8f8ff;
+  color: #555f78;
+}
+
+#portalRoot #view-settings .settings-account-password-feedback[data-tone='success'] {
+  border-color: #bae7cf;
+  background: #f2fcf7;
+  color: #18744e;
+}
+
+#portalRoot #view-settings .settings-account-password-feedback[data-tone='error'] {
+  border-color: #f1c7ca;
+  background: #fff6f6;
+  color: var(--portal-quality-danger);
 }
 
 #portalRoot #view-settings .settings-avatar-row .settings-secondary-button {
@@ -594,6 +683,7 @@
   }
 
   #portalRoot #view-settings .settings-action-row,
+  #portalRoot #view-settings .settings-account-password-actions,
   #portalRoot #view-settings .settings-plan-card {
     align-items: flex-start;
     flex-direction: column;
@@ -626,6 +716,7 @@
   }
 
   #portalRoot #view-settings .settings-action-row > button,
+  #portalRoot #view-settings .settings-account-password-actions > button,
   #portalRoot #view-settings .settings-plan-card > button {
     width: 100%;
   }

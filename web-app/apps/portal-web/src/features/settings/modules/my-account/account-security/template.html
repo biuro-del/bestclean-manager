@@ -1,12 +1,40 @@
 <section class="settings-module" aria-labelledby="settingsAccountSecurityTitle">
   <header class="settings-module-header">
-    <div><p class="settings-eyebrow">Moje konto</p><h2 id="settingsAccountSecurityTitle">Bezpieczeństwo konta</h2><p>Zarządzaj dostępem do konta i aktywnymi sesjami.</p></div>
-    <span class="settings-status">W przygotowaniu</span>
+    <div><p class="settings-eyebrow">Moje konto</p><h2 id="settingsAccountSecurityTitle">Bezpieczeństwo konta</h2><p>Ustaw dodatkowy sposób logowania do swojego konta.</p></div>
+    <span class="settings-status" data-account-password-status>Sprawdzanie</span>
   </header>
-  <div class="settings-permission-note"><i class="ph ph-info" aria-hidden="true"></i><span data-settings-permission>Edycja będzie dostępna dla ról OWNER i ADMIN.</span></div>
-  <fieldset class="settings-fieldset" disabled>
-    <legend>Hasło</legend>
-    <div class="settings-action-row"><div><strong>Hasło do konta</strong><p>Ostatnia zmiana nie jest jeszcze dostępna.</p></div><button class="settings-secondary-button" type="button">Zmień hasło</button></div>
+  <div class="settings-permission-note"><i class="ph ph-info" aria-hidden="true"></i><span>To ustawienie dotyczy wyłącznie Twojego konta. Nie zmienia dostępu innych użytkowników ani danych firmy.</span></div>
+  <fieldset class="settings-fieldset" data-account-password-section>
+    <legend>Hasło do logowania e-mailem</legend>
+    <div class="settings-action-row settings-account-password-summary">
+      <div>
+        <strong data-account-password-title>Sprawdzamy metody logowania</strong>
+        <p data-account-password-copy>Za chwilę pokażemy dostępne ustawienie.</p>
+      </div>
+    </div>
+    <form class="settings-account-password-form" data-account-password-form hidden novalidate>
+      <div class="settings-form-grid settings-form-grid--single">
+        <label>
+          <span>Adres e-mail</span>
+          <input data-account-password-email type="email" autocomplete="username" readonly />
+          <small>Hasło zostanie przypięte tylko do aktualnie zalogowanego konta.</small>
+        </label>
+        <label>
+          <span>Nowe hasło</span>
+          <input data-account-password-new type="password" autocomplete="new-password" minlength="6" maxlength="120" required />
+          <small>Użyj co najmniej 6 znaków.</small>
+        </label>
+        <label>
+          <span>Powtórz nowe hasło</span>
+          <input data-account-password-confirm type="password" autocomplete="new-password" minlength="6" maxlength="120" required />
+        </label>
+      </div>
+      <div class="settings-account-password-actions">
+        <p>Przed zapisaniem poprosimy o ponowne potwierdzenie tego samego konta Google.</p>
+        <button class="settings-primary-button" data-account-password-submit type="submit">Ustaw hasło</button>
+      </div>
+    </form>
+    <p class="settings-account-password-feedback" data-account-password-feedback role="status" aria-live="polite"></p>
   </fieldset>
   <fieldset class="settings-fieldset" disabled>
     <legend>Uwierzytelnianie wieloskładnikowe</legend>

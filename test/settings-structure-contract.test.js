@@ -128,14 +128,18 @@ test('poprawna zapisana podtrasa Ustawień może zostać odtworzona', () => {
   assert.match(routeRestoreContract, /portalRouteExists\(storedRoute\) \? storedRoute : 'dashboard'/)
 })
 
-test('makiety są dostępne semantycznie i nie umożliwiają zapisu', () => {
+test('moduły ustawień są semantyczne, a tylko własne hasło udostępnia kontrolowany zapis', () => {
   const feature = readSettingsSource('index.js')
-  const moduleTemplates = moduleDirectories.slice(1).map((directory) => readSettingsSource('modules', ...directory, 'template.html'))
+  const passiveModuleTemplates = moduleDirectories
+    .slice(1)
+    .filter((directory) => directory.join('/') !== 'my-account/account-security')
+    .map((directory) => readSettingsSource('modules', ...directory, 'template.html'))
+  const accountSecurity = readSettingsSource('modules', 'my-account', 'account-security', 'template.html')
 
   assert.match(feature, /new Set\(\['OWNER', 'ADMIN'\]\)/)
   assert.match(feature, /shell\.dataset\.canEdit = String\(canEdit\)/)
 
-  for (const template of moduleTemplates) {
+  for (const template of passiveModuleTemplates) {
     assert.match(template, /<section class="settings-module" aria-labelledby=/)
     assert.match(template, /<fieldset class="settings-fieldset" disabled>/)
     assert.doesNotMatch(template, /<form\b|type="submit"|localStorage|sessionStorage/)
@@ -145,6 +149,13 @@ test('makiety są dostępne semantycznie i nie umożliwiają zapisu', () => {
       .match(/<(?:input|select|textarea|button)\b/g)
     assert.equal(controlsOutsideDisabledFieldsets, null)
   }
+
+  assert.match(accountSecurity, /<section class="settings-module" aria-labelledby=/)
+  assert.match(accountSecurity, /data-account-password-form/)
+  assert.match(accountSecurity, /autocomplete="new-password"/)
+  assert.doesNotMatch(accountSecurity, /localStorage|sessionStorage/)
+  assert.match(feature, /bindAccountPasswordSettings/)
+  assert.match(feature, /ctx\.linkEmailPasswordToCurrentUser/)
 })
 
 test('nowe moduły nie przywracają usług, motywów ani integracji danych', () => {
