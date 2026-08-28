@@ -20,8 +20,9 @@ test('zwykły panel logowania nie pokazuje logo karty ani wyboru obszaru', () =>
 
 test('frontend obsługuje Google, weryfikację email i bezpieczny reset hasła Firebase', () => {
   const auth = fs.readFileSync(path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'auth', 'authService.js'), 'utf8')
-  assert.match(auth, /new GoogleAuthProvider\(\)/)
-  assert.match(auth, /signInWithPopup\(firebase\.auth, provider\)/)
+  assert.match(auth, /requestGoogleSignInCredential\(\)/)
+  assert.match(auth, /signInWithCredential\(firebase\.auth, GoogleAuthProvider\.credential\(idToken\)\)/)
+  assert.doesNotMatch(auth, /signInWithPopup\(/)
   assert.match(auth, /signInWithRedirect\(firebase\.auth, provider\)/)
   assert.match(auth, /sendEmailVerification\(user\)/)
   assert.match(auth, /sendPasswordResetEmail\(firebase\.auth, email\)/)

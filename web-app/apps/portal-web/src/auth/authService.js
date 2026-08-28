@@ -13,7 +13,6 @@ import {
   sendPasswordResetEmail,
   signInWithEmailLink,
   signInWithEmailAndPassword,
-  signInWithPopup,
   signInWithRedirect,
   signInWithCredential,
   signOut,
@@ -604,7 +603,11 @@ export async function loginWithGoogle({ deferContext = false, forceRedirect = fa
     await signInWithRedirect(firebase.auth, provider)
     return { status: 'REDIRECTING' }
   }
-  const credential = await signInWithPopup(firebase.auth, provider)
+  // Desktop popup hand-offs can fail before Firebase receives the Google
+  // result. Use the already-configured Google Identity Services credential
+  // flow instead, then exchange its ID token with Firebase in this document.
+  const { idToken } = await requestGoogleSignInCredential()
+  const credential = await signInWithCredential(firebase.auth, GoogleAuthProvider.credential(idToken))
   localStorage.removeItem(AUTH_STORAGE_KEY)
   sessionStorage.removeItem(PLATFORM_EMAIL_MFA_TOKEN_KEY)
   await credential.user.getIdToken(true)
