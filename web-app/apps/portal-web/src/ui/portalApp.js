@@ -1310,6 +1310,26 @@ function applySidebarRouteTitles() {
   })
 }
 
+function setSidebarSubmenuToggleState(submenu, open) {
+  if (!(submenu instanceof HTMLElement) || !submenu.id.startsWith('submenu-')) return
+  const toggleKey = submenu.id.slice('submenu-'.length)
+  const toggle = document.querySelector(`#portalSidebar [data-toggle="${toggleKey}"]`)
+  toggle?.classList.toggle('open', open)
+  if (toggle?.hasAttribute('aria-expanded')) {
+    toggle.setAttribute('aria-expanded', String(open))
+  }
+}
+
+function restoreActiveSidebarSubmenus() {
+  const activeItem = document.querySelector('#portalSidebar .submenu-item.active')
+  let submenu = activeItem?.closest?.('.submenu')
+  while (submenu instanceof HTMLElement) {
+    submenu.classList.add('open')
+    setSidebarSubmenuToggleState(submenu, true)
+    submenu = submenu.parentElement?.closest?.('.submenu')
+  }
+}
+
 function setSidebarCollapsed(collapsed, { persist = true } = {}) {
   const root = document.getElementById('portalRoot')
   if (!root) {
@@ -1331,8 +1351,11 @@ function setSidebarCollapsed(collapsed, { persist = true } = {}) {
   if (nextCollapsed) {
     document.querySelectorAll('#portalSidebar .submenu.open').forEach((submenu) => {
       submenu.classList.remove('open')
+      setSidebarSubmenuToggleState(submenu, false)
     })
     sidebarGlobalSearchClose()
+  } else {
+    restoreActiveSidebarSubmenus()
   }
 
   if (!persist) {
@@ -5316,7 +5339,11 @@ function bindSubmenuToggles() {
       const key = button.dataset.toggle
       const submenu = document.getElementById(`submenu-${key}`)
       if (submenu) {
-        submenu.classList.toggle('open')
+        const open = submenu.classList.toggle('open')
+        button.classList.toggle('open', open)
+        if (button.hasAttribute('aria-expanded')) {
+          button.setAttribute('aria-expanded', String(open))
+        }
       }
     }
 

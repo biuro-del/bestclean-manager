@@ -13,7 +13,7 @@ export const portalLayoutTemplate = `
     />
     <div class="login-visual-overlay" aria-hidden="true"></div>
     <div class="login-visual-brand">
-      <img src="/cleanzi-logo.svg" alt="Cleanzi" width="180" height="50" />
+      <img src="/cleanzi-logo-brand-v2.png" alt="Cleanzi" width="180" height="59" />
       <span>Panel firmy sprz&#261;taj&#261;cej</span>
     </div>
     <div class="login-visual-story">
@@ -324,7 +324,7 @@ export const portalLayoutTemplate = `
   <div class="company-basics-backdrop" aria-hidden="true"></div>
   <form class="company-basics-card" id="companyBasicsForm" novalidate>
     <div class="company-basics-brand">
-      <img src="/cleanzi-logo.svg" alt="Cleanzi" width="132" height="38" />
+      <img src="/cleanzi-logo-brand-v2.png" alt="Cleanzi" width="132" height="43" />
       <span>Zak&#322;adanie firmy</span>
     </div>
     <div class="company-basics-heading">
@@ -415,7 +415,7 @@ export const portalLayoutTemplate = `
       <aside class="sidebar" id="portalSidebar">
         <div class="facility-manager-sidebar" id="facilityManagerSidebarNav" hidden>
           <button class="facility-manager-sidebar__brand" data-route="managerObjects" type="button" aria-label="Przejdź do moich obiektów">
-            <img src="/cleanzi-logo.svg" alt="Cleanzi" width="146" height="42" />
+            <img src="/cleanzi-logo-brand-v2.png" alt="Cleanzi" width="146" height="48" />
           </button>
           <p>PANEL ZARZĄDCY</p>
           <button class="facility-manager-sidebar__link menu-item" data-route="managerObjects" type="button">
@@ -433,7 +433,7 @@ export const portalLayoutTemplate = `
           aria-label="Przejdź do strony głównej"
         >
           <span class="sidebar-brand-logo logo-block logo-block--cleanzi">
-            <img src="/cleanzi-logo.svg" alt="Cleanzi" />
+            <img src="/cleanzi-logo-brand-v2.png" alt="Cleanzi" width="301" height="98" />
           </span>
         </button>
 
@@ -559,7 +559,7 @@ export const portalLayoutTemplate = `
             </button>
           </div>
 
-          <button class="menu-section" type="button" data-toggle="objects">
+          <button class="menu-section" type="button" data-toggle="objects" aria-controls="submenu-objects" aria-expanded="false">
             <span class="mi-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none"><path d="M3 9l9-5 9 5-9 5-9-5zM3 14l9 5 9-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </span>
@@ -742,25 +742,7 @@ export const portalLayoutTemplate = `
                 <p id="dashCommandCenterDate">Dzisiaj</p>
               </div>
               <div class="dash-command-center__actions">
-                <button
-                  class="dash-command-center__action"
-                  id="dashCommandFiltersBtn"
-                  type="button"
-                  aria-controls="dashCommandFiltersPanel"
-                  aria-expanded="false"
-                >
-                  <i class="ph ph-funnel-simple" aria-hidden="true"></i>
-                  <span>Filtry</span>
-                </button>
-                <button
-                  class="dash-command-center__action dash-command-center__action--primary"
-                  id="dashCommandViewBtn"
-                  type="button"
-                  aria-pressed="false"
-                >
-                  <i class="ph ph-squares-four" aria-hidden="true"></i>
-                  <span>Widok</span>
-                </button>
+                <span class="dash-activity-feed__day" id="dashActivityFeedDay">Dzisiaj</span>
                 <button
                   class="dash-command-center__notification"
                   type="button"
@@ -774,224 +756,105 @@ export const portalLayoutTemplate = `
               </div>
             </header>
 
-            <div
-              class="dash-command-center__filters"
-              id="dashCommandFiltersPanel"
-              aria-label="Szybkie filtry Centrum dowodzenia"
-              hidden
-            >
-              <div class="dash-command-center__filter-copy">
-                <strong>Widoczność na mapie</strong>
-                <span>Wybierz statusy pracowników.</span>
-              </div>
-              <label class="dash-command-center__filter">
-                <input type="checkbox" data-command-map-filter="active" checked />
-                <span class="is-active" aria-hidden="true"></span>
-                W pracy
-              </label>
-              <label class="dash-command-center__filter">
-                <input type="checkbox" data-command-map-filter="planned" checked />
-                <span class="is-planned" aria-hidden="true"></span>
-                Zaplanowany
-              </label>
-              <label class="dash-command-center__filter">
-                <input type="checkbox" data-command-map-filter="finished" checked />
-                <span class="is-finished" aria-hidden="true"></span>
-                Zakończony
-              </label>
-              <label class="dash-command-center__filter">
-                <input type="checkbox" data-command-map-filter="late" checked />
-                <span class="is-late" aria-hidden="true"></span>
-                Nie rozpoczął w czasie
-              </label>
-              <button
-                class="dash-command-center__quick-alert"
-                id="dashCommandOpenQrStopCard"
-                type="button"
-                data-dash-metric="openStartStopYesterday"
-                data-dash-metric-view="list"
-                aria-controls="dashMetricPopover"
-                aria-haspopup="dialog"
-                aria-expanded="false"
-              >
-                <i class="ph ph-warning-circle" aria-hidden="true"></i>
-                <span>Brak QR STOP</span>
-                <strong id="dashCommandOpenQrStopCount">0</strong>
-              </button>
-              <button
-                class="dash-command-center__quick-alert"
-                id="dashCommandPlannedOrdersCard"
-                type="button"
-                data-dash-metric="plannedOrders"
-                data-dash-metric-view="list"
-                aria-controls="dashMetricPopover"
-                aria-haspopup="dialog"
-                aria-expanded="false"
-              >
-                <i class="ph ph-calendar-blank" aria-hidden="true"></i>
-                <span>Plan na dziś</span>
-                <strong id="dashCommandPlannedOrdersCount">0</strong>
-                <span class="dash-command-center__plan-data" id="dashCommandPlannedOrdersStrip">Brak przypisanych zleceń.</span>
-              </button>
-            </div>
-
-            <div class="dash-command-overview" data-dashboard-section="command-center">
-              <article class="dash-command-plan" aria-labelledby="dashCommandPlanTitle">
-                <header>
-                  <h2 id="dashCommandPlanTitle">Plan dnia</h2>
-                </header>
-                <div class="dash-command-plan__body">
-                  <div
-                    class="dash-command-plan__ring"
-                    id="dashCommandPlanRing"
-                    role="progressbar"
-                    aria-label="Postęp planu dnia"
-                    aria-valuemin="0"
-                    aria-valuemax="100"
-                    aria-valuenow="0"
-                  >
-                    <strong id="dashCommandPlanPercent">—%</strong>
+            <div class="dash-command-center__workspace" data-dashboard-section="command-center">
+              <section class="card dash-activity-panel dash-activity-feed-panel" data-dashboard-section="active" aria-labelledby="dashActivityFeedTitle">
+                <header class="dash-activity-feed__header">
+                  <div>
+                    <div class="card-title" id="dashActivityFeedTitle">Aktualności z dziś</div>
+                    <p>Dzisiejsze zdarzenia pracy, zleceń i rejestracji QR.</p>
                   </div>
-                  <div class="dash-command-plan__summary">
-                    <div class="dash-command-plan__headline">
-                      <strong><span id="dashCommandPlanCompleted">0</span> z <span id="dashCommandPlanTotal">0</span> ukończonych</strong>
-                      <span>Postęp planu na dziś</span>
-                    </div>
-                    <div class="dash-command-plan__progress" aria-hidden="true">
-                      <span id="dashCommandPlanProgress"></span>
-                    </div>
-                    <div class="dash-command-plan__footer">
-                      <dl class="dash-command-plan__states">
-                        <div class="is-active"><dt id="dashCommandPlanActive">0</dt><dd>w toku</dd></div>
-                        <div class="is-waiting"><dt id="dashCommandPlanWaiting">0</dt><dd>oczekuje</dd></div>
-                        <div class="is-cancelled"><dt id="dashCommandPlanCancelled">0</dt><dd>anulowanych</dd></div>
-                      </dl>
-                      <button class="dash-command-plan__calendar" type="button" data-route="calendar">
-                        <i class="ph ph-calendar-blank" aria-hidden="true"></i>
-                        Otwórz kalendarz
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </article>
-
-              <article class="dash-command-upcoming" aria-labelledby="dashCommandUpcomingTitle">
-                <header>
-                  <span><i class="ph ph-clock" aria-hidden="true"></i></span>
-                  <h2 id="dashCommandUpcomingTitle">Najbliższe 60 minut</h2>
-                </header>
-                <div class="dash-command-upcoming__list" id="dashCommandUpcomingList">
-                  <p>Brak zaplanowanych rozpoczęć w ciągu godziny.</p>
-                </div>
-                <button class="dash-command-upcoming__footer" type="button" data-route="calendar">
-                  Zobacz pełny kalendarz
-                  <i class="ph ph-arrow-right" aria-hidden="true"></i>
-                </button>
-              </article>
-            </div>
-
-            <div class="dash-command-center__workspace">
-              <article
-                class="dash-command-map"
-                id="dashCommandMapPanel"
-                aria-labelledby="dashCommandMapTitle"
-              >
-                <div class="dash-command-map__topbar">
-                  <div class="dash-command-map__title">
-                    <strong id="dashCommandMapTitle">Mapa operacyjna</strong>
-                    <span class="dash-command-map__count" id="dashCommandMapCount">0 / 0 na mapie</span>
-                  </div>
-                  <div class="dash-command-map__stats">
+                  <div class="dash-activity-feed__header-actions">
                     <button
-                      class="dash-command-map-stat"
-                      id="dashCommandActiveWorkersCard"
+                      class="btn2 secondary dash-refresh-btn dash-refresh-btn--source"
+                      id="dashRefreshBtn"
                       type="button"
-                      data-dash-metric="activeNow"
-                      data-dash-metric-view="list"
-                      aria-controls="dashMetricPopover"
-                      aria-haspopup="dialog"
-                      aria-expanded="false"
+                      aria-label="Odśwież aktualności u źródła"
+                      title="Odśwież aktualności u źródła"
                     >
-                      <i class="ph ph-users-three" aria-hidden="true"></i>
-                      <strong id="dashCommandActiveWorkersCount">0</strong>
-                      <span>aktywnych</span>
-                    </button>
-                    <button
-                      class="dash-command-map-stat"
-                      id="dashCommandActiveObjectsCard"
-                      type="button"
-                      data-dash-metric="activeObjects"
-                      data-dash-metric-view="list"
-                      aria-controls="dashMetricPopover"
-                      aria-haspopup="dialog"
-                      aria-expanded="false"
-                    >
-                      <i class="ph ph-buildings" aria-hidden="true"></i>
-                      <strong id="dashCommandActiveObjectsCount">0</strong>
-                      <span>obiekty</span>
+                      <i class="ph ph-arrows-clockwise" aria-hidden="true"></i>
+                      <span>Odśwież</span>
                     </button>
                   </div>
-                </div>
-                <div class="dash-command-map__host" id="dashCommandMapHost"></div>
-                <div class="dash-command-map__controls">
-                  <button id="dashCommandLegendBtn" type="button" aria-expanded="false">
-                    <i class="ph ph-stack" aria-hidden="true"></i>
-                    Legenda
-                    <i class="ph ph-caret-up" aria-hidden="true"></i>
+                </header>
+
+                <div class="dash-activity-feed__toolbar">
+                  <div class="dash-activity-feed__filters" role="tablist" aria-label="Kategorie aktualności">
+                    <button type="button" role="tab" data-dashboard-activity-filter="all" aria-controls="dashActivityCalendar" aria-selected="true">Wszystko</button>
+                    <button type="button" role="tab" data-dashboard-activity-filter="workers" aria-controls="dashActivityCalendar" aria-selected="false">Pracownicy</button>
+                    <button type="button" role="tab" data-dashboard-activity-filter="orders" aria-controls="dashActivityCalendar" aria-selected="false">Zlecenia</button>
+                    <button type="button" role="tab" data-dashboard-activity-filter="vehicles" aria-controls="dashActivityCalendar" aria-selected="false">Pojazdy</button>
+                    <button type="button" role="tab" data-dashboard-activity-filter="system" aria-controls="dashActivityCalendar" aria-selected="false">System</button>
+                  </div>
+                  <button class="dash-activity-feed__history-link" type="button" data-route="events">
+                    Historia zdarzeń pracy
+                    <i class="ph ph-arrow-square-out" aria-hidden="true"></i>
                   </button>
-                  <button id="dashCommandLocateBtn" type="button">
-                    <i class="ph ph-crosshair" aria-hidden="true"></i>
-                    Wyśrodkuj
+                </div>
+
+                <div class="dash-activity-feed__columns" aria-hidden="true">
+                  <span>Czas</span>
+                  <span>Kto / co</span>
+                  <span>Zdarzenie</span>
+                  <span>Powiązanie</span>
+                  <span>Status</span>
+                </div>
+                <div class="dash-activity-calendar dash-activity-feed" id="dashActivityCalendar" aria-live="polite" aria-busy="true">
+                  <div class="dash-activity-calendar-empty">Ładowanie dzisiejszych aktualności...</div>
+                </div>
+                <footer class="dash-activity-feed__footer">
+                  <span id="dashActivityFeedSummary">Pokazano dzisiejsze zdarzenia operacyjne</span>
+                  <button type="button" data-route="events">
+                    Otwórz historię zdarzeń pracy
+                    <i class="ph ph-arrow-square-out" aria-hidden="true"></i>
                   </button>
-                </div>
-                <div class="dash-command-map__legend" id="dashCommandLegend" hidden>
-                  <span><i class="is-active" aria-hidden="true"></i>W pracy</span>
-                  <span><i class="is-planned" aria-hidden="true"></i>Zaplanowany</span>
-                  <span><i class="is-finished" aria-hidden="true"></i>Zakończony</span>
-                  <span><i class="is-late" aria-hidden="true"></i>Nie rozpoczął w czasie</span>
-                </div>
-              </article>
+                </footer>
+              </section>
 
               <div class="dash-command-side">
-                <article class="dash-command-alerts" aria-labelledby="dashCommandAlertsTitle">
-                  <header>
-                    <span><i class="ph ph-warning" aria-hidden="true"></i></span>
-                    <h2 id="dashCommandAlertsTitle">Wymaga reakcji</h2>
-                    <strong id="dashCommandAlertsCount">0</strong>
-                  </header>
-                  <div class="dash-command-alerts__list" id="dashCommandAlertsList">
-                    <p>Brak bieżących alertów operacyjnych.</p>
+              <article
+                class="dash-command-live"
+                id="dashCommandLivePanel"
+                aria-labelledby="dashCommandLiveTitle"
+              >
+                <header class="dash-command-live__header">
+                  <div>
+                    <h2 id="dashCommandLiveTitle">Operacje na żywo</h2>
+                    <p>Faktyczne rozpoczęcia i zakończenia pracy.</p>
                   </div>
-                </article>
-
-                <article
-                  class="dash-command-live"
-                  id="dashCommandLivePanel"
-                  aria-labelledby="dashCommandLiveTitle"
-                >
-                  <header class="dash-command-live__header">
-                    <div>
-                      <h2 id="dashCommandLiveTitle">Operacje na żywo</h2>
-                      <p>Faktyczne rozpoczęcia i zakończenia. Procent tylko przy potwierdzonym planie.</p>
-                    </div>
+                  <div class="dash-command-live__actions">
                     <span class="dash-command-live__status">
                       <i aria-hidden="true"></i>
-                      <span id="dashCommandLiveCount">0 w toku</span>
+                      <span id="dashCommandLiveCount" aria-live="polite" aria-atomic="true">0 w toku</span>
                     </span>
-                  </header>
-                  <div class="dash-command-live__body" id="dashCommandOperationsHost"></div>
-                  <button
-                    class="dash-command-live__footer"
-                    id="dashCommandAllOperations"
-                    type="button"
-                    aria-haspopup="dialog"
-                    aria-controls="dashCommandOperationsOverlay"
-                    hidden
-                  >
-                    Zobacz wszystkie operacje
-                    <i class="ph ph-arrow-right" aria-hidden="true"></i>
-                  </button>
-                </article>
+                    <button
+                      class="dash-command-live__footer"
+                      id="dashCommandAllOperations"
+                      type="button"
+                      aria-haspopup="dialog"
+                      aria-controls="dashCommandOperationsOverlay"
+                      hidden
+                    >
+                      Pokaż wszystkie
+                      <i class="ph ph-arrow-right" aria-hidden="true"></i>
+                    </button>
+                  </div>
+                </header>
+                <div class="dash-command-live__body" id="dashCommandOperationsHost"></div>
+              </article>
+
+              <article class="dash-command-alerts" aria-labelledby="dashCommandAlertsTitle">
+                <header>
+                  <span><i class="ph ph-warning" aria-hidden="true"></i></span>
+                  <h2 id="dashCommandAlertsTitle">Wymaga reakcji</h2>
+                  <strong id="dashCommandAlertsCount" aria-live="polite" aria-atomic="true">0</strong>
+                </header>
+                <div class="dash-command-alerts__list" id="dashCommandAlertsList" aria-live="polite" aria-atomic="true">
+                  <p class="dash-command-empty-state dash-command-empty-state--success">
+                    <strong>Wszystko pod kontrolą</strong>
+                    <span>Brak bieżących alertów operacyjnych.</span>
+                  </p>
+                </div>
+              </article>
               </div>
             </div>
 
@@ -1201,84 +1064,6 @@ export const portalLayoutTemplate = `
               aria-label="Operacyjny podgląd dnia"
             >
               <article
-                class="card dash-insights-panel dash-insights-panel--objects"
-                id="dashActiveWorkersPanel"
-                aria-labelledby="dashActiveWorkersMapTitle"
-              >
-                <div class="dash-insights-panel-head">
-                  <div>
-                    <h2 class="dash-insights-panel-title" id="dashActiveWorkersMapTitle">Obiekty</h2>
-                    <p class="dash-insights-panel-subtitle">Dzisiejsi pracownicy na obiektach</p>
-                  </div>
-                  <div class="dash-insights-panel-actions">
-                    <span class="dash-insights-count" id="dashActiveWorkersMapCount">0 / 0 na mapie</span>
-                    <button
-                      class="dash-panel-collapse-toggle"
-                      id="dashActiveWorkersPanelToggle"
-                      type="button"
-                      aria-controls="dashActiveWorkersPanelBody"
-                      aria-expanded="true"
-                      aria-label="Zwiń panel obiektów"
-                      title="Zwiń panel obiektów"
-                    >
-                      Zwiń
-                    </button>
-                  </div>
-                </div>
-
-                <div
-                  class="dash-insights-panel-compact"
-                  id="dashActiveWorkersPanelCompact"
-                  aria-live="polite"
-                  hidden
-                >
-                  <strong id="dashActiveWorkersPanelCompactHeadline">Brak pracowników na mapie</strong>
-                  <span id="dashActiveWorkersPanelCompactMeta">W pracy 0 · Zaplanowani 0 · Zakończeni 0 · Alarm 0</span>
-                </div>
-
-                <div class="dash-insights-panel-body" id="dashActiveWorkersPanelBody">
-                  <div class="dash-active-workers-map-shell" id="dashActiveWorkersMapHome">
-                    <div
-                      class="dash-active-workers-map is-loading"
-                      id="dashActiveWorkersMap"
-                      role="region"
-                      tabindex="0"
-                      aria-label="Mapa pozycji GPS i zaplanowanych lokalizacji dzisiejszych pracowników"
-                      aria-describedby="dashActiveWorkersMapStatus"
-                      aria-busy="true"
-                    >
-                      <div class="dash-active-workers-map-empty">Ładowanie mapy...</div>
-                    </div>
-                    <button
-                      class="dash-active-workers-map-expand"
-                      id="dashActiveWorkersMapExpand"
-                      type="button"
-                      aria-controls="dashActiveWorkersMapOverlay"
-                      aria-haspopup="dialog"
-                      disabled
-                    >
-                      Powiększ mapę
-                    </button>
-                  </div>
-
-                  <div class="dash-active-workers-map-legend" aria-label="Legenda statusów pracowników">
-                    <span><i class="is-active" aria-hidden="true"></i>W pracy</span>
-                    <span><i class="is-planned" aria-hidden="true"></i>Zaplanowany</span>
-                    <span><i class="is-finished" aria-hidden="true"></i>Zakończony</span>
-                    <span><i class="is-late" aria-hidden="true"></i>Nie rozpoczął w czasie</span>
-                  </div>
-
-                  <p class="dash-active-workers-map-status" id="dashActiveWorkersMapStatus" role="status" aria-live="polite">
-                    Alarm pojawia się po przekroczeniu planu START o więcej niż 10 minut. Pozycja pochodzi z GPS, a przy jego braku z lokalizacji zadania.
-                  </p>
-
-                  <ul class="dash-active-workers-location-list" id="dashActiveWorkersLocationList" aria-label="Dzisiejsi pracownicy z pozycją GPS lub lokalizacją zadania">
-                    <li class="dash-active-workers-location-empty">Brak pozycji GPS i lokalizacji zaplanowanych zadań.</li>
-                  </ul>
-                </div>
-              </article>
-
-              <article
                 class="card dash-insights-panel dash-insights-panel--progress"
                 id="dashServiceProgressPanel"
                 aria-labelledby="dashServiceProgressTitle"
@@ -1376,124 +1161,6 @@ export const portalLayoutTemplate = `
                   </ul>
                 </div>
               </article>
-            </div>
-
-            <section
-              class="dash-active-workers-map-overlay"
-              id="dashActiveWorkersMapOverlay"
-              hidden
-              aria-hidden="true"
-            >
-              <div
-                class="dash-active-workers-map-dialog"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="dashActiveWorkersMapDialogTitle"
-                aria-describedby="dashActiveWorkersMapDialogDescription"
-              >
-                <div class="dash-active-workers-map-dialog-head">
-                  <div>
-                    <span class="dash-active-workers-map-dialog-eyebrow">Mapa pracowników</span>
-                    <h2 id="dashActiveWorkersMapDialogTitle">Pozycje pracowników</h2>
-                    <p id="dashActiveWorkersMapDialogDescription">
-                      Zielone pinezki oznaczają osoby w pracy, czerwone zakończony dzień, a niebieskie przydział do zadania na dziś. Pozycja pochodzi z GPS lub lokalizacji zadania.
-                    </p>
-                  </div>
-                  <div class="dash-active-workers-map-dialog-actions">
-                    <span class="dash-insights-count" id="dashActiveWorkersMapDialogCount">0 / 0 na mapie</span>
-                    <button class="dash-active-workers-map-dialog-close" id="dashActiveWorkersMapClose" type="button">
-                      Zamknij
-                    </button>
-                  </div>
-                </div>
-                <div class="dash-active-workers-map-modal-host" id="dashActiveWorkersMapModalHost"></div>
-                <div class="dash-active-workers-map-dialog-foot">
-                  <div class="dash-active-workers-map-legend" aria-label="Legenda statusów pracowników">
-                    <span><i class="is-active" aria-hidden="true"></i>W pracy</span>
-                    <span><i class="is-planned" aria-hidden="true"></i>Zaplanowany</span>
-                    <span><i class="is-finished" aria-hidden="true"></i>Zakończony</span>
-                    <span><i class="is-late" aria-hidden="true"></i>Nie rozpoczął w czasie</span>
-                  </div>
-                  <span>Przeciągnij mapę lub użyj kółka myszy, aby zmienić widok.</span>
-                </div>
-              </div>
-            </section>
-
-            <div class="card dash-feedback dash-activity-panel" data-dashboard-section="active">
-              <div class="card-title-row">
-                <div class="card-title" id="dashActivityTitle">Widok dnia dzisiejszego</div>
-                <div class="dash-activity-actions">
-                  <button
-                    class="btn2 secondary dash-refresh-btn dash-refresh-btn--source"
-                    id="dashRefreshBtn"
-                    type="button"
-                    aria-label="Odśwież dane pulpitu u źródła"
-                    title="Odśwież dane pulpitu u źródła"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <path d="M20 11a8 8 0 0 0-14.2-5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-                      <path d="M6 5H3V2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-                      <path d="M4 13a8 8 0 0 0 14.2 5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-                      <path d="M18 19h3v3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                    <span>Odśwież</span>
-                  </button>
-                  <button
-                    class="btn2 secondary dash-refresh-btn dash-refresh-btn--icon"
-                    id="dashActivitySettingsBtn"
-                    type="button"
-                    aria-label="Ustaw widok panelu"
-                    aria-expanded="false"
-                    title="Ustaw widok panelu"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" stroke="currentColor" stroke-width="2.1"/>
-                      <path d="M12 2.5v3" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
-                      <path d="M12 18.5v3" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
-                      <path d="M4.5 12h-3" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
-                      <path d="M22.5 12h-3" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
-                      <path d="M6.7 6.7 4.6 4.6" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
-                      <path d="m19.4 19.4-2.1-2.1" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
-                      <path d="m17.3 6.7 2.1-2.1" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
-                      <path d="m4.6 19.4 2.1-2.1" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <div class="dash-activity-view-popover" id="dashActivityViewPopover" hidden>
-                <div class="dash-activity-view-popover-title">Widoczność panelu</div>
-                <button class="dash-activity-view-option" type="button" data-dash-activity-view="today-calendar" aria-pressed="true">
-                  <span class="dash-activity-view-option-name">Oś dnia dzisiejszego</span>
-                  <span class="dash-activity-view-option-note">Kalendarz z aktualnym czasem na środku</span>
-                </button>
-                <button class="dash-activity-view-option" type="button" data-dash-activity-view="active-list" aria-pressed="false">
-                  <span class="dash-activity-view-option-name">Lista aktywnych pracowników</span>
-                  <span class="dash-activity-view-option-note">Dotychczasowy widok aktywnych osób</span>
-                </button>
-              </div>
-              <div class="dash-last-refresh" id="dashLastRefresh">Ostatnie odświeżenie: -</div>
-
-              <div class="dash-activity-calendar" id="dashActivityCalendar" data-dash-activity-view-panel="today-calendar">
-                <div class="dash-activity-calendar-empty">Ładowanie widoku dnia...</div>
-              </div>
-
-              <div class="dash-events" data-dash-activity-view-panel="active-list" hidden>
-                <div class="dash-events-head">
-                  <div>Osoba</div>
-                  <div>Wpisy</div>
-                  <div>Klient</div>
-                  <div>Aktywna strefa</div>
-                  <div class="ta-right">Czas</div>
-                </div>
-
-                <div class="list dash-events-list" id="dashEventsList">
-                  <div class="list-row dash-events-row">
-                    <div class="muted">-</div><div class="muted">-</div><div class="muted">-</div>
-                    <div class="muted">-</div>
-                    <div class="muted ta-right">-</div>
-                  </div>
-                </div>
-              </div>
             </div>
 
           </div>

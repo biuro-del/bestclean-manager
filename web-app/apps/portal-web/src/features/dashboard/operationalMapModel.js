@@ -10,6 +10,16 @@ export const OPERATIONAL_MAP_STATUS = Object.freeze({
   LATE: 'late',
 })
 
+const OPERATIONAL_MAP_TRUSTED_QR_GPS_ACTIONS = new Set([
+  'START_GPS',
+  'STOP_GPS',
+  'CLEAN_START_GPS',
+  'CLEAN_STOP_GPS',
+])
+const OPERATIONAL_MAP_QR_GPS_MAX_AGE_MS = 24 * 60 * 60 * 1000
+const OPERATIONAL_MAP_QR_GPS_FUTURE_SKEW_MS = 5 * 60 * 1000
+const OPERATIONAL_MAP_QR_GPS_MAX_SPREAD_METERS = 250
+
 const FEMALE_GENDER_VALUES = new Set([
   'f',
   'female',
@@ -158,45 +168,335 @@ export function resolveOperationalMapStatus({
   }
 }
 
+function operationalMapCoordinatePair(rawLat, rawLng) {
+  const lat = Number(rawLat)
+  const lng = Number(rawLng)
+  const valid =
+    rawLat !== null &&
+    rawLat !== undefined &&
+    rawLat !== '' &&
+    rawLng !== null &&
+    rawLng !== undefined &&
+    rawLng !== '' &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180 &&
+    !(lat === 0 && lng === 0)
+
+  return valid ? { lat, lng } : null
+}
+
+export function operationalMapStoredFacilityCoordinates(location = {}) {
+  return operationalMapCoordinatePair(location?.plannedLat, location?.plannedLng)
+}
+
+function operationalMapDistanceMeters(left, right) {
+  const earthRadiusMeters = 6371000
+  const toRadians = (value) => (Number(value) * Math.PI) / 180
+  const latDelta = toRadians(right.lat - left.lat)
+  const lngDelta = toRadians(right.lng - left.lng)
+  const leftLat = toRadians(left.lat)
+  const rightLat = toRadians(right.lat)
+  const haversine =
+    Math.sin(latDelta / 2) ** 2 +
+    Math.cos(leftLat) * Math.cos(rightLat) * Math.sin(lngDelta / 2) ** 2
+
+  return 2 * earthRadiusMeters * Math.asin(Math.min(1, Math.sqrt(haversine)))
+}
+
+function operationalMapQrGpsEntry(location = {}, nowTs = Date.now()) {
+  if (String(location?.positionKind ?? '').trim().toLowerCase() !== 'gps') {
+    return null
+  }
+
+  if (location?.gpsTrustedSource !== true) {
+    return null
+  }
+
+  const gpsAction = String(location?.gpsAction ?? '').trim().toUpperCase()
+  if (!OPERATIONAL_MAP_TRUSTED_QR_GPS_ACTIONS.has(gpsAction)) {
+    return null
+  }
+
+  const timestamp = Number(location?.gpsTimestamp ?? location?.positionTimestamp ?? 0)
+  const ageMs = Number(nowTs) - timestamp
+  if (
+    !Number.isFinite(timestamp) ||
+    timestamp <= 0 ||
+    ageMs > OPERATIONAL_MAP_QR_GPS_MAX_AGE_MS ||
+    ageMs < -OPERATIONAL_MAP_QR_GPS_FUTURE_SKEW_MS
+  ) {
+    return null
+  }
+
+  const coordinates = operationalMapCoordinatePair(location?.lat, location?.lng)
+  return coordinates ? { ...coordinates, timestamp } : null
+}
+
+export function resolveOperationalMapGroupPoint(group = {}, options = {}) {
+  const locations = Array.isArray(group?.locations) ? group.locations : []
+  const storedCoordinates = locations
+    .map((location) => operationalMapStoredFacilityCoordinates(location))
+    .filter(Boolean)
+
+  if (storedCoordinates.length) {
+    return {
+      lat: storedCoordinates.reduce((sum, point) => sum + point.lat, 0) / storedCoordinates.length,
+      lng: storedCoordinates.reduce((sum, point) => sum + point.lng, 0) / storedCoordinates.length,
+      source: 'stored-facility',
+    }
+  }
+
+  const clientId = String(group?.clientId ?? locations[0]?.clientId ?? '').trim()
+  const objectLabel = String(
+    group?.objectLabel || locations[0]?.plannedObjectLabel || locations[0]?.objectLabel || '',
+  ).trim()
+
+  if (!clientId || !isOperationalMapRecognizedObjectLabel(objectLabel)) {
+    return null
+  }
+
+  const nowTs = Number(options?.nowTs ?? Date.now())
+  const liveCoordinates = locations
+    .map((location) => operationalMapQrGpsEntry(location, nowTs))
+    .filter(Boolean)
+
+  if (!liveCoordinates.length) {
+    return null
+  }
+
+  const centroid = {
+    lat: liveCoordinates.reduce((sum, point) => sum + point.lat, 0) / liveCoordinates.length,
+    lng: liveCoordinates.reduce((sum, point) => sum + point.lng, 0) / liveCoordinates.length,
+  }
+  const maxRadiusMeters = liveCoordinates.reduce(
+    (maxDistance, point) => Math.max(maxDistance, operationalMapDistanceMeters(centroid, point)),
+    0,
+  )
+  const maxSpreadMeters = liveCoordinates.reduce(
+    (maxDistance, point, pointIndex) => Math.max(
+      maxDistance,
+      ...liveCoordinates
+        .slice(pointIndex + 1)
+        .map((otherPoint) => operationalMapDistanceMeters(point, otherPoint)),
+    ),
+    0,
+  )
+  if (maxSpreadMeters > OPERATIONAL_MAP_QR_GPS_MAX_SPREAD_METERS) {
+    return null
+  }
+
+  return {
+    ...centroid,
+    source: liveCoordinates.length === 1 ? 'last-qr-gps' : 'last-qr-gps-centroid',
+    sampleCount: liveCoordinates.length,
+    latestTimestamp: Math.max(...liveCoordinates.map((point) => point.timestamp)),
+    maxRadiusMeters,
+    maxSpreadMeters,
+  }
+}
+
+function operationalMapPreferredObjectLabel(location = {}) {
+  const isLiveQrGps = String(location?.positionKind ?? '').trim().toLowerCase() === 'gps'
+  return String(
+    isLiveQrGps
+      ? location?.objectLabel || location?.plannedObjectLabel || ''
+      : location?.plannedObjectLabel || location?.objectLabel || '',
+  ).trim()
+}
+
+function operationalMapObjectLabelSlug(value) {
+  return String(value ?? '')
+    .trim()
+    .toLocaleLowerCase('pl-PL')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+export function isOperationalMapRecognizedObjectLabel(value) {
+  const normalizedLabel = operationalMapObjectLabelSlug(value)
+  return Boolean(
+    normalizedLabel &&
+      !normalizedLabel.startsWith('brak-obiektu') &&
+      normalizedLabel !== 'obiekt-bez-nazwy' &&
+      normalizedLabel !== 'zaplanowany-obiekt' &&
+      normalizedLabel !== 'unknown' &&
+      normalizedLabel !== 'unassigned' &&
+      normalizedLabel !== 'nieprzypisany' &&
+      !normalizedLabel.startsWith('qr-') &&
+      !/^bc\d+$/.test(normalizedLabel)
+  )
+}
+
 export function operationalMapObjectKey(location = {}) {
   const clientId = String(location?.clientId ?? '').trim()
-  return clientId ? `client:${clientId}` : ''
+  const objectLabel = operationalMapPreferredObjectLabel(location)
+  if (!isOperationalMapRecognizedObjectLabel(objectLabel)) {
+    return ''
+  }
+
+  const storedCoordinates = operationalMapStoredFacilityCoordinates(location)
+  if (storedCoordinates) {
+    const { lat, lng } = storedCoordinates
+    return clientId
+      ? `client:${clientId}:site:${lat.toFixed(5)},${lng.toFixed(5)}`
+      : `site:${lat.toFixed(5)},${lng.toFixed(5)}:label:${operationalMapObjectLabelSlug(objectLabel)}`
+  }
+
+  if (!clientId) {
+    return ''
+  }
+
+  const label = operationalMapObjectLabelSlug(objectLabel)
+
+  return label ? `client:${clientId}:label:${label}` : `client:${clientId}`
 }
 
 export function groupOperationalMapLocations(locations = []) {
   const groupsByKey = new Map()
+  const clientObjectBuckets = new Map()
   const standalone = []
 
-  ;(Array.isArray(locations) ? locations : []).forEach((location) => {
-    const key = operationalMapObjectKey(location)
-    if (!key) {
-      standalone.push(location)
-      return
-    }
-
+  const addGroupLocation = (key, location, objectLabel = operationalMapPreferredObjectLabel(location)) => {
     if (!groupsByKey.has(key)) {
       groupsByKey.set(key, {
         key,
         clientId: String(location?.clientId ?? '').trim(),
-        objectLabel: String(
-          location?.plannedObjectLabel || location?.objectLabel || 'Obiekt bez nazwy',
-        ).trim() || 'Obiekt bez nazwy',
+        objectLabel: objectLabel || 'Obiekt bez nazwy',
         locations: [],
       })
     }
     groupsByKey.get(key).locations.push(location)
-  })
+  }
 
-  const groups = []
-  groupsByKey.forEach((group) => {
-    if (group.locations.length < 2) {
-      standalone.push(...group.locations)
+  ;(Array.isArray(locations) ? locations : []).forEach((location) => {
+    const clientId = String(location?.clientId ?? '').trim()
+    const objectLabel = operationalMapPreferredObjectLabel(location)
+    const labelSlug = operationalMapObjectLabelSlug(objectLabel)
+    if (!clientId || !isOperationalMapRecognizedObjectLabel(objectLabel)) {
+      const directKey = operationalMapObjectKey(location)
+      if (directKey) {
+        addGroupLocation(directKey, location, objectLabel)
+      } else {
+        standalone.push(location)
+      }
       return
     }
-    groups.push(group)
+
+    const identityKey = `client:${clientId}:label:${labelSlug}`
+    if (!clientObjectBuckets.has(identityKey)) {
+      clientObjectBuckets.set(identityKey, {
+        clientId,
+        objectLabel,
+        locations: [],
+      })
+    }
+    clientObjectBuckets.get(identityKey).locations.push(location)
   })
 
+  clientObjectBuckets.forEach((bucket, identityKey) => {
+    const storedCoordinateGroups = new Map()
+    const locationsWithoutStoredCoordinates = []
+
+    bucket.locations.forEach((location) => {
+      const storedCoordinates = operationalMapStoredFacilityCoordinates(location)
+      if (!storedCoordinates) {
+        locationsWithoutStoredCoordinates.push(location)
+        return
+      }
+      const coordinateKey = `${storedCoordinates.lat.toFixed(5)},${storedCoordinates.lng.toFixed(5)}`
+      if (!storedCoordinateGroups.has(coordinateKey)) {
+        storedCoordinateGroups.set(coordinateKey, [])
+      }
+      storedCoordinateGroups.get(coordinateKey).push(location)
+    })
+
+    if (!storedCoordinateGroups.size) {
+      bucket.locations.forEach((location) => addGroupLocation(identityKey, location, bucket.objectLabel))
+      return
+    }
+
+    if (storedCoordinateGroups.size === 1) {
+      const [[coordinateKey, storedLocations]] = [...storedCoordinateGroups.entries()]
+      const groupKey = `client:${bucket.clientId}:site:${coordinateKey}`
+      ;[...storedLocations, ...locationsWithoutStoredCoordinates].forEach((location) =>
+        addGroupLocation(groupKey, location, bucket.objectLabel),
+      )
+      return
+    }
+
+    storedCoordinateGroups.forEach((storedLocations, coordinateKey) => {
+      const groupKey = `client:${bucket.clientId}:site:${coordinateKey}`
+      storedLocations.forEach((location) => addGroupLocation(groupKey, location, bucket.objectLabel))
+    })
+    locationsWithoutStoredCoordinates.forEach((location) => {
+      standalone.push(location)
+    })
+  })
+
+  const groups = [...groupsByKey.values()]
+
   return { groups, standalone }
+}
+
+export function resolveOperationalMapObjectTone(locations = []) {
+  const statuses = new Set(
+    (Array.isArray(locations) ? locations : [])
+      .map((location) => location?.workStatus)
+      .filter((status) => Object.values(OPERATIONAL_MAP_STATUS).includes(status)),
+  )
+
+  if (statuses.has(OPERATIONAL_MAP_STATUS.LATE)) {
+    return OPERATIONAL_MAP_STATUS.LATE
+  }
+  if (statuses.has(OPERATIONAL_MAP_STATUS.ACTIVE)) {
+    return OPERATIONAL_MAP_STATUS.ACTIVE
+  }
+  return OPERATIONAL_MAP_STATUS.PLANNED
+}
+
+function normalizeOperationalMapSearchText(value) {
+  return String(value ?? '')
+    .trim()
+    .toLocaleLowerCase('pl-PL')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+export function filterOperationalMapLocations(
+  locations = [],
+  { mode = 'active', query = '' } = {},
+) {
+  const normalizedMode = ['active', 'late', 'objects'].includes(mode)
+    ? mode
+    : 'active'
+  const normalizedQuery = normalizeOperationalMapSearchText(query)
+
+  return (Array.isArray(locations) ? locations : []).filter((location) => {
+    const status = Object.values(OPERATIONAL_MAP_STATUS).includes(location?.workStatus)
+      ? location.workStatus
+      : OPERATIONAL_MAP_STATUS.PLANNED
+    if (normalizedMode !== 'objects' && status !== normalizedMode) {
+      return false
+    }
+    if (!normalizedQuery) {
+      return true
+    }
+
+    return normalizeOperationalMapSearchText([
+      location?.workerName,
+      location?.workerKey,
+      location?.workerId,
+      location?.objectLabel,
+      location?.plannedObjectLabel,
+      location?.clientId,
+    ].filter(Boolean).join(' ')).includes(normalizedQuery)
+  })
 }
 
 export function buildOperationalMapObjectLiveSummary(locations = []) {

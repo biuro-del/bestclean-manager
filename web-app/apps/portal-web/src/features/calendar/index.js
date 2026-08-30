@@ -3298,19 +3298,37 @@ export function createCalendarFeature(ctx) {
     return normalized
   }
   
-  async function ordersSyncRemoteTimelineOrders({ render = false } = {}) {
+  async function ordersSyncRemoteTimelineOrders({
+    render = false,
+    showError = true,
+    propagateError = false,
+  } = {}) {
     const orgId = ordersActiveOrganizationId()
     const sessionKey = ordersRemoteSessionKey()
     if (!orgId || !sessionKey) {
       return ordersListSourceOrders()
     }
 
-    if (calendarTimelineOrdersRemotePromise && calendarTimelineOrdersRemotePromiseKey === sessionKey) {
-      const syncedOrders = await calendarTimelineOrdersRemotePromise
-      if (render) {
-        ordersRenderScheduleOrderViews()
+    const resolveRemoteOrders = async (remotePromise) => {
+      try {
+        const syncedOrders = await remotePromise
+        if (render) {
+          ordersRenderScheduleOrderViews()
+        }
+        return syncedOrders
+      } catch (error) {
+        if (showError) {
+          showPortalErrorNotice('Nie udało się pobrać zleceń z serwera', error)
+        }
+        if (propagateError) {
+          throw error
+        }
+        return ordersListSourceOrders()
       }
-      return syncedOrders
+    }
+
+    if (calendarTimelineOrdersRemotePromise && calendarTimelineOrdersRemotePromiseKey === sessionKey) {
+      return resolveRemoteOrders(calendarTimelineOrdersRemotePromise)
     }
 
     const generation = calendarTimelineOrdersRemoteGeneration
@@ -3331,8 +3349,7 @@ export function createCalendarFeature(ctx) {
         }
         appState.calendarTimelineOrdersRemoteLoaded = false
         console.warn('[portal/schedule-orders] remote load failed', error)
-        showPortalErrorNotice('Nie udało się pobrać zleceń z serwera', error)
-        return ordersListSourceOrders()
+        throw error
       } finally {
         if (calendarTimelineOrdersRemotePromise === request) {
           appState.calendarTimelineOrdersRemoteLoading = false
@@ -3343,11 +3360,7 @@ export function createCalendarFeature(ctx) {
     })()
     calendarTimelineOrdersRemotePromise = request
     calendarTimelineOrdersRemotePromiseKey = sessionKey
-    const syncedOrders = await calendarTimelineOrdersRemotePromise
-    if (render) {
-      ordersRenderScheduleOrderViews()
-    }
-    return syncedOrders
+    return resolveRemoteOrders(calendarTimelineOrdersRemotePromise)
   }
   
   async function ordersDeleteTimelineOrdersById(orderIds = [], options = {}) {
