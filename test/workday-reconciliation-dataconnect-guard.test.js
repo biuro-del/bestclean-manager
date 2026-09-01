@@ -71,7 +71,7 @@ test('Reidentify Event jest jednorazowym linkiem, a Insert flow pozostaje bez no
   assert.ok(reidentify.indexOf('targetEvent:') < reidentify.indexOf('event_update('))
 })
 
-test('REST bulk-delete blokuje Event i Workday w tej samej transakcji przed ocena powiazan', () => {
+test('REST bulk-delete blokuje powiazane sesje bez jawnej zgody i pozwala usunac caly Workday', () => {
   const guardStart = backendSource.indexOf('async function assertPortalEventDeleteOutsideReconciliation')
   const deleteStart = backendSource.indexOf('async function deletePortalEventsByIds', guardStart)
   const handlerStart = backendSource.indexOf('async function handlePortalEventsRequest', deleteStart)
@@ -87,12 +87,20 @@ test('REST bulk-delete blokuje Event i Workday w tej samej transakcji przed ocen
   assert.match(guard, /select event_id, workday_id, start_event_id, end_event_id[\s\S]*order by event_id asc\s*for update/)
   assert.doesNotMatch(guard, /nullif\(btrim\(workday_id\), ''\) is not null/)
   assert.match(guard, /select workday_id[\s\S]*order by workday_id asc\s*for update/)
-  assert.match(guard, /const hasLinkedEvent = lockedEvents\.some/)
+  assert.match(guard, /const protectedWorkdayIds = new Set/)
+  assert.match(guard, /const allowedWholeWorkdayIds = new Set/)
+  assert.match(guard, /const blockedWorkdayIds = \[\.\.\.protectedWorkdayIds\]\.filter/)
+  assert.match(guard, /if \(!blockedWorkdayIds\.length\) return/)
 
   const beginIndex = deletion.indexOf("await client.query('begin')")
   const guardIndex = deletion.indexOf('await assertPortalEventDeleteOutsideReconciliation')
   const firstDeleteIndex = deletion.indexOf('await deletePortalEventsFromTableByColumns')
   assert.ok(beginIndex >= 0 && beginIndex < guardIndex && guardIndex < firstDeleteIndex)
+  assert.match(deletion, /assertPortalEventDeleteOutsideReconciliation\(client, orgId, ids, wholeWorkdayIds\)/)
+  assert.match(deletion, /deletePortalWorkdayStopProposalRows/)
+  assert.ok(deletion.indexOf('deletePortalWorkdayStopProposalRows') < deletion.lastIndexOf("'public.workday'"))
   assert.doesNotMatch(handler, /await assertPortalEventDeleteOutsideReconciliation/)
+  assert.match(handler, /collectPortalWholeWorkdayDeleteIds/)
+  assert.match(handler, /deletePortalEventsByIds\(client, orgId, eventIds, \{ wholeWorkdayIds \}\)/)
   assert.match(handler, /client\.query\('rollback'\)/)
 })

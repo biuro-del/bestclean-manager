@@ -1110,6 +1110,21 @@ export function createEventsFeature(ctx) {
     return ''
   }
 
+  function eventWholeWorkdayDeletionId(row = {}) {
+    if (eventRecordKind(row) !== EVENT_RECORD_KINDS.WORKDAY) {
+      return ''
+    }
+
+    return String(
+      eventReconciliationWorkdayId(row) ||
+        row?.workdayId ||
+        row?.linkedWorkdayId ||
+        (String(row?.historySourceKind ?? '').trim().toLowerCase() === 'workday'
+          ? row?.eventId ?? row?.id
+          : ''),
+    ).trim()
+  }
+
   function eventReconciliationDayKey(row = {}) {
     const directDayKey = [
       row?.businessDateYmd,
@@ -1337,7 +1352,11 @@ export function createEventsFeature(ctx) {
   }
 
   function eventCanDelete(row) {
-    return !eventReconciliationWorkdayId(row) && eventDeletionCandidateIds(row).length > 0
+    const wholeWorkdayId = eventWholeWorkdayDeletionId(row)
+    return Boolean(
+      wholeWorkdayId ||
+        (!eventReconciliationWorkdayId(row) && eventDeletionCandidateIds(row).length > 0),
+    )
   }
 
   function eventRowFingerprintKey(row) {
@@ -1998,7 +2017,8 @@ export function createEventsFeature(ctx) {
   }
 
   async function deleteEventByCandidateIds(orgId, row) {
-    if (eventReconciliationWorkdayId(row)) {
+    const wholeWorkdayId = eventWholeWorkdayDeletionId(row)
+    if (eventReconciliationWorkdayId(row) && !wholeWorkdayId) {
       throw new Error(EVENT_RECONCILIATION_REQUIRED_MESSAGE)
     }
     const candidateIds = eventDeletionCandidateIds(row)
@@ -2008,7 +2028,12 @@ export function createEventsFeature(ctx) {
 
     const errors = []
     try {
-      const result = await forceDeletePortalEvents(orgId, [row], candidateIds)
+      const result = await forceDeletePortalEvents(
+        orgId,
+        [row],
+        candidateIds,
+        wholeWorkdayId ? { wholeWorkdayIds: [wholeWorkdayId] } : {},
+      )
       if (result?.deletedAny) {
         return candidateIds
       }
@@ -2017,7 +2042,14 @@ export function createEventsFeature(ctx) {
       if (status === 401 || status === 403) {
         throw error
       }
+      if (wholeWorkdayId) {
+        throw error
+      }
       errors.push(error)
+    }
+
+    if (wholeWorkdayId) {
+      throw new Error('Nie udalo sie usunac calego dnia pracy.')
     }
 
     let deletedAny = false
@@ -3691,7 +3723,10 @@ export function createEventsFeature(ctx) {
     if (deleteButton) {
       deleteButton.style.display = canDeleteEvents() ? '' : 'none'
       deleteButton.disabled = !eventCanDelete(item)
-      setEventEditorButtonLabel(deleteButton, 'Usuń zdarzenie')
+      setEventEditorButtonLabel(
+        deleteButton,
+        eventWholeWorkdayDeletionId(item) ? 'Usuń dzień pracy' : 'Usuń zdarzenie',
+      )
     }
 
     eventEditorSyncTimeSummary()
@@ -4410,6 +4445,7 @@ export function createEventsFeature(ctx) {
     count = 1,
     displayId = '',
     skippedCount = 0,
+    wholeWorkdayCount = 0,
   } = {}) {
     ensureEventOverlaysMountedToBody()
     const overlay = document.getElementById('evDeleteConfirmOverlay')
@@ -4430,11 +4466,26 @@ export function createEventsFeature(ctx) {
 
     const normalizedCount = Math.max(1, Number(count) || 1)
     const isBulk = normalizedCount > 1
-    title.textContent = isBulk ? 'Usunąć wybrane zdarzenia?' : 'Usunąć zdarzenie?'
+    const normalizedWholeWorkdayCount = Math.min(
+      normalizedCount,
+      Math.max(0, Number(wholeWorkdayCount) || 0),
+    )
+    const isSingleWholeWorkday = !isBulk && normalizedWholeWorkdayCount === 1
+    title.textContent = isBulk
+      ? 'Usunąć wybrane zdarzenia?'
+      : isSingleWholeWorkday
+        ? 'Usunąć cały dzień pracy?'
+        : 'Usunąć zdarzenie?'
     description.textContent = isBulk
-      ? `${normalizedCount} zaznaczonych zdarzeń zostanie trwale usuniętych z ewidencji pracy.`
-      : 'Zdarzenie zostanie trwale usunięte z ewidencji pracy.'
-    detailLabel.textContent = isBulk ? 'Liczba wybranych rekordów' : 'Identyfikator zdarzenia'
+      ? `${normalizedCount} zaznaczonych rekordów zostanie trwale usuniętych z ewidencji pracy.${normalizedWholeWorkdayCount ? ` Całe dni pracy: ${normalizedWholeWorkdayCount}.` : ''}`
+      : isSingleWholeWorkday
+        ? 'Cała sesja dnia pracy oraz jej powiązane wpisy zostaną trwale usunięte z ewidencji.'
+        : 'Zdarzenie zostanie trwale usunięte z ewidencji pracy.'
+    detailLabel.textContent = isBulk
+      ? 'Liczba wybranych rekordów'
+      : isSingleWholeWorkday
+        ? 'Identyfikator dnia pracy'
+        : 'Identyfikator zdarzenia'
     detailValue.textContent = isBulk ? String(normalizedCount) : String(displayId || '-')
     if (warning) {
       warning.textContent =
@@ -4442,7 +4493,14 @@ export function createEventsFeature(ctx) {
           ? `Tej operacji nie można cofnąć. Pominięte rekordy bez identyfikatora: ${skippedCount}.`
           : 'Tej operacji nie można cofnąć.'
     }
-    setEventEditorButtonLabel(acceptButton, isBulk ? `Usuń ${normalizedCount} zdarzenia` : 'Usuń zdarzenie')
+    setEventEditorButtonLabel(
+      acceptButton,
+      isBulk
+        ? `Usuń ${normalizedCount} rekordy`
+        : isSingleWholeWorkday
+          ? 'Usuń dzień pracy'
+          : 'Usuń zdarzenie',
+    )
     overlay.style.display = 'flex'
 
     return new Promise((resolve) => {
@@ -4465,7 +4523,8 @@ export function createEventsFeature(ctx) {
     if (!editedRow) {
       return
     }
-    if (eventReconciliationWorkdayId(editedRow)) {
+    const wholeWorkdayId = eventWholeWorkdayDeletionId(editedRow)
+    if (eventReconciliationWorkdayId(editedRow) && !wholeWorkdayId) {
       showTransientNotice(EVENT_RECONCILIATION_REQUIRED_MESSAGE)
       await openEventWorkdayReconciliation(editedRow)
       return
@@ -4478,7 +4537,10 @@ export function createEventsFeature(ctx) {
     const targetFingerprint = eventRowFingerprintKey(editedRow)
     const targetDisplayId = eventId || eventDeletionCandidateIds(editedRow)[0] || '-'
 
-    const confirmed = await openEventDeleteConfirmation({ displayId: targetDisplayId })
+    const confirmed = await openEventDeleteConfirmation({
+      displayId: targetDisplayId,
+      wholeWorkdayCount: wholeWorkdayId ? 1 : 0,
+    })
     if (!confirmed) {
       return
     }
@@ -4507,7 +4569,7 @@ export function createEventsFeature(ctx) {
     } finally {
       if (deleteButton) {
         deleteButton.disabled = false
-        setEventEditorButtonLabel(deleteButton, 'Usuń zdarzenie')
+        setEventEditorButtonLabel(deleteButton, wholeWorkdayId ? 'Usuń dzień pracy' : 'Usuń zdarzenie')
       }
     }
   }
@@ -4541,6 +4603,7 @@ export function createEventsFeature(ctx) {
     const confirmed = await openEventDeleteConfirmation({
       count: selectedRows.length,
       skippedCount,
+      wholeWorkdayCount: selectedRows.filter((row) => eventWholeWorkdayDeletionId(row)).length,
     })
     if (!confirmed) {
       return

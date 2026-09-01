@@ -9269,6 +9269,15 @@ function collectPortalEventDeleteIds(body = {}) {
   return [...new Set(ids)].slice(0, 300)
 }
 
+function collectPortalWholeWorkdayDeleteIds(body = {}) {
+  const values = Array.isArray(body?.wholeWorkdayIds)
+    ? body.wholeWorkdayIds
+    : [body?.wholeWorkdayIds]
+  return [
+    ...new Set(values.map((value) => sanitizePortalEventDeleteId(value)).filter(Boolean)),
+  ].slice(0, 100)
+}
+
 async function deletePortalEventsFromTableByColumns(client, orgId, relationName, columns, ids) {
   if (!ids.length || !(await databaseRelationExists(client, relationName))) {
     return 0
@@ -9287,7 +9296,50 @@ async function deletePortalEventsFromTableByColumns(client, orgId, relationName,
   return result.rowCount || 0
 }
 
-async function assertPortalEventDeleteOutsideReconciliation(client, orgId, ids) {
+async function deletePortalWorkdayStopProposalRows(client, orgId, workdayIds) {
+  const counts = { audit: 0, proposal: 0 }
+  if (
+    !workdayIds.length ||
+    !(await databaseRelationExists(client, 'public.workday_stop_proposal')) ||
+    !(await databaseColumnExists(client, 'public.workday_stop_proposal', 'proposal_id')) ||
+    !(await databaseColumnExists(client, 'public.workday_stop_proposal', 'workday_id'))
+  ) {
+    return counts
+  }
+
+  const proposalResult = await client.query(
+    `select proposal_id
+       from public.workday_stop_proposal
+      where org_id = $1 and workday_id = any($2::varchar[])
+      order by proposal_id asc
+      for update`,
+    [orgId, workdayIds],
+  )
+  const proposalIds = (proposalResult.rows || [])
+    .map((row) => sanitizePortalEventDeleteId(row?.proposal_id))
+    .filter(Boolean)
+  if (!proposalIds.length) {
+    return counts
+  }
+
+  counts.audit = await deletePortalEventsFromTableByColumns(
+    client,
+    orgId,
+    'public.workday_stop_proposal_audit',
+    ['proposal_id'],
+    proposalIds,
+  )
+  counts.proposal = await deletePortalEventsFromTableByColumns(
+    client,
+    orgId,
+    'public.workday_stop_proposal',
+    ['proposal_id'],
+    proposalIds,
+  )
+  return counts
+}
+
+async function assertPortalEventDeleteOutsideReconciliation(client, orgId, ids, wholeWorkdayIds = []) {
   if (!ids.length) return
 
   // Share the organization-level reconciliation lock before taking row locks.
@@ -9328,8 +9380,19 @@ async function assertPortalEventDeleteOutsideReconciliation(client, orgId, ids) 
       for update`,
     [orgId, workdayLookupIds],
   )
-  const hasLinkedEvent = lockedEvents.some((row) => normalizeText(row?.workday_id))
-  if (!hasLinkedEvent && !lockedWorkdayResult.rows?.[0]) return
+  const protectedWorkdayIds = new Set([
+    ...linkedWorkdayIds,
+    ...(lockedWorkdayResult.rows || [])
+      .map((row) => normalizeText(row?.workday_id))
+      .filter(Boolean),
+  ])
+  const allowedWholeWorkdayIds = new Set(
+    wholeWorkdayIds.map((value) => sanitizePortalEventDeleteId(value)).filter(Boolean),
+  )
+  const blockedWorkdayIds = [...protectedWorkdayIds].filter(
+    (workdayId) => !allowedWholeWorkdayIds.has(workdayId),
+  )
+  if (!blockedWorkdayIds.length) return
 
   const error = new Error(
     'Sesja powiazana z dniem pracy nie moze zostac usunieta przez stary edytor. Uzyj dialogu „Przeglad i naprawa dnia”.',
@@ -9340,11 +9403,20 @@ async function assertPortalEventDeleteOutsideReconciliation(client, orgId, ids) 
   throw error
 }
 
-async function deletePortalEventsByIds(client, orgId, ids) {
+async function deletePortalEventsByIds(client, orgId, ids, options = {}) {
+  const wholeWorkdayIds = [
+    ...new Set(
+      (Array.isArray(options?.wholeWorkdayIds) ? options.wholeWorkdayIds : [options?.wholeWorkdayIds])
+        .map((value) => sanitizePortalEventDeleteId(value))
+        .filter(Boolean),
+    ),
+  ]
   const counts = {
     workdayPause: 0,
     event: 0,
     backupCycle: 0,
+    workdayStopProposalAudit: 0,
+    workdayStopProposal: 0,
     workday: 0,
   }
 
@@ -9353,7 +9425,7 @@ async function deletePortalEventsByIds(client, orgId, ids) {
   }
 
   await client.query('begin')
-  await assertPortalEventDeleteOutsideReconciliation(client, orgId, ids)
+  await assertPortalEventDeleteOutsideReconciliation(client, orgId, ids, wholeWorkdayIds)
   counts.workdayPause = await deletePortalEventsFromTableByColumns(
     client,
     orgId,
@@ -9375,6 +9447,13 @@ async function deletePortalEventsByIds(client, orgId, ids) {
     ['cycle_id', 'start_event_id', 'end_event_id'],
     ids,
   )
+  const stopProposalCounts = await deletePortalWorkdayStopProposalRows(
+    client,
+    orgId,
+    wholeWorkdayIds,
+  )
+  counts.workdayStopProposalAudit = stopProposalCounts.audit
+  counts.workdayStopProposal = stopProposalCounts.proposal
   counts.workday = await deletePortalEventsFromTableByColumns(
     client,
     orgId,
@@ -9422,6 +9501,16 @@ async function handlePortalEventsRequest(req, res) {
     sendApiError(res, 400, 'INVALID_EVENT_IDS', 'Brak identyfikatorow zdarzen do usuniecia.')
     return
   }
+  const wholeWorkdayIds = collectPortalWholeWorkdayDeleteIds(body)
+  if (wholeWorkdayIds.some((workdayId) => !eventIds.includes(workdayId))) {
+    sendApiError(
+      res,
+      400,
+      'INVALID_WHOLE_WORKDAY_IDS',
+      'Kazdy caly dzien pracy musi wystepowac na liscie usuwanych identyfikatorow.',
+    )
+    return
+  }
 
   const token = parseBearerToken(req)
   if (!token) {
@@ -9443,12 +9532,13 @@ async function handlePortalEventsRequest(req, res) {
   try {
     client = await connectDbClient()
     await requirePortalEventAccess(client, orgId, requesterUid)
-    const counts = await deletePortalEventsByIds(client, orgId, eventIds)
+    const counts = await deletePortalEventsByIds(client, orgId, eventIds, { wholeWorkdayIds })
     const deletedTotal = Object.values(counts).reduce((sum, value) => sum + (Number(value) || 0), 0)
     sendJson(res, 200, {
       ok: true,
       data: {
         deletedIds: eventIds,
+        wholeWorkdayIds,
         counts,
         deletedTotal,
       },

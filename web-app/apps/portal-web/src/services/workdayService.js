@@ -203,7 +203,7 @@ function slimPortalEventDeleteRow(row = {}) {
   }
 }
 
-export async function forceDeletePortalEvents(orgId, rows = [], ids = []) {
+export async function forceDeletePortalEvents(orgId, rows = [], ids = [], options = {}) {
   const normalizedOrgId = String(orgId ?? '').trim()
   if (!normalizedOrgId) {
     throw new Error('Brak identyfikatora organizacji.')
@@ -212,6 +212,13 @@ export async function forceDeletePortalEvents(orgId, rows = [], ids = []) {
   const normalizedRows = (Array.isArray(rows) ? rows : [rows]).map((row) => slimPortalEventDeleteRow(row)).filter(Boolean)
   const normalizedIds = [
     ...new Set((Array.isArray(ids) ? ids : [ids]).map((value) => String(value ?? '').trim()).filter(Boolean)),
+  ]
+  const wholeWorkdayIds = [
+    ...new Set(
+      (Array.isArray(options?.wholeWorkdayIds) ? options.wholeWorkdayIds : [options?.wholeWorkdayIds])
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean),
+    ),
   ]
   if (!normalizedIds.length && !normalizedRows.length) {
     throw new Error('Brak identyfikatora zdarzenia do usuniecia.')
@@ -225,6 +232,7 @@ export async function forceDeletePortalEvents(orgId, rows = [], ids = []) {
       orgId: normalizedOrgId,
       ids: normalizedIds,
       rows: normalizedRows,
+      wholeWorkdayIds,
     }),
   })
 
