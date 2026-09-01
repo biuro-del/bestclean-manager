@@ -5208,3 +5208,28 @@ Granice przed aktywacja:
 - Wymagane jest przywrocenie istniejacej wspolnej funkcji
   `centralRegistrationBeforeUserCreated` jako Firebase Auth `beforeCreate`,
   rejestracja App Check, sekret HMAC, migracja oraz rollout App Hosting.
+
+Data: 2026-09-01
+Autor: AI Codex
+Temat: Lokalny P1 przywrocenia statusow propozycji STOP w Historii aplikacji mobilnej
+Powod:
+- Frontend wysylal `operation: "STATUS"` dla widocznych dni pracy, ale biezaca linia
+  backendu nie obslugiwala tej operacji i kierowala zadanie do walidacji zapisu.
+- Po bledzie aplikacja nie widziala istniejacego `PENDING`, przez co mogla ponownie
+  pokazac pracownikowi formularz propozycji STOP.
+Dodano lokalnie:
+- Ograniczony odczyt `STATUS` dla 1-120 `workdayIds`, tokenowo zawezony do
+  organizacji, kanonicznego `worker_id`, loginu Workday i widocznych dni.
+- Odczyt nie otwiera transakcji, nie blokuje rekordow i niczego nie zapisuje.
+- Repozytorium zwraca najnowsza propozycje dla dnia wraz z `workdayId` i danymi
+  stanow `PENDING`, `APPROVED`, `CORRECTED`, `REJECTED` i `SUPERSEDED`.
+Weryfikacja:
+- Testy celowane API i repozytorium: 31/31 PASS.
+- `node --check` i `git diff --check`: PASS.
+- Szeroki przebieg testow w izolowanym worktree przeszedl poza 4 testami Vite,
+  ktore nie mialy lokalnego pakietu `vite`; identyczne pliki testu, konfiguracji
+  i lockfile uruchomione w worktree z zaleznosciami przeszly 4/4 PASS.
+Granice i kolejnosc wydania:
+- Nie wykonano zapisu do bazy, migracji, commita, pusha ani wdrozenia.
+- Bezpieczna kolejnosc to najpierw addytywny backend `STATUS` i odczytowy smoke,
+  a dopiero potem frontend fail-closed. Produkcja wymaga osobnej zgody wydania.

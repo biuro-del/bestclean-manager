@@ -3,6 +3,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const { createWorkdayStopProposalApi, dateFilter, portalMembershipCanApprove, WorkdayStopProposalError } = require('../workday-stop-proposal-api')
+const { createWorkdayStopProposalRepository } = require('../workday-stop-proposal-repository')
 
 const START = '2026-08-11T06:00:00.000Z'
 const PROPOSED_STOP = '2026-08-11T14:00:00.000Z'
@@ -290,6 +291,189 @@ test('endpoint mobilny bierze organizacj? z resolvera tokenu, a orgId body tylko
   assert.equal(sent[0][1].proposal.proposalId, 'wdsp_deterministic')
   assert.equal(sent[0][1].proposal.status, 'PENDING')
   assert.equal(sent[0][1].proposal.organizationId, undefined)
+  assert.equal(sent[0][1].proposal.workdayId, undefined)
+})
+
+test('odczyt STATUS jest tokenowo zawężony, nie otwiera transakcji i zwraca PENDING', async () => {
+  const calls = []
+  const sent = []
+  const client = {
+    query: async (sql) => calls.push(sql),
+    release: () => calls.push('release'),
+  }
+  const api = createApi({
+    connectDbClient: async () => client,
+    readJsonBody: async () => ({
+      operation: 'STATUS',
+      orgId: 'niezaufany-org',
+      workerLogin: 'niezaufany-pracownik@example.com',
+      workdayId: 'wd-attempted-write',
+      proposedStopLocal: '2026-08-11T16:00',
+      clientActionId: 'must-not-write',
+      workdayIds: ['wd-1', 'wd-1', 'wd-2'],
+    }),
+    resolveMobileOrganization: async (_client, decoded, bodyOrgId) => {
+      calls.push(['org', decoded.uid, bodyOrgId])
+      return { orgId: 'token-org', membership: { worker_id: 'W-1' } }
+    },
+    resolveMobileWorker: async (_client, orgId, body) => {
+      calls.push(['worker', orgId, body])
+      return { login: 'worker@example.com', workerId: 'W-1' }
+    },
+    createRepository: () => ({
+      schemaReady: async () => true,
+      listForMobileWorkerWorkdays: async (input) => {
+        calls.push(['statuses', input])
+        return [pendingProposal({ org_id: 'token-org', workday_id: 'wd-1' })]
+      },
+      lockWorkday: async () => { throw new Error('STATUS must not lock Workday.') },
+      insertProposal: async () => { throw new Error('STATUS must not insert a proposal.') },
+    }),
+    sendMobileJson: (_res, status, body) => sent.push({ status, body }),
+  })
+
+  await api.handleMobile({ method: 'POST', headers: {} }, {}, { pathname: '/api/mobile/workday-stop-proposals' })
+
+  assert.deepEqual(calls.find((item) => Array.isArray(item) && item[0] === 'org'), ['org', 'worker-uid', ''])
+  assert.deepEqual(calls.find((item) => Array.isArray(item) && item[0] === 'worker'), ['worker', 'token-org', {}])
+  assert.deepEqual(calls.find((item) => Array.isArray(item) && item[0] === 'statuses'), [
+    'statuses',
+    { orgId: 'token-org', workerId: 'W-1', workerLogin: 'worker@example.com', workdayIds: ['wd-1', 'wd-2'] },
+  ])
+  assert.equal(calls.includes('begin'), false)
+  assert.equal(calls.includes('rollback'), false)
+  assert.equal(sent[0].status, 200)
+  assert.deepEqual(sent[0].body.proposals.map((proposal) => proposal.workdayId), ['wd-1'])
+  assert.equal(sent[0].body.proposals[0].status, 'PENDING')
+})
+
+test('odczyt STATUS zwraca APPROVED wraz z kanonicznym officialStopAt', async () => {
+  const sent = []
+  const api = createApi({
+    readJsonBody: async () => ({ operation: 'STATUS', workdayIds: ['wd-approved'] }),
+    createRepository: () => ({
+      schemaReady: async () => true,
+      listForMobileWorkerWorkdays: async () => [pendingProposal({
+        workday_id: 'wd-approved',
+        status: 'APPROVED',
+        proposed_stop_at: '2026-08-03T17:00:00.000Z',
+        proposed_stop_local: '2026-08-03T19:00',
+        official_stop_at: '2026-08-03T17:00:00.000Z',
+        reviewed_at: '2026-08-25T11:00:00.000Z',
+        decision_note: 'Godzina zatwierdzona przez koordynatora.',
+      })],
+    }),
+    sendMobileJson: (_res, status, body) => sent.push({ status, body }),
+  })
+
+  await api.handleMobile({ method: 'POST', headers: {} }, {}, { pathname: '/api/mobile/workday-stop-proposals' })
+
+  assert.equal(sent[0].status, 200)
+  assert.deepEqual(sent[0].body.proposals, [
+    {
+      proposalId: 'p-1',
+      workdayId: 'wd-approved',
+      status: 'APPROVED',
+      proposedStopAt: '2026-08-03T17:00:00.000Z',
+      proposedStopLocal: '2026-08-03T19:00',
+      timeZone: 'Europe/Warsaw',
+      employeeNote: '',
+      decisionNote: 'Godzina zatwierdzona przez koordynatora.',
+      officialStopAt: '2026-08-03T17:00:00.000Z',
+      submittedAt: '',
+      reviewedAt: '2026-08-25T11:00:00.000Z',
+    },
+  ])
+})
+
+test('odczyt STATUS zwraca CORRECTED wraz z officialStopAt, reviewedAt i decisionNote', async () => {
+  const sent = []
+  const api = createApi({
+    readJsonBody: async () => ({ operation: 'STATUS', workdayIds: ['wd-corrected'] }),
+    createRepository: () => ({
+      schemaReady: async () => true,
+      listForMobileWorkerWorkdays: async () => [pendingProposal({
+        workday_id: 'wd-corrected',
+        status: 'CORRECTED',
+        proposed_stop_at: '2026-08-03T17:00:00.000Z',
+        proposed_stop_local: '2026-08-03T19:00',
+        official_stop_at: '2026-08-03T17:15:00.000Z',
+        reviewed_at: '2026-08-25T11:05:00.000Z',
+        decision_note: 'Godzina skorygowana przez koordynatora.',
+      })],
+    }),
+    sendMobileJson: (_res, status, body) => sent.push({ status, body }),
+  })
+
+  await api.handleMobile({ method: 'POST', headers: {} }, {}, { pathname: '/api/mobile/workday-stop-proposals' })
+
+  assert.equal(sent[0].status, 200)
+  assert.deepEqual(sent[0].body.proposals[0], {
+    proposalId: 'p-1',
+    workdayId: 'wd-corrected',
+    status: 'CORRECTED',
+    proposedStopAt: '2026-08-03T17:00:00.000Z',
+    proposedStopLocal: '2026-08-03T19:00',
+    timeZone: 'Europe/Warsaw',
+    employeeNote: '',
+    decisionNote: 'Godzina skorygowana przez koordynatora.',
+    officialStopAt: '2026-08-03T17:15:00.000Z',
+    submittedAt: '',
+    reviewedAt: '2026-08-25T11:05:00.000Z',
+  })
+})
+
+test('nieprawidłowy STATUS odrzuca błędne lub ponad-120 ID przed połączeniem, schema i odczytem', async () => {
+  for (const [workdayIds, expectedCode] of [
+    ['wd-1', 'WORKDAY_STOP_PROPOSAL_STATUS_IDS_REQUIRED'],
+    [Array.from({ length: 121 }, () => 'wd-1'), 'WORKDAY_STOP_PROPOSAL_STATUS_IDS_INVALID'],
+  ]) {
+    const sent = []
+    let connections = 0
+    let schemaChecks = 0
+    let statusReads = 0
+    const api = createApi({
+      readJsonBody: async () => ({ operation: 'STATUS', workdayIds }),
+      connectDbClient: async () => {
+        connections += 1
+        return { query: async () => {}, release: () => {} }
+      },
+      createRepository: () => ({
+        schemaReady: async () => { schemaChecks += 1; return true },
+        listForMobileWorkerWorkdays: async () => { statusReads += 1; return [] },
+      }),
+      sendMobileApiError: (_res, status, code) => sent.push({ status, code }),
+    })
+
+    await api.handleMobile({ method: 'POST', headers: {} }, {}, { pathname: '/api/mobile/workday-stop-proposals' })
+
+    assert.deepEqual(sent, [{ status: 400, code: expectedCode }])
+    assert.equal(connections, 0)
+    assert.equal(schemaChecks, 0)
+    assert.equal(statusReads, 0)
+  }
+})
+
+test('STATUS repository requires canonical worker ID even when the login text matches', async () => {
+  const calls = []
+  const repository = createWorkdayStopProposalRepository({
+    query: async (sql, params) => {
+      calls.push({ sql, params })
+      return { rows: params[1] === 'W-1' ? [pendingProposal()] : [] }
+    },
+  })
+
+  const ownerRows = await repository.listForMobileWorkerWorkdays({
+    orgId: 'best-clean', workerId: 'W-1', workerLogin: 'worker@example.com', workdayIds: ['wd-1'],
+  })
+  const otherWorkerRows = await repository.listForMobileWorkerWorkdays({
+    orgId: 'best-clean', workerId: 'W-2', workerLogin: 'worker@example.com', workdayIds: ['wd-1'],
+  })
+
+  assert.equal(ownerRows.length, 1)
+  assert.equal(otherWorkerRows.length, 0)
+  assert.match(calls[0].sql, /p\.worker_id = \$2::text/)
+  assert.deepEqual(calls[1].params, ['best-clean', 'W-2', 'worker@example.com', ['wd-1']])
 })
 
 test('brak tokenu zwraca 401 przed odczytem body, po??czeniem z baz? lub zapisem propozycji', async () => {
