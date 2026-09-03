@@ -1374,3 +1374,110 @@ final result: passed
 - [x] Verify desktop, 1024 px, keyboard focus, click behavior, tests, lint, and build.
 
 final result: passed
+
+---
+
+# Design QA - Dashboard requires-action alignment (2026-09-03)
+
+## Reference and verification state
+
+- Source visual truth: `C:\Users\dosta\AppData\Local\Temp\codex-clipboard-3e6b4f7d-b652-4d75-8073-ab78f80f4d3b.png` (619 x 315 px), together with the user's explicit instruction to move every `Przejdź` action to one right-aligned column.
+- Browser-rendered implementation: `C:\Users\dosta\cleanzi-version-4.0\.qa\dashboard-requires-action-aligned.png` (570 x 257 px).
+- Browser viewport: 1920 x 855 CSS px at device scale factor 1; responsive checks at 1280 x 900, 768 x 900, and 430 x 900 CSS px.
+- Density normalization: the focused source card and implementation card were compared at approximately the same 570 px CSS width without resampling.
+- State: authenticated dashboard with three live alerts in `Wymaga reakcji`.
+
+## Full-view and focused comparison evidence
+
+- The source and implementation were opened together in one comparison input. The explicit requested delta is present: all three action buttons now share the same right edge instead of following the varying copy width.
+- Browser measurement at 1920 px reports `actionRight = 1832.48 px` for every row; at 1280 px every action ends at 1226 px, and at 768 px every action ends at 722 px.
+- No description overlaps its action and no horizontal document overflow appears at the checked desktop and tablet widths.
+- At 430 px the existing mobile simplification continues to hide the action label; this behavior is unchanged by the scoped desktop/tablet alignment fix.
+
+## Required fidelity surfaces
+
+- Fonts and typography: the existing Manrope family, weights, sizes, line heights, truncation, and text hierarchy are unchanged.
+- Spacing and layout rhythm: each alert row fills the available list width and uses a stable icon, flexible copy, and right action grid. Existing padding, dividers, radii, and vertical rhythm remain unchanged.
+- Colors and visual tokens: warning colors, navy text, violet action border, white background, and subtle dividers retain the current portal tokens.
+- Image quality and asset fidelity: existing Phosphor icons are preserved; no image, custom SVG, CSS drawing, or placeholder asset was introduced.
+- Copy and content: all dynamic titles, counts, descriptions, and the `Przejdź` label remain data-driven and unchanged. The live count differs from the source screenshot because current dashboard data is used.
+
+## Findings
+
+- No actionable P0, P1, or P2 mismatch remains for the requested alignment.
+- All three rendered alert rows remain enabled, and the final browser log check reports zero errors.
+
+## Comparison history
+
+1. Initial measurement found content-sized rows: their right edges varied between 1628.73 px and 1659.52 px, moving each action according to description length.
+2. The row grid was expanded to 100% width and its action column was pinned to the end while preserving the existing alert markup and behavior.
+3. The post-fix screenshot and responsive measurements confirm one shared action line, no copy overlap, and no new page overflow.
+
+## Technical QA
+
+- Focused dashboard and System UI tests: 16/16 passed.
+- Full test suite: 803/803 passed.
+- ESLint: passed; only the existing Babel large-file optimization note was emitted.
+- Production build: passed; only the existing chunk-size advisory was emitted.
+
+## Implementation checklist
+
+- [x] Stretch every requires-action row across the list width.
+- [x] Keep icon and copy tracks stable while pinning the action to the right.
+- [x] Preserve labels, data, icons, click behavior, and mobile treatment.
+- [x] Verify the authenticated render, responsive widths, browser errors, tests, lint, and build.
+
+final result: passed
+
+---
+
+# Design QA - Missing GPS alert icon (2026-09-03)
+
+## Reference and verification state
+
+- Source visual truth: `C:\Users\dosta\AppData\Local\Temp\codex-clipboard-fd6507d5-6d98-4b00-aa2b-25c7ff3c17f6.png` (565 x 69 px), plus the explicit instruction to add an icon to the empty alert badge.
+- Browser-rendered implementation: `C:\Users\dosta\cleanzi-version-4.0\.qa\dashboard-missing-gps-row-icon.png` (530 x 64 px).
+- Full-card implementation: `C:\Users\dosta\cleanzi-version-4.0\.qa\dashboard-missing-gps-icon.png` (570 x 257 px).
+- Browser viewport: 1920 x 855 CSS px at device scale factor 1.
+- Density normalization: the source and focused implementation row were compared at native density without resampling; the small width difference comes from the source crop including additional surrounding space.
+- State: authenticated dashboard with the live `Brak GPS 8 osoby` warning.
+
+## Full-view and focused comparison evidence
+
+- The source and focused implementation were opened together in one comparison input. The previously empty 32 px warning badge now contains a recognizable map-pin glyph.
+- Browser inspection reports class `ph ph-map-pin`, Phosphor font content, and a rendered 16 x 16 px icon.
+- The full-card capture confirms that the new icon matches the size, warning color, alignment, and circular background of the other two alert icons.
+
+## Required fidelity surfaces
+
+- Fonts and typography: alert labels, metadata, action type, wrapping, weights, and line heights are unchanged.
+- Spacing and layout rhythm: the existing badge, row grid, divider, right-aligned action column, padding, and card proportions are unchanged.
+- Colors and visual tokens: the icon inherits the established orange warning foreground and pale-orange badge background.
+- Image quality and asset fidelity: the implementation uses the installed Phosphor `ph-map-pin` icon rather than the unavailable `ph-map-pin-slash` class; no custom SVG, CSS drawing, text glyph, or raster placeholder was introduced.
+- Copy and content: dynamic GPS count and description remain unchanged; the live count differs from the source screenshot because current portal data is rendered.
+
+## Findings
+
+- No actionable P0, P1, or P2 mismatch remains for the missing icon.
+- The alert row remains enabled and the final browser log check reports zero errors.
+
+## Comparison history
+
+1. The source showed an empty warning circle because `ph-map-pin-slash` had no definition in the installed Phosphor 2.1.2 regular icon stylesheet.
+2. The alert was switched to the available, semantically appropriate `ph-map-pin` icon while keeping all layout and behavior intact.
+3. The post-fix focused and full-card captures confirm a sharp, centered icon consistent with neighboring alert badges.
+
+## Technical QA
+
+- Focused dashboard test: 6/6 passed.
+- Full test suite: 804/804 passed.
+- ESLint: passed; only the existing Babel large-file optimization note was emitted.
+- Production build: passed; only the existing chunk-size advisory was emitted.
+
+## Implementation checklist
+
+- [x] Replace the unsupported icon class with an installed Phosphor icon.
+- [x] Preserve badge dimensions, warning styling, labels, counts, and alert routing.
+- [x] Verify the rendered glyph, comparison evidence, browser errors, tests, lint, and build.
+
+final result: passed

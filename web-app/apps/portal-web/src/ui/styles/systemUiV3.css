@@ -646,7 +646,6 @@
   grid-row: auto !important;
   width: 100% !important;
   min-width: 0 !important;
-  height: 100% !important;
   min-height: 0 !important;
   margin: 0 !important;
   padding: 0 !important;
@@ -657,9 +656,21 @@
   box-shadow: none !important;
 }
 
+#portalRoot #view-dashboard .dash-command-side > :where(.dash-command-live, .dash-command-alerts) {
+  height: auto !important;
+}
+
 #portalRoot #view-dashboard .dash-command-center__workspace > .dash-activity-panel.dash-activity-feed-panel {
   grid-area: auto !important;
   align-self: stretch !important;
+  height: 100% !important;
+}
+
+@media (min-width: 1400px) {
+  #portalRoot #view-dashboard .dash-command-center__workspace > .dash-command-side {
+    align-self: stretch !important;
+    height: 100%;
+  }
 }
 
 #portalRoot #view-dashboard :where(.dash-activity-feed__header, .dash-command-live__header, .dash-command-alerts > header) {
@@ -856,9 +867,18 @@
   font-size: 9.5px !important;
 }
 
-#portalRoot #view-dashboard .dash-command-live__body,
+#portalRoot #view-dashboard .dash-command-live__body {
+  flex: 1 1 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
 #portalRoot #view-dashboard .dash-command-live__body > .dash-insights-panel-body {
-  height: calc(100% - 64px) !important;
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  height: 100% !important;
   min-height: 0 !important;
   padding: 0 !important;
   overflow: hidden !important;
@@ -915,9 +935,41 @@
 }
 
 #portalRoot #view-dashboard .dash-command-live .dash-command-operation__progress {
-  height: 5px !important;
+  height: 10px !important;
+  margin-top: 2px !important;
+  border: 1px solid #cbd8e8 !important;
   border-radius: 999px !important;
-  background: #e9eef4 !important;
+  background: #dce6f2 !important;
+  box-shadow: inset 0 1px 2px rgba(36, 56, 88, 0.12) !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-command-operation__progress-fill {
+  background: linear-gradient(90deg, #087ffd, #3b96ff) !important;
+  box-shadow: 0 0 7px rgba(8, 127, 253, 0.3);
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-command-operation__progress-late {
+  border-right-color: #d94b38 !important;
+  background-color: #fff0ec !important;
+  background-image: repeating-linear-gradient(
+    135deg,
+    #ef5b45 0,
+    #ef5b45 3px,
+    transparent 3px,
+    transparent 7px
+  ) !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-command-operation__progress-value {
+  display: none !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-command-operation.is-completed .dash-command-operation__progress-fill {
+  background: linear-gradient(90deg, #18a865, #38c985) !important;
+}
+
+#portalRoot #view-dashboard .dash-command-live .dash-command-operation__progress.is-indeterminate .dash-command-operation__progress-fill {
+  background: linear-gradient(90deg, rgba(8, 127, 253, 0), #70b7ff 24%, #087ffd 56%, rgba(8, 127, 253, 0)) !important;
 }
 
 #portalRoot #view-dashboard .dash-command-alerts > header {
@@ -952,10 +1004,14 @@
 }
 
 #portalRoot #view-dashboard .dash-command-alert {
+  width: 100% !important;
+  grid-template-columns: 32px minmax(0, 1fr) auto !important;
+  gap: 9px !important;
   min-height: 64px !important;
   padding: 9px 0 !important;
   border-bottom: 1px solid var(--clz-ui-border) !important;
   background: transparent !important;
+  box-sizing: border-box !important;
 }
 
 #portalRoot #view-dashboard .dash-command-alert__icon {
@@ -964,6 +1020,7 @@
 }
 
 #portalRoot #view-dashboard .dash-command-alert__go {
+  justify-self: end !important;
   min-width: 0 !important;
   min-height: 30px !important;
   padding: 0 8px !important;
@@ -1005,6 +1062,39 @@
   #portalRoot #view-dashboard .dash-command-side {
     grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr);
     grid-template-rows: minmax(330px, 430px);
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1180px) {
+  #portalRoot .header {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    height: auto !important;
+    padding: 10px 12px !important;
+  }
+
+  #portalRoot .topbar-search {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  #portalRoot .topbar-search-input,
+  #portalRoot input.topbar-search-input {
+    min-width: 0 !important;
+  }
+
+  #portalRoot .header-right {
+    flex-wrap: wrap !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  #portalRoot .header-right > *,
+  #portalRoot :where(.organization-chip, .subscription-chip, .user-chip) {
+    min-width: 0 !important;
+    max-width: 100%;
   }
 }
 

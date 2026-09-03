@@ -5786,7 +5786,7 @@ export function createDashboardFeature(ctx) {
     if (missingGpsRows.length > 0) {
       alerts.push({
         tone: 'warning',
-        icon: 'ph-map-pin-slash',
+        icon: 'ph-map-pin',
         title: `Brak GPS ${missingGpsRows.length} ${missingGpsRows.length === 1 ? 'osoba' : 'osoby'}`,
         meta: missingGpsRows.length === 1
           ? dashboardResolveWorkerLabel(missingGpsRows[0])

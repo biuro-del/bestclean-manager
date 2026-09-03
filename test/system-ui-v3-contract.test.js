@@ -102,6 +102,85 @@ test('System UI V3 ma jawne warianty tabletowe i mobilne', () => {
   assert.match(mobileBlock, /(?:\.content-shell|\.sidebar|\.main|input|table)/)
 })
 
+test('tabletowy nagłówek mieści pola w szerokości strony', () => {
+  const styles = readRequired(systemStylesPath)
+  const tabletHeaderIndex = styles.indexOf('@media (min-width: 761px) and (max-width: 1180px)')
+  const nextBreakpointIndex = styles.indexOf('@media (max-width: 920px)', tabletHeaderIndex)
+
+  assert.ok(tabletHeaderIndex >= 0, 'Brak breakpointu chroniącego tabletowy nagłówek przed przepełnieniem')
+  assert.ok(nextBreakpointIndex > tabletHeaderIndex)
+
+  const tabletHeaderBlock = styles.slice(tabletHeaderIndex, nextBreakpointIndex)
+  assert.match(tabletHeaderBlock, /#portalRoot \.header\s*\{[\s\S]*?flex-direction\s*:\s*column\s*!important\s*;/)
+  assert.match(tabletHeaderBlock, /#portalRoot \.topbar-search\s*\{[\s\S]*?width\s*:\s*100%\s*!important\s*;[\s\S]*?min-width\s*:\s*0\s*!important\s*;/)
+  assert.match(tabletHeaderBlock, /#portalRoot \.header-right\s*\{[\s\S]*?flex-wrap\s*:\s*wrap\s*!important\s*;[\s\S]*?width\s*:\s*100%\s*!important\s*;/)
+  assert.match(tabletHeaderBlock, /\.organization-chip, \.subscription-chip, \.user-chip[\s\S]*?min-width\s*:\s*0\s*!important\s*;/)
+})
+
+test('prawa kolumna dashboardu nie rośnie ponad wysokość workspace', () => {
+  const styles = readRequired(systemStylesPath)
+
+  assert.match(
+    styles,
+    /\.dash-command-side\s*>\s*:where\(\.dash-command-live, \.dash-command-alerts\)\s*\{[\s\S]*?height\s*:\s*auto\s*!important\s*;/,
+  )
+  assert.match(
+    styles,
+    /@media \(min-width: 1400px\)\s*\{[\s\S]*?\.dash-command-center__workspace\s*>\s*\.dash-command-side\s*\{[\s\S]*?align-self\s*:\s*stretch\s*!important\s*;[\s\S]*?height\s*:\s*100%\s*;/,
+  )
+})
+
+test('paski postępu operacji na żywo pozostają wyraźnie widoczne', () => {
+  const styles = readRequired(systemStylesPath)
+
+  assert.match(
+    styles,
+    /\.dash-command-live \.dash-command-operation__progress\s*\{[\s\S]*?height\s*:\s*10px\s*!important\s*;[\s\S]*?border\s*:[^;]+![iI]mportant\s*;[\s\S]*?background\s*:\s*#dce6f2\s*!important\s*;/,
+  )
+  assert.match(
+    styles,
+    /\.dash-command-live \.dash-command-operation__progress-fill\s*\{[\s\S]*?background\s*:\s*linear-gradient\([^;]+\)\s*!important\s*;/,
+  )
+  assert.match(
+    styles,
+    /\.dash-command-live \.dash-command-operation__progress-value\s*\{[\s\S]*?display\s*:\s*none\s*!important\s*;/,
+  )
+})
+
+test('lista operacji na żywo wykorzystuje pełną wysokość pod nagłówkiem', () => {
+  const styles = readRequired(systemStylesPath)
+  const innerBodySelector = '#portalRoot #view-dashboard .dash-command-live__body > .dash-insights-panel-body {'
+  const innerBodyStart = styles.indexOf(innerBodySelector)
+  const innerBodyBlock = styles.slice(innerBodyStart, styles.indexOf('}', innerBodyStart) + 1)
+
+  assert.match(
+    styles,
+    /\.dash-command-live__body\s*\{[\s\S]*?flex\s*:\s*1 1 auto\s*!important\s*;[\s\S]*?height\s*:\s*auto\s*!important\s*;/,
+  )
+  assert.match(
+    styles,
+    /\.dash-command-live__body\s*>\s*\.dash-insights-panel-body\s*\{[\s\S]*?height\s*:\s*100%\s*!important\s*;/,
+  )
+  assert.ok(innerBodyStart >= 0)
+  assert.doesNotMatch(
+    innerBodyBlock,
+    /height\s*:\s*calc\(100%\s*-\s*64px\)/,
+  )
+})
+
+test('przyciski alertów są wyrównane do prawej krawędzi bloku', () => {
+  const styles = readRequired(systemStylesPath)
+
+  assert.match(
+    styles,
+    /\.dash-command-alert\s*\{[\s\S]*?width\s*:\s*100%\s*!important\s*;[\s\S]*?grid-template-columns\s*:\s*32px minmax\(0, 1fr\) auto\s*!important\s*;/,
+  )
+  assert.match(
+    styles,
+    /\.dash-command-alert__go\s*\{[\s\S]*?justify-self\s*:\s*end\s*!important\s*;/,
+  )
+})
+
 test('dashboard zaczyna workspace od aktualności i trzyma live przed alertami w prawej kolumnie', () => {
   const layout = readRequired(layoutPath)
 

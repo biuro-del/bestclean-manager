@@ -82,3 +82,18 @@ test('kandydat zachowuje produkcyjną kolejność: pracownik, potem miejsce real
     /<strong>\$\{escapeHtml\(workerLabel\)\}<\/strong>\s*<small>\$\{escapeHtml\(primaryLabel\)\}<\/small>/,
   )
 })
+
+test('alert Brak GPS korzysta z dostepnej ikony lokalizacji', () => {
+  const dashboard = fs.readFileSync(
+    path.join(root, 'web-app', 'apps', 'portal-web', 'src', 'features', 'dashboard', 'index.js'),
+    'utf8',
+  )
+  const phosphor = fs.readFileSync(
+    path.join(root, 'web-app', 'node_modules', '@phosphor-icons', 'web', 'src', 'regular', 'style.css'),
+    'utf8',
+  )
+
+  assert.match(dashboard, /icon: 'ph-map-pin',[\s\S]*title: `Brak GPS/)
+  assert.doesNotMatch(dashboard, /icon: 'ph-map-pin-slash',[\s\S]*title: `Brak GPS/)
+  assert.match(phosphor, /\.ph\.ph-map-pin:before\s*\{/)
+})
