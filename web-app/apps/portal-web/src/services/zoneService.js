@@ -1,8 +1,8 @@
 import {
   deleteZoneForOrg,
-  insertZoneWithRequiredVisitForOrg,
+  isPlatformSession,
   platformAuthHeaders,
-  updateZoneWithRequiredVisitForOrg,
+  platformContextHeaders,
   zonesForOrg,
   zonesPageForOrg,
 } from './platformDataConnectService'
@@ -117,6 +117,51 @@ async function parsePortalApiResponse(response) {
   return body?.data ?? {}
 }
 
+async function portalZoneAuthHeaders() {
+  if (isPlatformSession()) {
+    return platformAuthHeaders()
+  }
+  const user = ensureFirebase()?.auth?.currentUser
+  if (!user) {
+    throw new Error('Sesja wygasła. Zaloguj się ponownie.')
+  }
+  return {
+    Authorization: `Bearer ${await user.getIdToken()}`,
+    ...platformContextHeaders(),
+  }
+}
+
+async function fetchRequiredVisitFlags(orgId) {
+  const search = new URLSearchParams({ orgId: toText(orgId) })
+  const response = await fetch(`${portalApiBase()}/portal/zones?${search.toString()}`, {
+    headers: {
+      ...(await portalZoneAuthHeaders()),
+      Accept: 'application/json',
+    },
+  })
+  const data = await parsePortalApiResponse(response)
+  return new Map(
+    (Array.isArray(data?.zones) ? data.zones : []).map((row) => [
+      toText(row?.zoneId),
+      row?.requiredVisit === true,
+    ]),
+  )
+}
+
+async function writeZoneThroughPortalApi(method, payload) {
+  const response = await fetch(`${portalApiBase()}/portal/zones`, {
+    method,
+    headers: {
+      ...(await portalZoneAuthHeaders()),
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+  const data = await parsePortalApiResponse(response)
+  return data?.zone ?? null
+}
+
 function mapZone(orgId, row) {
   const zoneId = toText(row?.ZoneId ?? row?.zoneId ?? row?.id)
   const clientId = normalizedZoneClientId(row?.clientId)
@@ -201,8 +246,16 @@ export async function getZones(orgId, options = {}) {
     invalidateZonesCache(orgId)
   }
   return readZonesCached(orgId, async () => {
-    const rows = await fetchZoneRows(orgId)
-    return sortZonesForDisplay(rows.map((row) => mapZone(orgId, row)))
+    const [rows, requiredVisitFlags] = await Promise.all([
+      fetchZoneRows(orgId),
+      fetchRequiredVisitFlags(orgId),
+    ])
+    return sortZonesForDisplay(
+      rows.map((row) => ({
+        ...mapZone(orgId, row),
+        requiredVisit: requiredVisitFlags.get(toText(row?.ZoneId ?? row?.zoneId ?? row?.id)) === true,
+      })),
+    )
   })
 }
 
@@ -229,8 +282,7 @@ export async function createZone(orgId, payload) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
-  ensureFirebase()
-  await insertZoneWithRequiredVisitForOrg({
+  const saved = await writeZoneThroughPortalApi('POST', {
     orgId,
     zoneId,
     clientId,
@@ -244,6 +296,7 @@ export async function createZone(orgId, payload) {
   invalidateZonesCache(orgId)
 
   return {
+    ...saved,
     id: zoneId,
     zoneId,
     orgId,
@@ -274,8 +327,7 @@ export async function updateZone(orgId, zoneId, payload) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
-  ensureFirebase()
-  await updateZoneWithRequiredVisitForOrg({
+  const saved = await writeZoneThroughPortalApi('PATCH', {
     orgId,
     zoneId: toText(zoneId),
     clientId: clientId || (generatedZoneQr ? LEGACY_UNASSIGNED_CLIENT_ID : null),
@@ -289,6 +341,7 @@ export async function updateZone(orgId, zoneId, payload) {
   invalidateZonesCache(orgId)
 
   return {
+    ...saved,
     id: zoneId,
     orgId,
     clientId,

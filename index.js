@@ -56,6 +56,7 @@ const { createFacilityManagerFirebaseAppCheckGate } = require('./facility-manage
 const { createFacilityManagerFirestoreRateGate } = require('./facility-manager-registration-firestore-rate-gate')
 const { createFacilityManagerObjectService } = require('./facility-manager-object-service')
 const { createFacilityManagerObjectApi } = require('./facility-manager-object-api')
+const { createPortalZoneApi } = require('./portal-zone-api')
 const {
   CLEANING_COMPANY_ONBOARDING_REQUIRED,
   CleaningCompanyOnboardingError,
@@ -179,6 +180,7 @@ const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
 const PORTAL_JOB_CARDS_PATH = '/api/portal/job-cards'
 const PORTAL_EVENTS_PATH = '/api/portal/events'
+const PORTAL_ZONES_PATH = '/api/portal/zones'
 const PORTAL_ZONE_QR_CODES_PATH = '/api/portal/zones/qr-codes'
 const PORTAL_PROFITABILITY_PATH = '/api/portal/profitability'
 const PORTAL_WORKDAY_STOP_PROPOSALS_PATH = '/api/portal/workday-stop-proposals'
@@ -8537,6 +8539,31 @@ async function requirePortalZoneQrAccess(client, orgId, uid) {
   return { membership, role }
 }
 
+async function requirePortalZoneAccess(client, { orgId, uid, write = false }) {
+  const membership = await getRequesterMembership(client, orgId, uid)
+  if (!membership) {
+    const error = new Error('ORG_ACCESS_MISSING')
+    error.statusCode = 404
+    error.publicCode = 'ORG_ACCESS_MISSING'
+    error.publicMessage = 'Brak dostępu do tej organizacji.'
+    throw error
+  }
+  if (write) {
+    assertMembershipPlanCapability(membership, 'timeQrNfc')
+  }
+  const role = normalizeRequesterRole(membership?.role)
+  if (write && !['ADMIN', 'MANAGER', 'OWNER', 'PLATFORM_OWNER'].includes(role)) {
+    const error = new Error('FORBIDDEN')
+    error.statusCode = membership ? 403 : 404
+    error.publicCode = membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING'
+    error.publicMessage = membership
+      ? 'Brak uprawnień do edycji stref.'
+      : 'Brak dostępu do tej organizacji.'
+    throw error
+  }
+  return { membership, role }
+}
+
 async function insertPortalZoneQrCodes(client, { orgId, items, clientId, zone, editedBy }) {
   const orgToken = portalZoneQrOrgToken(orgId)
   const idPrefix = `QRC_${orgToken}_Z`
@@ -10897,6 +10924,18 @@ const workdayStopProposalApi = createWorkdayStopProposalApi({
   verifyFirebaseIdToken,
 })
 
+const portalZoneApi = createPortalZoneApi({
+  authorize: requirePortalZoneAccess,
+  connectDbClient,
+  mapDatabaseConnectionError,
+  mapFirebaseAdminError,
+  parseBearerToken,
+  readJsonBody,
+  sendApiError,
+  sendJson,
+  verifyFirebaseIdToken: verifySessionContextFirebaseIdToken,
+})
+
 const server = http.createServer((req, res) => runWithPlatformRequest(req, () => {
   const scopedRequest = getPlatformRequestContext()
   res.once('finish', () => {
@@ -11003,6 +11042,13 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   ) {
     handleMobileWorkflowRequest(req, res, requestUrl).catch((error) => {
       sendMobileApiError(res, 500, 'MOBILE_WORKFLOW_ERROR', error?.message || 'Unexpected mobile workflow error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === PORTAL_ZONES_PATH) {
+    portalZoneApi.handle(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'PORTAL_ZONE_ERROR', error?.message || 'Unexpected portal zone error.')
     })
     return
   }

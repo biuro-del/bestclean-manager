@@ -119,7 +119,7 @@ create index if not exists mobile_object_visit_requirement_missing_idx
   where visited_at is null;
 
 grant usage on schema public to portal_app;
-grant select on table public.zone to portal_app;
+grant select, insert, update on table public.zone to portal_app;
 grant select, insert, update on table public.mobile_object_visit to portal_app;
 grant select, insert, update on table public.mobile_object_visit_requirement to portal_app;
 

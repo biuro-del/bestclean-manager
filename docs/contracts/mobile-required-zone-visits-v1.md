@@ -11,7 +11,9 @@ Ten kontrakt dotyczy webowej aplikacji pracownika i portalu. Nie jest kontraktem
 - `public.zone.required_visit` jest polem logicznym z wartością domyślną `false`.
 - Portal pokazuje pole „Wymagana wizyta” podczas dodawania i edycji kodu QR.
 - Kod START ani STOP nie może zostać oznaczony jako wymagana strefa. Serwis portalu wymusza tę zasadę także poza interfejsem.
-- Istniejące operacje Data Connect `InsertZoneForOrg` i `UpdateZoneForOrg` zachowują dotychczasową sygnaturę. Nowe pole zapisują oddzielne operacje `InsertZoneWithRequiredVisitForOrg` i `UpdateZoneWithRequiredVisitForOrg`, dzięki czemu starsi klienci pozostają zgodni.
+- Istniejące operacje Data Connect `InsertZoneForOrg` i `UpdateZoneForOrg` zachowują dotychczasową sygnaturę, dzięki czemu starsi klienci pozostają zgodni.
+- Portal odczytuje flagi i zapisuje kompletny rekord strefy przez uwierzytelniony endpoint `/api/portal/zones`. Backend wyprowadza użytkownika z tokenu, ponownie sprawdza członkostwo, plan i rolę oraz zapisuje zmianę w jednej transakcji.
+- Przygotowane definicje Data Connect dla `requiredVisit` nie są bramką wydania portalu. Nie wolno publikować całego lokalnego schematu nad produkcją, dopóki niezależny audyt zgodności nie usunie destrukcyjnego driftu wykrytego 2026-09-03.
 
 ## Lista obiektu
 
@@ -72,11 +74,11 @@ Nieznana wartość trybu jest traktowana jak `OFF`.
 1. Osobno zatwierdzić i wykonać preflight bazy oraz addytywną migrację `20260903_mobile_required_zone_visits_additive.sql`.
 2. Wdrożyć backend z trybem `OFF` i potwierdzić, że dotychczasowy workflow nie zmienił się.
 3. Włączyć `OBSERVE` wyłącznie dla testowej organizacji/pracownika i wykonać zalogowane E2E: START, pierwszy obiekt, kompletna i niekompletna lista, switch strefy, STOP.
-4. Wdrożyć portal i webową aplikację pracownika dopiero po zgodnych kontraktach backendu.
+4. Wdrożyć portal i webową aplikację pracownika dopiero po zgodnych kontraktach backendu. Portal zapisuje `requiredVisit` przez `/api/portal/zones`; wydanie V1 nie wymaga aktualizacji produkcyjnego Data Connect.
 5. `ENFORCE` włączyć osobną zgodą, najpierw dla canary, ze sprawdzonym rollbackiem do `OFF`.
 
 Samo ustawienie `OFF` jest natychmiastowym rollbackiem zachowania. Dane addytywne pozostają do audytu; migracja nie zawiera destrukcyjnego rollbacku.
 
 ## Status kandydata 2026-09-03
 
-Kod, migracja, portal i frontend są przygotowane wyłącznie lokalnie. Nie wykonano migracji, zapisu do bazy, commita, pusha ani wdrożenia produkcyjnego.
+Kod, migracja, portal i frontend są przygotowane lokalnie. Pierwszy commit kandydata istnieje, ale nie wykonano migracji, zapisu do bazy, pusha ani wdrożenia produkcyjnego. Walidacja `validateOnly` wykazała niezależny destrukcyjny drift schematu Data Connect, dlatego tor wdrożenia portalu został przełączony na bezpieczny endpoint backendu.

@@ -29,7 +29,7 @@ test('migracja jest addytywna, domyslnie nie wymaga wizyty i zamraza checkliste 
   assert.doesNotMatch(migration, /\bdrop table\b|\btruncate\b/i)
 })
 
-test('stare mutacje Zone pozostaja zgodne, a portal dostaje osobne operacje requiredVisit', () => {
+test('przygotowane definicje Data Connect pozostaja addytywne i nie zmieniaja starych mutacji Zone', () => {
   const mutations = read('dataconnect', 'connectors', 'example', 'mutations.gql')
   const oldInsert = mutations.slice(
     mutations.indexOf('mutation InsertZoneForOrg('),
@@ -71,6 +71,7 @@ test('tryb produkcyjny kandydata pozostaje OFF, a portal oznacza tylko strefy in
   const portalSource = read('web-app', 'apps', 'portal-web', 'src', 'features', 'objects', 'zones', 'index.js')
   const portalTemplate = read('web-app', 'apps', 'portal-web', 'src', 'features', 'objects', 'zones', 'template.html')
   const platformPolicy = read('platform-policy.js')
+  const zoneService = read('web-app', 'apps', 'portal-web', 'src', 'services', 'zoneService.js')
 
   assert.match(appHosting, /variable: MOBILE_REQUIRED_ZONE_VISITS_MODE\s+value: "OFF"/)
   assert.match(portalTemplate, /id="znEditRequiredVisit"/)
@@ -78,4 +79,8 @@ test('tryb produkcyjny kandydata pozostaje OFF, a portal oznacza tylko strefy in
   assert.match(portalSource, /zones-required-visit-pill/)
   assert.match(platformPolicy, /'InsertZoneWithRequiredVisitForOrg'/)
   assert.match(platformPolicy, /'UpdateZoneWithRequiredVisitForOrg'/)
+  assert.match(indexSource, /const PORTAL_ZONES_PATH = '\/api\/portal\/zones'/)
+  assert.match(indexSource, /createPortalZoneApi\(/)
+  assert.match(zoneService, /writeZoneThroughPortalApi\('PATCH'/)
+  assert.doesNotMatch(zoneService, /insertZoneWithRequiredVisitForOrg|updateZoneWithRequiredVisitForOrg/)
 })
