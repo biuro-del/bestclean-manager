@@ -214,6 +214,7 @@ query ZonesForOrg($orgId: String!) @auth(level: USER) {
     clientId
     zone
     function
+    requiredVisit
     editedBy
     date
     location

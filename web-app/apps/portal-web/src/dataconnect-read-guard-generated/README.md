@@ -136,7 +136,7 @@ import { connectorConfig, workersPageForOrg, WorkersPageForOrgVariables } from '
 
 // The `WorkersPageForOrg` query requires an argument of type `WorkersPageForOrgVariables`:
 const workersPageForOrgVars: WorkersPageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -170,7 +170,7 @@ import { connectorConfig, workersPageForOrgRef, WorkersPageForOrgVariables } fro
 
 // The `WorkersPageForOrg` query requires an argument of type `WorkersPageForOrgVariables`:
 const workersPageForOrgVars: WorkersPageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -268,8 +268,8 @@ import { connectorConfig, workerForOrgByLogin, WorkerForOrgByLoginVariables } fr
 
 // The `WorkerForOrgByLogin` query requires an argument of type `WorkerForOrgByLoginVariables`:
 const workerForOrgByLoginVars: WorkerForOrgByLoginVariables = {
-  orgId: ..., 
-  workerLogin: ..., 
+  orgId: ...,
+  workerLogin: ...,
 };
 
 // Call the `workerForOrgByLogin()` function to execute the query.
@@ -299,8 +299,8 @@ import { connectorConfig, workerForOrgByLoginRef, WorkerForOrgByLoginVariables }
 
 // The `WorkerForOrgByLogin` query requires an argument of type `WorkerForOrgByLoginVariables`:
 const workerForOrgByLoginVars: WorkerForOrgByLoginVariables = {
-  orgId: ..., 
-  workerLogin: ..., 
+  orgId: ...,
+  workerLogin: ...,
 };
 
 // Call the `workerForOrgByLoginRef()` function to get a reference to the query.
@@ -430,7 +430,7 @@ import { connectorConfig, clientsPageForOrg, ClientsPageForOrgVariables } from '
 
 // The `ClientsPageForOrg` query requires an argument of type `ClientsPageForOrgVariables`:
 const clientsPageForOrgVars: ClientsPageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -462,7 +462,7 @@ import { connectorConfig, clientsPageForOrgRef, ClientsPageForOrgVariables } fro
 
 // The `ClientsPageForOrg` query requires an argument of type `ClientsPageForOrgVariables`:
 const clientsPageForOrgVars: ClientsPageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -539,6 +539,7 @@ export interface ZonesPageForOrgData {
     clientId?: string | null;
     zone?: string | null;
     function?: string | null;
+    requiredVisit: boolean;
     editedBy?: string | null;
     date?: TimestampString | null;
     location?: string | null;
@@ -553,7 +554,7 @@ import { connectorConfig, zonesPageForOrg, ZonesPageForOrgVariables } from '@dat
 
 // The `ZonesPageForOrg` query requires an argument of type `ZonesPageForOrgVariables`:
 const zonesPageForOrgVars: ZonesPageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -585,7 +586,7 @@ import { connectorConfig, zonesPageForOrgRef, ZonesPageForOrgVariables } from '@
 
 // The `ZonesPageForOrg` query requires an argument of type `ZonesPageForOrgVariables`:
 const zonesPageForOrgVars: ZonesPageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -681,7 +682,7 @@ import { connectorConfig, backupCyclesPageForOrg, BackupCyclesPageForOrgVariable
 
 // The `BackupCyclesPageForOrg` query requires an argument of type `BackupCyclesPageForOrgVariables`:
 const backupCyclesPageForOrgVars: BackupCyclesPageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -713,7 +714,7 @@ import { connectorConfig, backupCyclesPageForOrgRef, BackupCyclesPageForOrgVaria
 
 // The `BackupCyclesPageForOrg` query requires an argument of type `BackupCyclesPageForOrgVariables`:
 const backupCyclesPageForOrgVars: BackupCyclesPageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -809,7 +810,7 @@ import { connectorConfig, workdayPausesPageForOrg, WorkdayPausesPageForOrgVariab
 
 // The `WorkdayPausesPageForOrg` query requires an argument of type `WorkdayPausesPageForOrgVariables`:
 const workdayPausesPageForOrgVars: WorkdayPausesPageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };
@@ -841,7 +842,7 @@ import { connectorConfig, workdayPausesPageForOrgRef, WorkdayPausesPageForOrgVar
 
 // The `WorkdayPausesPageForOrg` query requires an argument of type `WorkdayPausesPageForOrgVariables`:
 const workdayPausesPageForOrgVars: WorkdayPausesPageForOrgVariables = {
-  orgId: ..., 
+  orgId: ...,
   limit: ..., // optional
   offset: ..., // optional
 };

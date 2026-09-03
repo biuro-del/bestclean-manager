@@ -1,8 +1,8 @@
 import {
   deleteZoneForOrg,
-  insertZoneForOrg,
+  insertZoneWithRequiredVisitForOrg,
   platformAuthHeaders,
-  updateZoneForOrg,
+  updateZoneWithRequiredVisitForOrg,
   zonesForOrg,
   zonesPageForOrg,
 } from './platformDataConnectService'
@@ -68,6 +68,15 @@ function toText(value) {
   return String(value ?? '').trim()
 }
 
+function toBoolean(value) {
+  return value === true || ['1', 'true', 'yes', 'tak'].includes(toText(value).toLowerCase())
+}
+
+function functionAllowsRequiredVisit(value) {
+  const normalized = toText(value).toUpperCase()
+  return Boolean(normalized) && !normalized.startsWith('START') && !normalized.startsWith('STOP')
+}
+
 function portalApiBase() {
   const raw = toText(import.meta.env.VITE_ADMIN_API_BASE || '/api').replace(/\/+$/, '')
   if (!raw) return '/api'
@@ -127,6 +136,7 @@ function mapZone(orgId, row) {
     name: toText(row?.zone),
     zone: toText(row?.zone),
     function: toText(row?.function),
+    requiredVisit: toBoolean(row?.requiredVisit),
     location: toText(row?.location),
     workerLogin,
     workerName,
@@ -204,6 +214,8 @@ export async function getZoneById(orgId, zoneId) {
 export async function createZone(orgId, payload) {
   const zoneId = toText(payload?.zoneId ?? payload?.id ?? payload?.code ?? payload?.qr)
   const clientId = toText(payload?.clientId)
+  const functionName = toText(payload?.function)
+  const requiredVisit = functionAllowsRequiredVisit(functionName) && toBoolean(payload?.requiredVisit)
 
   if (!zoneId) {
     throw new Error('Pole zoneId jest wymagane dla createZone(orgId).')
@@ -218,12 +230,13 @@ export async function createZone(orgId, payload) {
   }
 
   ensureFirebase()
-  await insertZoneForOrg({
+  await insertZoneWithRequiredVisitForOrg({
     orgId,
     zoneId,
     clientId,
     zone: payload?.name ?? payload?.zone ?? null,
-    function: payload?.function ?? null,
+    function: functionName || null,
+    requiredVisit,
     location: payload?.location ?? null,
     editedBy: payload?.editedBy ?? null,
     date: payload?.date ?? null,
@@ -236,7 +249,8 @@ export async function createZone(orgId, payload) {
     orgId,
     clientId,
     name: toText(payload?.name ?? payload?.zone),
-    function: toText(payload?.function),
+    function: functionName,
+    requiredVisit,
     location: toText(payload?.location),
     workerLogin: toText(payload?.workerLogin),
     workerName: toText(payload?.workerName),
@@ -249,6 +263,8 @@ export async function updateZone(orgId, zoneId, payload) {
   const clientId = toText(payload?.clientId)
   const existingZone = await getZoneById(orgId, zoneId)
   const generatedZoneQr = isGeneratedZoneQr(existingZone)
+  const functionName = generatedZoneQr ? toText(existingZone?.function) : toText(payload?.function)
+  const requiredVisit = functionAllowsRequiredVisit(functionName) && toBoolean(payload?.requiredVisit)
 
   if (!clientId && !generatedZoneQr) {
     throw new Error('Pole clientId jest wymagane dla updateZone(orgId, zoneId).')
@@ -259,12 +275,13 @@ export async function updateZone(orgId, zoneId, payload) {
   }
 
   ensureFirebase()
-  await updateZoneForOrg({
+  await updateZoneWithRequiredVisitForOrg({
     orgId,
     zoneId: toText(zoneId),
     clientId: clientId || (generatedZoneQr ? LEGACY_UNASSIGNED_CLIENT_ID : null),
     zone: payload?.name ?? payload?.zone ?? null,
-    function: generatedZoneQr ? existingZone.function : payload?.function ?? null,
+    function: functionName || null,
+    requiredVisit,
     location: payload?.location ?? null,
     editedBy: payload?.editedBy ?? null,
     date: payload?.date ?? null,
@@ -276,7 +293,8 @@ export async function updateZone(orgId, zoneId, payload) {
     orgId,
     clientId,
     name: toText(payload?.name ?? payload?.zone),
-    function: generatedZoneQr ? existingZone.function : toText(payload?.function),
+    function: functionName,
+    requiredVisit,
     location: toText(payload?.location),
     workerLogin: toText(payload?.workerLogin),
     workerName: toText(payload?.workerName),

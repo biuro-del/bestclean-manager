@@ -548,6 +548,71 @@ mutation UpdateZoneForOrg(
   )
 }
 
+mutation InsertZoneWithRequiredVisitForOrg(
+  $orgId: String!
+  $zoneId: String!
+  $clientId: String
+  $zone: String
+  $function: String
+  $requiredVisit: Boolean!
+  $editedBy: String
+  $date: Timestamp
+  $location: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do dodawania stref.")
+      }
+  }
+
+  zone_insert(data: {
+    orgId: $orgId
+    zoneId: $zoneId
+    clientId: $clientId
+    zone: $zone
+    function: $function
+    requiredVisit: $requiredVisit
+    editedBy: $editedBy
+    date: $date
+    location: $location
+  })
+}
+
+mutation UpdateZoneWithRequiredVisitForOrg(
+  $orgId: String!
+  $zoneId: String!
+  $clientId: String
+  $zone: String
+  $function: String
+  $requiredVisit: Boolean!
+  $editedBy: String
+  $date: Timestamp
+  $location: String
+) @auth(level: USER) @transaction {
+  query @redact {
+    organizationMember(key: { orgId: $orgId, uid_expr: "auth.uid" })
+      @check(expr: "this != null", message: "Brak dostepu do tej organizacji.") {
+        status @check(expr: "this == 'ACTIVE'", message: "Czlonkostwo w organizacji jest nieaktywne.")
+        role @check(expr: "this in ['ADMIN','ADMINISTRATOR','OWNER','SUPERADMIN','MANAGER','KIEROWNIK']", message: "Brak uprawnien do edycji stref.")
+      }
+  }
+
+  zone_update(
+    key: { orgId: $orgId, zoneId: $zoneId }
+    data: {
+      clientId: $clientId
+      zone: $zone
+      function: $function
+      requiredVisit: $requiredVisit
+      editedBy: $editedBy
+      date: $date
+      location: $location
+    }
+  )
+}
+
 mutation DeleteZoneForOrg(
   $orgId: String!
   $zoneId: String!

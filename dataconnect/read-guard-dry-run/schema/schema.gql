@@ -513,6 +513,7 @@ type Zone @table(
 
   zone: String @col(name: "zone")
   function: String @col(name: "function")
+  requiredVisit: Boolean! @col(name: "required_visit") @default(value: false)
   editedBy: String @col(name: "edited_by")
   date: Timestamp @col(name: "date")
   location: String @col(name: "location")

@@ -204,3 +204,7 @@ env:
     value: "W001,W005"
     availability:
       - RUNTIME
+  - variable: MOBILE_REQUIRED_ZONE_VISITS_MODE
+    value: "OFF"
+    availability:
+      - RUNTIME

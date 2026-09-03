@@ -1,4 +1,4 @@
-import { insertClientForOrgRef, updateClientForOrgRef, deleteClientForOrgRef, insertIndividualJobForOrgRef, updateIndividualJobForOrgRef, deleteIndividualJobForOrgRef, upsertTaskForOrgRef, deleteTaskForOrgRef, insertZoneForOrgRef, updateZoneForOrgRef, deleteZoneForOrgRef, insertWorkdayForOrgRef, updateWorkdayForOrgRef, deleteWorkdayForOrgRef, insertEventForOrgRef, updateEventForOrgRef, reidentifyEventForOrgRef, deleteEventForOrgRef, insertBackupCycleForOrgRef, updateBackupCycleForOrgRef, insertStorageForOrgRef, updateStorageForOrgRef, deleteStorageForOrgRef, insertClientStorageForOrgRef, updateClientStorageForOrgRef, deleteClientStorageForOrgRef, startWorkdayPauseRef, stopWorkdayPauseRef, myOrganizationsRef, canManageWorkersForOrgRef, workersForOrgRef, clientsForOrgRef, individualJobsForOrgRef, tasksForOrgRef, zonesForOrgRef, workdaysForOrgRef, workdaysPageForOrgRef, workdaysPageForOrgByBusinessDateRef, workdaysIntegrityPageForOrgRef, workdaysPageForOrgByWorkerRef, workdaysPageForOrgByWorkerAndStatusRef, workdaysPageForOrgByRoomRef, workdaysPageForOrgByStatusRef, workdaysFingerprintForOrgRef, backupCyclesForOrgRef, eventsForOrgRef, eventsIntegrityPageForOrgRef, eventsPageForOrgRef, eventsPageForOrgByWorkerRef, eventsPageForOrgByZoneRef, eventsPageForOrgByStatusRef, eventsPageForOrgByTaskOccurrenceRef, eventsPageForOrgByPlanMatchStatusRef, eventsFingerprintForOrgRef, workerWorkdaysForOrgRef, storageForOrgRef, clientStorageForClientRef, clientStorageForOrgRef, workdayPausesForOrgRef, activeWorkdayPauseForWorkerRef, connectorConfig } from '../../esm/index.esm.js';
+import { insertClientForOrgRef, updateClientForOrgRef, deleteClientForOrgRef, insertIndividualJobForOrgRef, updateIndividualJobForOrgRef, deleteIndividualJobForOrgRef, upsertTaskForOrgRef, deleteTaskForOrgRef, insertZoneForOrgRef, updateZoneForOrgRef, insertZoneWithRequiredVisitForOrgRef, updateZoneWithRequiredVisitForOrgRef, deleteZoneForOrgRef, insertWorkdayForOrgRef, updateWorkdayForOrgRef, deleteWorkdayForOrgRef, insertEventForOrgRef, updateEventForOrgRef, reidentifyEventForOrgRef, deleteEventForOrgRef, insertBackupCycleForOrgRef, updateBackupCycleForOrgRef, insertStorageForOrgRef, updateStorageForOrgRef, deleteStorageForOrgRef, insertClientStorageForOrgRef, updateClientStorageForOrgRef, deleteClientStorageForOrgRef, startWorkdayPauseRef, stopWorkdayPauseRef, myOrganizationsRef, canManageWorkersForOrgRef, workersForOrgRef, clientsForOrgRef, individualJobsForOrgRef, tasksForOrgRef, zonesForOrgRef, workdaysForOrgRef, workdaysPageForOrgRef, workdaysPageForOrgByBusinessDateRef, workdaysIntegrityPageForOrgRef, workdaysPageForOrgByWorkerRef, workdaysPageForOrgByWorkerAndStatusRef, workdaysPageForOrgByRoomRef, workdaysPageForOrgByStatusRef, workdaysFingerprintForOrgRef, backupCyclesForOrgRef, eventsForOrgRef, eventsIntegrityPageForOrgRef, eventsPageForOrgRef, eventsPageForOrgByWorkerRef, eventsPageForOrgByZoneRef, eventsPageForOrgByStatusRef, eventsPageForOrgByTaskOccurrenceRef, eventsPageForOrgByPlanMatchStatusRef, eventsFingerprintForOrgRef, workerWorkdaysForOrgRef, storageForOrgRef, clientStorageForClientRef, clientStorageForOrgRef, workdayPausesForOrgRef, activeWorkdayPauseForWorkerRef, connectorConfig } from '../../esm/index.esm.js';
 import { validateArgs, CallerSdkTypeEnum } from 'firebase/data-connect';
 import { useDataConnectQuery, useDataConnectMutation, validateReactArgs } from '@tanstack-query-firebase/react/data-connect';
 
@@ -78,6 +78,22 @@ export function useUpdateZoneForOrg(dcOrOptions, options) {
   const { dc: dcInstance, vars: inputOpts } = validateArgs(connectorConfig, dcOrOptions, options);
   function refFactory(vars) {
     return updateZoneForOrgRef(dcInstance, vars);
+  }
+  return useDataConnectMutation(refFactory, inputOpts, CallerSdkTypeEnum.GeneratedReact);
+}
+
+export function useInsertZoneWithRequiredVisitForOrg(dcOrOptions, options) {
+  const { dc: dcInstance, vars: inputOpts } = validateArgs(connectorConfig, dcOrOptions, options);
+  function refFactory(vars) {
+    return insertZoneWithRequiredVisitForOrgRef(dcInstance, vars);
+  }
+  return useDataConnectMutation(refFactory, inputOpts, CallerSdkTypeEnum.GeneratedReact);
+}
+
+export function useUpdateZoneWithRequiredVisitForOrg(dcOrOptions, options) {
+  const { dc: dcInstance, vars: inputOpts } = validateArgs(connectorConfig, dcOrOptions, options);
+  function refFactory(vars) {
+    return updateZoneWithRequiredVisitForOrgRef(dcInstance, vars);
   }
   return useDataConnectMutation(refFactory, inputOpts, CallerSdkTypeEnum.GeneratedReact);
 }

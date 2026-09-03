@@ -5233,3 +5233,25 @@ Granice i kolejnosc wydania:
 - Nie wykonano zapisu do bazy, migracji, commita, pusha ani wdrozenia.
 - Bezpieczna kolejnosc to najpierw addytywny backend `STATUS` i odczytowy smoke,
   a dopiero potem frontend fail-closed. Produkcja wymaga osobnej zgody wydania.
+
+Data: 2026-09-03
+Autor: AI Codex
+Temat: Lokalny kandydat obowiązkowych wizyt w strefach QR
+Dodano lokalnie:
+- Pole `required_visit` dla stref oraz portalowe oznaczenie „Wymagana wizyta”,
+  niedostępne dla kodów START i STOP.
+- Niezmienną listę wymaganych stref per organizacja, Workday i obiekt, z zapisem
+  pierwszego skanu według czasu serwera.
+- Mobilny snapshot postępu oraz serwerową blokadę STOP w trybie `ENFORCE`.
+- Blokadę przejścia do kolejnego obiektu przy brakujących strefach, z komunikatem
+  wskazującym obiekt i miejsca, do których pracownik musi wrócić.
+- Bezpieczne tryby `OFF`, `OBSERVE`, `ENFORCE` i zawężenie canary do organizacji
+  lub pracownika; konfiguracja wydaniowa pozostaje `OFF`.
+- Addytywną migrację i kontrakt `docs/contracts/mobile-required-zone-visits-v1.md`.
+Niezmienniki:
+- `Workday.utilityRoomId` zachowuje kod START; odwiedzana strefa pozostaje wyłącznie
+  w `Event.zoneId`.
+- Istniejące mutacje stref zachowują sygnaturę dla starszych klientów.
+Granice:
+- Nie wykonano migracji, zapisu do bazy, commita, pusha ani wdrożenia.
+- Szerokie `ENFORCE` wymaga zalogowanego E2E i decyzji o awaryjnym pominięciu.
