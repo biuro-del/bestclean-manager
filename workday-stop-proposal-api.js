@@ -23,6 +23,26 @@ function clientActionId(value, field = 'clientActionId') {
   return identifier(value, field, 128)
 }
 
+function statusWorkdayIds(value) {
+  if (!Array.isArray(value)) {
+    throw apiError(400, 'WORKDAY_STOP_PROPOSAL_STATUS_IDS_REQUIRED', 'Podaj listę dni pracy do sprawdzenia.')
+  }
+  // Enforce the bound before de-duplication so a very large body cannot avoid
+  // the request-size limit simply by repeating the same identifier.
+  if (!value.length || value.length > 120) {
+    throw apiError(400, 'WORKDAY_STOP_PROPOSAL_STATUS_IDS_INVALID', 'Lista dni pracy musi zawierać od 1 do 120 pozycji.')
+  }
+  const ids = []
+  const seen = new Set()
+  for (const item of value) {
+    const workdayId = identifier(item, 'workdayIds[]', 64)
+    if (seen.has(workdayId)) continue
+    seen.add(workdayId)
+    ids.push(workdayId)
+  }
+  return ids
+}
+
 function dateFilter(value, field) {
   const normalized = text(value)
   if (!normalized) return ''
@@ -66,6 +86,13 @@ function mobileProposalPayload(proposal) {
     officialStopAt: text(proposal?.officialStopAt),
     submittedAt: text(proposal?.submittedAt),
     reviewedAt: text(proposal?.reviewedAt),
+  }
+}
+
+function mobileStatusProposalPayload(proposal) {
+  return {
+    workdayId: text(proposal?.workdayId),
+    ...mobileProposalPayload(proposal),
   }
 }
 
@@ -205,6 +232,16 @@ function createWorkdayStopProposalApi(dependencies = {}) {
     return { idempotent: false, proposal: proposalPayload(proposal), durationSec: validProposal.durationSec }
   }
 
+  async function readMobileProposalStatuses(repository, { orgId, worker, workdayIds }) {
+    const rows = await repository.listForMobileWorkerWorkdays({
+      orgId,
+      workerId: identifier(worker?.workerId, 'workerId', 128),
+      workerLogin: text(worker?.login),
+      workdayIds,
+    })
+    return rows.map((row) => mobileStatusProposalPayload(proposalPayload(row)))
+  }
+
   async function handleMobile(req, res, requestUrl) {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' })
@@ -216,23 +253,40 @@ function createWorkdayStopProposalApi(dependencies = {}) {
       return
     }
     let client
+    let transactionOpen = false
     try {
       const { decoded, uid } = await authenticate(req, '', true)
       // Authenticate before reading a payload or opening a database transaction.
       // An unauthenticated request must not reach any proposal write path.
       const body = await readJsonBody(req)
+      const isStatusRead = text(body?.operation).toUpperCase() === 'STATUS'
+      // Validate bounded STATUS input before any DB connection, auth-scope
+      // lookup, schema check, lock, or mutation path.
+      const statusIds = isStatusRead ? statusWorkdayIds(body?.workdayIds) : null
       client = await connectDbClient()
-      await client.query('begin')
-      const { orgId, membership } = await resolveMobileOrganization(client, decoded, body?.orgId)
-      const worker = await resolveMobileWorker(client, orgId, body, decoded, membership)
+      // STATUS is intentionally scoped only from the verified Firebase token.
+      // Client-provided organization and worker identifiers never expand it.
+      const { orgId, membership } = await resolveMobileOrganization(client, decoded, isStatusRead ? '' : body?.orgId)
+      const worker = await resolveMobileWorker(client, orgId, isStatusRead ? {} : body, decoded, membership)
       const repository = createRepository(client)
       await assertSchema(repository)
 
+      if (isStatusRead) {
+        const proposals = await readMobileProposalStatuses(repository, { orgId, worker, workdayIds: statusIds })
+        sendMobileJson(res, 200, { ok: true, proposals })
+        return
+      }
+
+      await client.query('begin')
+      transactionOpen = true
       const payload = await submitMobileProposal(repository, { orgId, worker, uid, body })
       await client.query('commit')
+      transactionOpen = false
       sendMobileJson(res, 200, { ok: true, proposal: mobileProposalPayload(payload.proposal) })
     } catch (error) {
-      try { await client?.query('rollback') } catch {}
+      if (transactionOpen) {
+        try { await client?.query('rollback') } catch {}
+      }
       const mapped = responseError(error, 'WORKDAY_STOP_PROPOSAL_MOBILE_ERROR', 'Nie uda?o si? zapisa? propozycji STOP.')
       sendMobileApiError(res, mapped.statusCode, mapped.code, mapped.message, mapped.details)
     } finally {

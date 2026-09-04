@@ -5208,3 +5208,50 @@ Granice przed aktywacja:
 - Wymagane jest przywrocenie istniejacej wspolnej funkcji
   `centralRegistrationBeforeUserCreated` jako Firebase Auth `beforeCreate`,
   rejestracja App Check, sekret HMAC, migracja oraz rollout App Hosting.
+
+Data: 2026-09-01
+Autor: AI Codex
+Temat: Lokalny P1 przywrocenia statusow propozycji STOP w Historii aplikacji mobilnej
+Powod:
+- Frontend wysylal `operation: "STATUS"` dla widocznych dni pracy, ale biezaca linia
+  backendu nie obslugiwala tej operacji i kierowala zadanie do walidacji zapisu.
+- Po bledzie aplikacja nie widziala istniejacego `PENDING`, przez co mogla ponownie
+  pokazac pracownikowi formularz propozycji STOP.
+Dodano lokalnie:
+- Ograniczony odczyt `STATUS` dla 1-120 `workdayIds`, tokenowo zawezony do
+  organizacji, kanonicznego `worker_id`, loginu Workday i widocznych dni.
+- Odczyt nie otwiera transakcji, nie blokuje rekordow i niczego nie zapisuje.
+- Repozytorium zwraca najnowsza propozycje dla dnia wraz z `workdayId` i danymi
+  stanow `PENDING`, `APPROVED`, `CORRECTED`, `REJECTED` i `SUPERSEDED`.
+Weryfikacja:
+- Testy celowane API i repozytorium: 31/31 PASS.
+- `node --check` i `git diff --check`: PASS.
+- Szeroki przebieg testow w izolowanym worktree przeszedl poza 4 testami Vite,
+  ktore nie mialy lokalnego pakietu `vite`; identyczne pliki testu, konfiguracji
+  i lockfile uruchomione w worktree z zaleznosciami przeszly 4/4 PASS.
+Granice i kolejnosc wydania:
+- Nie wykonano zapisu do bazy, migracji, commita, pusha ani wdrozenia.
+- Bezpieczna kolejnosc to najpierw addytywny backend `STATUS` i odczytowy smoke,
+  a dopiero potem frontend fail-closed. Produkcja wymaga osobnej zgody wydania.
+
+Data: 2026-09-03
+Autor: AI Codex
+Temat: Lokalny kandydat obowiązkowych wizyt w strefach QR
+Dodano lokalnie:
+- Pole `required_visit` dla stref oraz portalowe oznaczenie „Wymagana wizyta”,
+  niedostępne dla kodów START i STOP.
+- Niezmienną listę wymaganych stref per organizacja, Workday i obiekt, z zapisem
+  pierwszego skanu według czasu serwera.
+- Mobilny snapshot postępu oraz serwerową blokadę STOP w trybie `ENFORCE`.
+- Blokadę przejścia do kolejnego obiektu przy brakujących strefach, z komunikatem
+  wskazującym obiekt i miejsca, do których pracownik musi wrócić.
+- Bezpieczne tryby `OFF`, `OBSERVE`, `ENFORCE` i zawężenie canary do organizacji
+  lub pracownika; konfiguracja wydaniowa pozostaje `OFF`.
+- Addytywną migrację i kontrakt `docs/contracts/mobile-required-zone-visits-v1.md`.
+Niezmienniki:
+- `Workday.utilityRoomId` zachowuje kod START; odwiedzana strefa pozostaje wyłącznie
+  w `Event.zoneId`.
+- Istniejące mutacje stref zachowują sygnaturę dla starszych klientów.
+Granice:
+- Nie wykonano migracji, zapisu do bazy, commita, pusha ani wdrożenia.
+- Szerokie `ENFORCE` wymaga zalogowanego E2E i decyzji o awaryjnym pominięciu.

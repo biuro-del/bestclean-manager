@@ -164,7 +164,7 @@ test('mobilny runtime wymaga schematu dla CLEAN, ale flagą blokuje wyłącznie 
   )
   assert.match(
     scan,
-    /else \{\s*const startsIndividualOrder = zone\.kind === 'INDIVIDUAL'\s*requireScanGps\('CLEAN_START', startsIndividualOrder\)\s*assertMobileCorrelationEnabled\(worker\)\s*await createMobileCycle/,
+    /else \{\s*const startsIndividualOrder = zone\.kind === 'INDIVIDUAL'\s*requireScanGps\('CLEAN_START', startsIndividualOrder\)\s*assertMobileCorrelationEnabled\(worker\)\s*const createdEvent = await createMobileCycle/,
   )
   const sameZoneBranchStart = scan.indexOf(
     "if (normalizeText(activeCycle.zone_id).toLowerCase() === normalizeText(zone.id).toLowerCase())",

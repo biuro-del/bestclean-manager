@@ -135,6 +135,7 @@ query ZonesPageForOrg($orgId: String!, $limit: Int, $offset: Int) @auth(level: U
     clientId
     zone
     function
+    requiredVisit
     editedBy
     date
     location

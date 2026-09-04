@@ -213,10 +213,29 @@ export function createZonesFeature(ctx) {
     if (functionControl) functionControl.disabled = !canEdit || generatedStartStop
     const functionToggle = document.querySelector('[data-zone-combo="znEditFunkcja"] .zones-combo-toggle')
     if (functionToggle) functionToggle.disabled = !canEdit || generatedStartStop
+    syncRequiredVisitControl()
     ;['znEditClient', 'znEditStrefa'].forEach((id) => {
       const toggle = document.querySelector(`[data-zone-combo="${id}"] .zones-combo-toggle`)
       if (toggle) toggle.disabled = !canEdit
     })
+  }
+
+  function zoneFunctionAllowsRequiredVisit(value) {
+    const normalized = String(value ?? '').trim().toUpperCase()
+    return Boolean(normalized) && !normalized.startsWith('START') && !normalized.startsWith('STOP')
+  }
+
+  function syncRequiredVisitControl(checked) {
+    const control = document.getElementById('znEditRequiredVisit')
+    if (!(control instanceof HTMLInputElement)) return
+    if (typeof checked === 'boolean') control.checked = checked
+    const functionName = String(document.getElementById('znEditFunkcja')?.value ?? '').trim()
+    const allowed = zoneFunctionAllowsRequiredVisit(functionName)
+    if (!allowed) control.checked = false
+    control.disabled = !canManageZoneQr() || !allowed
+    control.title = allowed
+      ? 'Wymagany kod musi zostać zeskanowany przed zakończeniem dnia na obiekcie.'
+      : 'Kody START i STOP nie mogą być wymaganymi strefami.'
   }
 
   function normalizeZoneDate(value) {
@@ -243,6 +262,7 @@ export function createZonesFeature(ctx) {
       zoneName: zone.name || zone.zone || unassignedLabel,
       location: zone.location || unassignedLabel,
       function: zone.function || '-',
+      requiredVisit: zone.requiredVisit === true,
       editedBy: zone.editedBy || '-',
       dateLabel: normalizeZoneDate(zone.date),
     }
@@ -549,6 +569,7 @@ export function createZonesFeature(ctx) {
     state.query = ''
     elements.hiddenInput.value = value
     elements.textInput.value = String(optionData.label || optionData.value || '').trim()
+    if (id === 'znEditFunkcja') syncRequiredVisitControl()
     closeCombo(id, { restoreText: false })
     elements.hiddenInput.dispatchEvent(new Event('change', { bubbles: true }))
   }
@@ -893,7 +914,10 @@ export function createZonesFeature(ctx) {
               <strong title="${escapeHtml(zone.zoneName)}">${escapeHtml(zone.zoneName)}</strong>
             </div>
             <div title="${escapeHtml(zone.location)}"><span class="zones-location-text">${escapeHtml(zone.location)}</span></div>
-            <div><span class="zones-function-pill ${toneClass}">${escapeHtml(zone.function)}</span></div>
+            <div class="zones-function-cell">
+              <span class="zones-function-pill ${toneClass}">${escapeHtml(zone.function)}</span>
+              ${zone.requiredVisit ? '<span class="zones-required-visit-pill">Wymagana wizyta</span>' : ''}
+            </div>
             <div class="zones-date-cell">${escapeHtml(zone.dateLabel)}</div>
             <div><strong>${escapeHtml(zone.editedBy)}</strong></div>
             <div class="zones-actions">
@@ -1746,6 +1770,7 @@ export function createZonesFeature(ctx) {
     setModalClientValue('')
     setModalZoneValue(DEFAULT_ZONE_TYPE)
     syncFunctionSelect('')
+    syncRequiredVisitControl(false)
 
     if (qrLabel) qrLabel.textContent = qr
     if (rowLabel) rowLabel.textContent = 'AUTO'
@@ -1792,6 +1817,7 @@ export function createZonesFeature(ctx) {
     setModalClientValue(view.clientId, view.clientName)
     setModalZoneValue(['-', 'Nieprzypisany'].includes(view.zoneName) ? '' : view.zoneName)
     syncFunctionSelect(view.function === '-' ? '' : view.function)
+    syncRequiredVisitControl(view.requiredVisit)
 
     if (qrLabel) qrLabel.textContent = view.qr
     if (rowLabel) rowLabel.textContent = '-'
@@ -1840,6 +1866,7 @@ export function createZonesFeature(ctx) {
     const zoneName = readModalZoneValue()
     const location = String(document.getElementById('znEditLoc')?.value ?? '').trim()
     const functionName = String(document.getElementById('znEditFunkcja')?.value ?? '').trim()
+    const requiredVisit = zoneFunctionAllowsRequiredVisit(functionName) && document.getElementById('znEditRequiredVisit')?.checked === true
     const originalZoneId = String(appState.zoneModalZoneId ?? '').trim()
     const isAddMode = appState.zoneModalMode === 'add'
     const originalQrValue = String(zoneModalOriginalQr || originalZoneId).trim()
@@ -1888,6 +1915,7 @@ export function createZonesFeature(ctx) {
         clientId,
         name: zoneName,
         function: immutableFunction,
+        requiredVisit,
         location,
         editedBy,
         date,
@@ -1925,6 +1953,7 @@ export function createZonesFeature(ctx) {
           clientId: clientId || null,
           name: zoneName || null,
           function: immutableFunction,
+          requiredVisit,
           location,
           editedBy,
           date,
@@ -2040,6 +2069,7 @@ export function createZonesFeature(ctx) {
       state.selectedValue = ''
       state.query = elements.textInput.value
       elements.hiddenInput.value = ''
+      if (id === 'znEditFunkcja') syncRequiredVisitControl(false)
 
       if (!state.open) {
         openCombo(id)

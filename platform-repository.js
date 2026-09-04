@@ -543,7 +543,10 @@ async function preserveTenantMutationAuthors(client, operationName, variables) {
               where org_id = $1::text and id_task = $2::text limit 1`
     params = [orgId, text(result.idTask)]
     assignments = { createdByUid: 'created_by_uid', updatedByUid: 'updated_by_uid' }
-  } else if (operationName === 'UpdateZoneForOrg' && text(result.zoneId)) {
+  } else if (
+    ['UpdateZoneForOrg', 'UpdateZoneWithRequiredVisitForOrg'].includes(operationName) &&
+    text(result.zoneId)
+  ) {
     query = `select edited_by from public.zone
               where org_id = $1::text and id = $2::text limit 1`
     params = [orgId, text(result.zoneId)]

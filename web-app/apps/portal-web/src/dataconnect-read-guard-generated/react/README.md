@@ -177,7 +177,7 @@ import { useWorkersPageForOrg } from '@dataconnect/read-guard-generated/react'
 export default function WorkersPageForOrgComponent() {
   // The `useWorkersPageForOrg` Query hook requires an argument of type `WorkersPageForOrgVariables`:
   const workersPageForOrgVars: WorkersPageForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -277,8 +277,8 @@ import { useWorkerForOrgByLogin } from '@dataconnect/read-guard-generated/react'
 export default function WorkerForOrgByLoginComponent() {
   // The `useWorkerForOrgByLogin` Query hook requires an argument of type `WorkerForOrgByLoginVariables`:
   const workerForOrgByLoginVars: WorkerForOrgByLoginVariables = {
-    orgId: ..., 
-    workerLogin: ..., 
+    orgId: ...,
+    workerLogin: ...,
   };
 
   // You don't have to do anything to "execute" the Query.
@@ -411,7 +411,7 @@ import { useClientsPageForOrg } from '@dataconnect/read-guard-generated/react'
 export default function ClientsPageForOrgComponent() {
   // The `useClientsPageForOrg` Query hook requires an argument of type `ClientsPageForOrgVariables`:
   const clientsPageForOrgVars: ClientsPageForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -486,6 +486,7 @@ export interface ZonesPageForOrgData {
     clientId?: string | null;
     zone?: string | null;
     function?: string | null;
+    requiredVisit: boolean;
     editedBy?: string | null;
     date?: TimestampString | null;
     location?: string | null;
@@ -505,7 +506,7 @@ import { useZonesPageForOrg } from '@dataconnect/read-guard-generated/react'
 export default function ZonesPageForOrgComponent() {
   // The `useZonesPageForOrg` Query hook requires an argument of type `ZonesPageForOrgVariables`:
   const zonesPageForOrgVars: ZonesPageForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -604,7 +605,7 @@ import { useBackupCyclesPageForOrg } from '@dataconnect/read-guard-generated/rea
 export default function BackupCyclesPageForOrgComponent() {
   // The `useBackupCyclesPageForOrg` Query hook requires an argument of type `BackupCyclesPageForOrgVariables`:
   const backupCyclesPageForOrgVars: BackupCyclesPageForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
     limit: ..., // optional
     offset: ..., // optional
   };
@@ -703,7 +704,7 @@ import { useWorkdayPausesPageForOrg } from '@dataconnect/read-guard-generated/re
 export default function WorkdayPausesPageForOrgComponent() {
   // The `useWorkdayPausesPageForOrg` Query hook requires an argument of type `WorkdayPausesPageForOrgVariables`:
   const workdayPausesPageForOrgVars: WorkdayPausesPageForOrgVariables = {
-    orgId: ..., 
+    orgId: ...,
     limit: ..., // optional
     offset: ..., // optional
   };

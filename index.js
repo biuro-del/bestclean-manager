@@ -56,6 +56,7 @@ const { createFacilityManagerFirebaseAppCheckGate } = require('./facility-manage
 const { createFacilityManagerFirestoreRateGate } = require('./facility-manager-registration-firestore-rate-gate')
 const { createFacilityManagerObjectService } = require('./facility-manager-object-service')
 const { createFacilityManagerObjectApi } = require('./facility-manager-object-api')
+const { createPortalZoneApi } = require('./portal-zone-api')
 const {
   CLEANING_COMPANY_ONBOARDING_REQUIRED,
   CleaningCompanyOnboardingError,
@@ -108,6 +109,10 @@ const {
 } = require('./mobile-open-cycle-policy')
 const { resolveOpenWorkdayState } = require('./mobile-open-workday-policy')
 const { mobileCorrelationRolloutDecision } = require('./mobile-correlation-rollout-policy')
+const {
+  requiredZoneVisitRolloutDecision,
+  selectBlockingRequiredZoneVisit,
+} = require('./mobile-required-zone-visits-policy')
 const {
   assertNoWorkerScheduleLocationConflicts,
   isScheduleOrderActive,
@@ -175,6 +180,7 @@ const PORTAL_TASKS_PATH = '/api/portal/tasks'
 const PORTAL_SCHEDULE_ORDERS_PATH = '/api/portal/schedule-orders'
 const PORTAL_JOB_CARDS_PATH = '/api/portal/job-cards'
 const PORTAL_EVENTS_PATH = '/api/portal/events'
+const PORTAL_ZONES_PATH = '/api/portal/zones'
 const PORTAL_ZONE_QR_CODES_PATH = '/api/portal/zones/qr-codes'
 const PORTAL_PROFITABILITY_PATH = '/api/portal/profitability'
 const PORTAL_WORKDAY_STOP_PROPOSALS_PATH = '/api/portal/workday-stop-proposals'
@@ -2517,6 +2523,7 @@ function mapMobileZoneRow(row) {
     location: normalizeText(row.location),
     kind: classified.kind,
     stopGraceMin: classified.stopGraceMin,
+    requiredVisit: row.required_visit === true,
   }
 }
 
@@ -2865,6 +2872,7 @@ async function readPublishedMobileJobCards(client, orgId, worker) {
 async function fetchMobileZones(client, orgId) {
   const result = await client.query(
     `select z.id as zone_id, z.client_id, z.zone as zone_name, z.function as function_name, z.location,
+            coalesce((to_jsonb(z) ->> 'required_visit')::boolean, false) as required_visit,
             c.name as client_name
        from public.zone z
        left join public.client c on c.org_id = z.org_id and c.client_id = z.client_id
@@ -2880,6 +2888,7 @@ async function findMobileZoneByQr(client, orgId, qrCode) {
   const compact = compactMobileKey(code)
   const result = await client.query(
     `select z.id as zone_id, z.client_id, z.zone as zone_name, z.function as function_name, z.location,
+            coalesce((to_jsonb(z) ->> 'required_visit')::boolean, false) as required_visit,
             c.name as client_name
        from public.zone z
        left join public.client c on c.org_id = z.org_id and c.client_id = z.client_id
@@ -2892,6 +2901,358 @@ async function findMobileZoneByQr(client, orgId, qrCode) {
     [orgId, code, compact],
   )
   return mapMobileZoneRow(resolveMobileZoneQrRows(result.rows, code))
+}
+
+function mobileRequiredZoneVisitDecision(orgId, worker) {
+  return requiredZoneVisitRolloutDecision({
+    mode: process.env.MOBILE_REQUIRED_ZONE_VISITS_MODE,
+    canaryOrgIds: process.env.MOBILE_REQUIRED_ZONE_VISITS_CANARY_ORG_IDS,
+    canaryWorkerIds: process.env.MOBILE_REQUIRED_ZONE_VISITS_CANARY_WORKER_IDS,
+    orgId,
+    worker,
+  })
+}
+
+function mobileRequiredZoneVisitEmptyState(decision, overrides = {}) {
+  return {
+    enabled: decision?.enabled === true,
+    available: decision?.enabled !== true || overrides.available !== false,
+    mode: normalizeText(decision?.mode) || 'OFF',
+    allComplete: true,
+    incompleteObjectCount: 0,
+    activeObject: null,
+    objects: [],
+    ...overrides,
+  }
+}
+
+async function inspectMobileRequiredZoneVisitSchema(client) {
+  const result = await client.query(
+    `select
+       exists (
+         select 1
+           from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'zone'
+            and column_name = 'required_visit'
+            and data_type = 'boolean'
+       ) as zone_required_visit_ready,
+       to_regclass('public.mobile_object_visit') is not null as visit_table_ready,
+       to_regclass('public.mobile_object_visit_requirement') is not null as requirement_table_ready`,
+  )
+  const row = result.rows[0] || {}
+  return {
+    ready:
+      row.zone_required_visit_ready === true &&
+      row.visit_table_ready === true &&
+      row.requirement_table_ready === true,
+    zoneRequiredVisitReady: row.zone_required_visit_ready === true,
+    visitTableReady: row.visit_table_ready === true,
+    requirementTableReady: row.requirement_table_ready === true,
+  }
+}
+
+function createMobileRequiredZoneVisitSchemaError(schema) {
+  const error = new Error('MOBILE_REQUIRED_ZONE_VISITS_SCHEMA_NOT_READY')
+  error.statusCode = 503
+  error.publicCode = 'REQUIRED_ZONE_VISITS_UNAVAILABLE'
+  error.publicMessage = 'Lista wymaganych stref jest chwilowo niedostepna. Nie mozna bezpiecznie zakonczyc pracy.'
+  error.publicDetails = {
+    zoneRequiredVisitReady: schema?.zoneRequiredVisitReady === true,
+    visitTableReady: schema?.visitTableReady === true,
+    requirementTableReady: schema?.requirementTableReady === true,
+  }
+  return error
+}
+
+function makeMobileObjectVisitId(orgId, workdayId, clientId) {
+  const digest = crypto
+    .createHash('sha256')
+    .update(`${normalizeOrgId(orgId)}\u0000${normalizeText(workdayId)}\u0000${normalizeText(clientId)}`)
+    .digest('hex')
+    .slice(0, 40)
+  return `MOV_${digest}`
+}
+
+function mapMobileRequiredZoneVisitRows(rows, activeClientId = '') {
+  const visits = new Map()
+  for (const row of rows || []) {
+    const visitId = normalizeText(row.visit_id)
+    if (!visitId) continue
+    if (!visits.has(visitId)) {
+      visits.set(visitId, {
+        visitId,
+        clientId: normalizeText(row.client_id),
+        clientName: normalizeText(row.client_name) || normalizeText(row.client_id),
+        sourceZoneId: normalizeText(row.source_zone_id),
+        status: normalizeText(row.visit_status) || 'ACTIVE',
+        startedAt: mobileIso(row.started_at),
+        completedAt: mobileIso(row.completed_at),
+        overriddenAt: mobileIso(row.overridden_at),
+        overrideReason: normalizeText(row.override_reason),
+        zones: [],
+      })
+    }
+    if (normalizeText(row.requirement_zone_id)) {
+      visits.get(visitId).zones.push({
+        zoneId: normalizeText(row.requirement_zone_id),
+        name: normalizeText(row.requirement_zone_name) || normalizeText(row.requirement_zone_id),
+        location: normalizeText(row.requirement_location),
+        visited: Boolean(row.visited_at),
+        visitedAt: mobileIso(row.visited_at),
+      })
+    }
+  }
+
+  const objects = [...visits.values()].map((visit) => {
+    visit.zones.sort((left, right) => left.name.localeCompare(right.name, 'pl', { sensitivity: 'base' }))
+    const requiredCount = visit.zones.length
+    const visitedCount = visit.zones.filter((zone) => zone.visited).length
+    const missingZones = visit.zones.filter((zone) => !zone.visited)
+    const overridden = visit.status === 'OVERRIDDEN'
+    const complete = overridden || missingZones.length === 0
+    return {
+      ...visit,
+      status: overridden ? 'OVERRIDDEN' : complete ? 'COMPLETED' : 'ACTIVE',
+      complete,
+      overridden,
+      requiredCount,
+      visitedCount,
+      remainingCount: missingZones.length,
+      missingZones,
+    }
+  })
+
+  const activeKey = normalizeText(activeClientId).toLowerCase()
+  const activeObject =
+    objects.find((visit) => normalizeText(visit.clientId).toLowerCase() === activeKey) ||
+    objects.find((visit) => !visit.complete) ||
+    objects[0] ||
+    null
+  const incompleteObjectCount = objects.filter((visit) => !visit.complete).length
+  return {
+    objects,
+    activeObject,
+    incompleteObjectCount,
+    allComplete: incompleteObjectCount === 0,
+  }
+}
+
+async function readMobileRequiredZoneVisitState(client, orgId, worker, activeWorkday, activeCycle = null) {
+  const decision = mobileRequiredZoneVisitDecision(orgId, worker)
+  if (!decision.enabled || !activeWorkday?.workday_id) {
+    return mobileRequiredZoneVisitEmptyState(decision)
+  }
+
+  const schema = await inspectMobileRequiredZoneVisitSchema(client)
+  if (!schema.ready) {
+    if (decision.enforce) throw createMobileRequiredZoneVisitSchemaError(schema)
+    return mobileRequiredZoneVisitEmptyState(decision, {
+      available: false,
+      message: 'Lista wymaganych stref oczekuje na przygotowanie bazy.',
+    })
+  }
+
+  const result = await client.query(
+    `select
+       v.visit_id,
+       v.client_id,
+       v.client_name,
+       v.source_zone_id,
+       v.status as visit_status,
+       v.started_at,
+       v.completed_at,
+       v.overridden_at,
+       v.override_reason,
+       r.zone_id as requirement_zone_id,
+       r.zone_name as requirement_zone_name,
+       r.location as requirement_location,
+       r.visited_at
+     from public.mobile_object_visit v
+     left join public.mobile_object_visit_requirement r
+       on r.org_id = v.org_id and r.visit_id = v.visit_id
+    where v.org_id = $1
+      and v.workday_id = $2
+    order by v.started_at desc, r.zone_name asc nulls last, r.zone_id asc nulls last`,
+    [orgId, activeWorkday.workday_id],
+  )
+  const mapped = mapMobileRequiredZoneVisitRows(result.rows, activeCycle?.client_id)
+  return mobileRequiredZoneVisitEmptyState(decision, mapped)
+}
+
+async function ensureMobileObjectVisit(client, orgId, worker, activeWorkday, zone, scannedAt) {
+  const clientId = normalizeText(zone?.clientId)
+  if (!activeWorkday?.workday_id || !clientId || clientId.toUpperCase() === PORTAL_ZONE_QR_UNASSIGNED_CLIENT_ID) {
+    return null
+  }
+
+  const visitId = makeMobileObjectVisitId(orgId, activeWorkday.workday_id, clientId)
+  const inserted = await client.query(
+    `insert into public.mobile_object_visit (
+       org_id, visit_id, workday_id, worker_login, client_id, client_name,
+       source_zone_id, status, started_at, created_at, updated_at
+     ) values ($1,$2,$3,$4,$5,$6,$7,'ACTIVE',$8,now(),now())
+     on conflict (org_id, workday_id, client_id) do nothing
+     returning visit_id`,
+    [
+      orgId,
+      visitId,
+      activeWorkday.workday_id,
+      worker.login,
+      clientId,
+      normalizeText(zone?.clientName),
+      normalizeText(zone?.id) || null,
+      scannedAt,
+    ],
+  )
+
+  if (inserted.rows.length) {
+    await client.query(
+      `insert into public.mobile_object_visit_requirement (
+         org_id, visit_id, zone_id, zone_name, location, created_at, updated_at
+       )
+       select z.org_id, $2, z.id, coalesce(nullif(btrim(z.zone), ''), z.id), z.location, now(), now()
+         from public.zone z
+        where z.org_id = $1
+          and z.client_id = $3
+          and z.required_visit is true
+          and upper(btrim(coalesce(z.function, ''))) not like 'START%'
+          and upper(btrim(coalesce(z.function, ''))) not like 'STOP%'
+       on conflict (org_id, visit_id, zone_id) do nothing`,
+      [orgId, visitId, clientId],
+    )
+  }
+
+  const resolved = await client.query(
+    `select visit_id
+       from public.mobile_object_visit
+      where org_id = $1 and workday_id = $2 and client_id = $3
+      limit 1`,
+    [orgId, activeWorkday.workday_id, clientId],
+  )
+  return normalizeText(resolved.rows[0]?.visit_id) || null
+}
+
+async function recordMobileRequiredZoneVisit(client, orgId, worker, activeWorkday, zone, {
+  scannedAt = new Date(),
+  eventId = '',
+  clientActionId = '',
+} = {}) {
+  const decision = mobileRequiredZoneVisitDecision(orgId, worker)
+  if (!decision.enabled) return null
+
+  const schema = await inspectMobileRequiredZoneVisitSchema(client)
+  if (!schema.ready) {
+    if (decision.enforce) throw createMobileRequiredZoneVisitSchemaError(schema)
+    return null
+  }
+
+  const visitId = await ensureMobileObjectVisit(client, orgId, worker, activeWorkday, zone, scannedAt)
+  if (!visitId) return null
+
+  await client.query(
+    `update public.mobile_object_visit_requirement
+        set visited_at = coalesce(visited_at, $4),
+            visited_event_id = coalesce(visited_event_id, nullif($5, '')),
+            visited_client_action_id = coalesce(visited_client_action_id, nullif($6, '')),
+            updated_at = now()
+      where org_id = $1 and visit_id = $2 and zone_id = $3`,
+    [orgId, visitId, normalizeText(zone?.id), scannedAt, normalizeText(eventId), normalizeText(clientActionId)],
+  )
+  await client.query(
+    `update public.mobile_object_visit v
+        set status = case
+              when v.status = 'OVERRIDDEN' then v.status
+              when not exists (
+                select 1
+                  from public.mobile_object_visit_requirement r
+                 where r.org_id = v.org_id and r.visit_id = v.visit_id and r.visited_at is null
+              ) then 'COMPLETED'
+              else 'ACTIVE'
+            end,
+            completed_at = case
+              when v.status = 'OVERRIDDEN' then v.completed_at
+              when not exists (
+                select 1
+                  from public.mobile_object_visit_requirement r
+                 where r.org_id = v.org_id and r.visit_id = v.visit_id and r.visited_at is null
+              ) then coalesce(v.completed_at, $3)
+              else null
+            end,
+            updated_at = now()
+      where v.org_id = $1 and v.visit_id = $2`,
+    [orgId, visitId, scannedAt],
+  )
+  return visitId
+}
+
+async function assertMobileRequiredZoneVisitsComplete(client, orgId, worker, activeWorkday, activeCycle = null) {
+  const decision = mobileRequiredZoneVisitDecision(orgId, worker)
+  if (!decision.enforce) return null
+
+  const state = await readMobileRequiredZoneVisitState(client, orgId, worker, activeWorkday, activeCycle)
+  const incomplete = state.objects.filter((visit) => !visit.complete)
+  if (!incomplete.length) return state
+
+  const missing = incomplete.flatMap((visit) => visit.missingZones.map((zone) => ({
+    clientId: visit.clientId,
+    clientName: visit.clientName,
+    zoneId: zone.zoneId,
+    zoneName: zone.name,
+    location: zone.location,
+  })))
+  const labels = missing.slice(0, 5).map((zone) => zone.zoneName || zone.zoneId)
+  const suffix = missing.length > labels.length ? ` i jeszcze ${missing.length - labels.length}` : ''
+  const error = new Error('MOBILE_REQUIRED_ZONE_VISITS_INCOMPLETE')
+  error.statusCode = 409
+  error.publicCode = 'REQUIRED_ZONES_INCOMPLETE'
+  error.publicMessage = `Nie mozna jeszcze zakonczyc dnia. Zeskanuj brakujace strefy: ${labels.join(', ')}${suffix}.`
+  error.publicDetails = {
+    incompleteObjectCount: incomplete.length,
+    missingZoneCount: missing.length,
+    missingZones: missing.slice(0, 50),
+  }
+  throw error
+}
+
+async function assertMobileRequiredZoneObjectTransitionAllowed(
+  client,
+  orgId,
+  worker,
+  activeWorkday,
+  targetZone,
+  activeCycle = null,
+) {
+  const decision = mobileRequiredZoneVisitDecision(orgId, worker)
+  if (!decision.enforce) return null
+
+  const state = await readMobileRequiredZoneVisitState(client, orgId, worker, activeWorkday, activeCycle)
+  const guardedVisit = selectBlockingRequiredZoneVisit({
+    objects: state.objects,
+    activeObject: state.activeObject,
+    activeCycleClientId: activeCycle?.client_id,
+    targetClientId: targetZone?.clientId,
+  })
+
+  if (!guardedVisit) {
+    return state
+  }
+
+  const missing = guardedVisit.missingZones || []
+  const labels = missing.slice(0, 5).map((zone) => zone.name || zone.zoneId)
+  const suffix = missing.length > labels.length ? ` i jeszcze ${missing.length - labels.length}` : ''
+  const objectName = guardedVisit.clientName || guardedVisit.clientId
+  const error = new Error('MOBILE_REQUIRED_ZONE_OBJECT_INCOMPLETE')
+  error.statusCode = 409
+  error.publicCode = 'REQUIRED_OBJECT_ZONES_INCOMPLETE'
+  error.publicMessage = `Hej, na obiekcie ${objectName} nie wszystko zostało zrobione. Wróć do: ${labels.join(', ')}${suffix}.`
+  error.publicDetails = {
+    clientId: guardedVisit.clientId,
+    clientName: guardedVisit.clientName,
+    missingZoneCount: missing.length,
+    missingZones: missing.slice(0, 50),
+  }
+  throw error
 }
 
 async function fetchMobileOpenWorkdayState(client, orgId, workerLogin) {
@@ -3249,6 +3610,13 @@ async function buildMobileSnapshotFromDb(client, orgId, worker, { persistRuntime
 
   const activeWorkday = mapMobileWorkdayRow(activeWorkdayRaw)
   const activeCycle = mapMobileEventRow(activeCycleRaw)
+  const requiredZoneVisits = await readMobileRequiredZoneVisitState(
+    client,
+    orgId,
+    worker,
+    activeWorkdayRaw,
+    activeCycleRaw,
+  )
   const staleOpenWorkdays = openWorkdayState.staleWorkdays.map(mapMobileWorkdayRow).filter(Boolean)
   const staleOpenCycles = priorOpenCycleRows.map(mapMobileEventRow).filter(Boolean)
   const unresolvedPriorCycles = priorUnresolvedCycleRows.map(mapMobileEventRow).filter(Boolean)
@@ -3284,6 +3652,7 @@ async function buildMobileSnapshotFromDb(client, orgId, worker, { persistRuntime
     activePause,
     pauseTotalSec: Number(activeWorkday?.pauseTotalSec || 0),
     activeCycle,
+    requiredZoneVisits,
     openCycleIntegrity,
     summary: buildMobileSummary(activeWorkdayRaw),
     workdayEvents: buildMobileWorkdayEvents(workdays),
@@ -3556,6 +3925,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
   const openWorkdayState = await fetchMobileOpenWorkdayState(client, orgId, worker.login)
   let activeWorkday = openWorkdayState.activeWorkday
   let activeCycle = null
+  let visitEventId = ''
   let action = 'NOOP'
   let message = 'Brak zmian.'
   const scanGpsData = normalizeMobileGpsData(body?.gpsData ?? body?.clientGps ?? body?.gps ?? body?.location)
@@ -3585,6 +3955,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
       error.publicMessage = 'Brak aktywnego dnia pracy. Najpierw zeskanuj START.'
       throw error
     }
+    await assertMobileRequiredZoneVisitsComplete(client, orgId, worker, activeWorkday)
     await closeMobileOpenCycles(
       client,
       orgId,
@@ -3632,13 +4003,28 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
     assertNoUnresolvedOpenEvents(unresolvedCycleState.blocking)
     const openCycleRows = await fetchOpenMobileCycles(client, orgId, worker.login)
     activeCycle = resolveOpenCycleState(openCycleRows, activeWorkday?.workday_id).activeCycle
+    await assertMobileRequiredZoneObjectTransitionAllowed(
+      client,
+      orgId,
+      worker,
+      activeWorkday,
+      zone,
+      activeCycle,
+    )
 
     if (activeCycle && isMobileEventOpen(activeCycle)) {
       if (normalizeText(activeCycle.zone_id).toLowerCase() === normalizeText(zone.id).toLowerCase()) {
-        await closeMobileEvent(client, orgId, activeCycle, 'QR_SAME', scannedAt, comment, '')
+        const closedEvent = await closeMobileEvent(client, orgId, activeCycle, 'QR_SAME', scannedAt, comment, '')
+        visitEventId = normalizeText(closedEvent?.event_id || activeCycle.event_id)
         action = 'CLOSE_ZONE'
         message = 'Zapisano na serwerze. Zakonczono sprzatanie tej strefy.'
         if (body?.closeWorkdayImmediately) {
+          await recordMobileRequiredZoneVisit(client, orgId, worker, activeWorkday, zone, {
+            scannedAt,
+            eventId: visitEventId,
+            clientActionId,
+          })
+          await assertMobileRequiredZoneVisitsComplete(client, orgId, worker, activeWorkday, activeCycle)
           await closeMobileWorkday(client, orgId, activeWorkday, zone, scannedAt, comment, '')
           action = 'CLOSE_ZONE_AND_WORKDAY'
           message = 'Zapisano na serwerze. Zakonczono strefe i dzien pracy.'
@@ -3656,7 +4042,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
           comment,
           '',
         )
-        await createMobileCycle(
+        const createdEvent = await createMobileCycle(
           client,
           orgId,
           worker,
@@ -3666,6 +4052,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
           comment,
           scanGpsNote('CLEAN_START', startsIndividualOrder),
         )
+        visitEventId = normalizeText(createdEvent?.event_id)
         action = 'SWITCH_ZONE'
         message = `Zapisano na serwerze. Zmiana strefy na: ${zone.name || zone.id}.`
       }
@@ -3673,7 +4060,7 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
       const startsIndividualOrder = zone.kind === 'INDIVIDUAL'
       requireScanGps('CLEAN_START', startsIndividualOrder)
       assertMobileCorrelationEnabled(worker)
-      await createMobileCycle(
+      const createdEvent = await createMobileCycle(
         client,
         orgId,
         worker,
@@ -3683,9 +4070,18 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
         comment,
         scanGpsNote('CLEAN_START', startsIndividualOrder),
       )
+      visitEventId = normalizeText(createdEvent?.event_id)
       action = 'START_ZONE'
       message = `Zapisano na serwerze. Rozpoczeto sprzatanie: ${zone.name || zone.id}.`
     }
+  }
+
+  if (zone.kind !== 'STOP' && activeWorkday) {
+    await recordMobileRequiredZoneVisit(client, orgId, worker, activeWorkday, zone, {
+      scannedAt,
+      eventId: visitEventId,
+      clientActionId,
+    })
   }
 
   const snapshot = await buildMobileSnapshotFromDb(client, orgId, worker, { persistRuntimeState: true })
@@ -8143,6 +8539,31 @@ async function requirePortalZoneQrAccess(client, orgId, uid) {
   return { membership, role }
 }
 
+async function requirePortalZoneAccess(client, { orgId, uid, write = false }) {
+  const membership = await getRequesterMembership(client, orgId, uid)
+  if (!membership) {
+    const error = new Error('ORG_ACCESS_MISSING')
+    error.statusCode = 404
+    error.publicCode = 'ORG_ACCESS_MISSING'
+    error.publicMessage = 'Brak dostępu do tej organizacji.'
+    throw error
+  }
+  if (write) {
+    assertMembershipPlanCapability(membership, 'timeQrNfc')
+  }
+  const role = normalizeRequesterRole(membership?.role)
+  if (write && !['ADMIN', 'MANAGER', 'OWNER', 'PLATFORM_OWNER'].includes(role)) {
+    const error = new Error('FORBIDDEN')
+    error.statusCode = membership ? 403 : 404
+    error.publicCode = membership ? 'FORBIDDEN' : 'ORG_ACCESS_MISSING'
+    error.publicMessage = membership
+      ? 'Brak uprawnień do edycji stref.'
+      : 'Brak dostępu do tej organizacji.'
+    throw error
+  }
+  return { membership, role }
+}
+
 async function insertPortalZoneQrCodes(client, { orgId, items, clientId, zone, editedBy }) {
   const orgToken = portalZoneQrOrgToken(orgId)
   const idPrefix = `QRC_${orgToken}_Z`
@@ -10503,6 +10924,18 @@ const workdayStopProposalApi = createWorkdayStopProposalApi({
   verifyFirebaseIdToken,
 })
 
+const portalZoneApi = createPortalZoneApi({
+  authorize: requirePortalZoneAccess,
+  connectDbClient,
+  mapDatabaseConnectionError,
+  mapFirebaseAdminError,
+  parseBearerToken,
+  readJsonBody,
+  sendApiError,
+  sendJson,
+  verifyFirebaseIdToken: verifySessionContextFirebaseIdToken,
+})
+
 const server = http.createServer((req, res) => runWithPlatformRequest(req, () => {
   const scopedRequest = getPlatformRequestContext()
   res.once('finish', () => {
@@ -10609,6 +11042,13 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   ) {
     handleMobileWorkflowRequest(req, res, requestUrl).catch((error) => {
       sendMobileApiError(res, 500, 'MOBILE_WORKFLOW_ERROR', error?.message || 'Unexpected mobile workflow error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === PORTAL_ZONES_PATH) {
+    portalZoneApi.handle(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'PORTAL_ZONE_ERROR', error?.message || 'Unexpected portal zone error.')
     })
     return
   }

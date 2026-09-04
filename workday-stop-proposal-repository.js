@@ -117,6 +117,30 @@ function createWorkdayStopProposalRepository(client) {
       return result.rows?.[0] ?? null
     },
 
+    // The History view requests only a bounded set of visible Workday IDs.
+    // It remains scoped to the token-resolved worker and organization and does
+    // not lock or mutate Workday/proposal rows.
+    async listForMobileWorkerWorkdays({ orgId, workerId, workerLogin, workdayIds }) {
+      const ids = Array.isArray(workdayIds) ? workdayIds : []
+      const canonicalWorkerId = text(workerId)
+      const normalizedWorkerLogin = text(workerLogin)
+      if (!ids.length || !canonicalWorkerId || !normalizedWorkerLogin) return []
+      const result = await client.query(
+        `select distinct on (p.workday_id) p.*
+           from public.workday_stop_proposal p
+           join public.workday w
+             on w.org_id = p.org_id
+            and w.workday_id = p.workday_id
+          where p.org_id = $1::text
+            and p.worker_id = $2::text
+            and lower(btrim(w.worker_login)) = lower(btrim($3::text))
+            and p.workday_id = any($4::text[])
+          order by p.workday_id, p.submitted_at desc, p.proposal_id desc`,
+        [orgId, canonicalWorkerId, normalizedWorkerLogin, ids],
+      )
+      return result.rows ?? []
+    },
+
     async insertProposal(input) {
       const result = await client.query(
         `insert into public.workday_stop_proposal (

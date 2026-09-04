@@ -2,6 +2,69 @@
   color:#0b234c;
 }
 
+#portalRoot #view-zones .zones-checkbox{
+  display:flex;
+  align-items:flex-start;
+  gap:12px;
+  min-height:48px;
+  padding:12px 14px;
+  border:1px solid rgba(37,99,235,.2);
+  border-radius:12px;
+  background:rgba(239,246,255,.72);
+  cursor:pointer;
+}
+
+#portalRoot #view-zones .zones-checkbox input{
+  width:20px;
+  height:20px;
+  margin:1px 0 0;
+  flex:0 0 auto;
+  accent-color:#2563eb;
+}
+
+#portalRoot #view-zones .zones-checkbox span{
+  display:grid;
+  gap:3px;
+}
+
+#portalRoot #view-zones .zones-checkbox strong{
+  color:#0f172a;
+  font-size:14px;
+}
+
+#portalRoot #view-zones .zones-checkbox small{
+  color:#52637a;
+  font-size:12px;
+  line-height:1.35;
+}
+
+#portalRoot #view-zones .zones-checkbox:has(input:disabled){
+  cursor:not-allowed;
+  opacity:.62;
+}
+
+#portalRoot #view-zones .zones-function-cell{
+  display:flex;
+  align-items:flex-start;
+  flex-direction:column;
+  gap:5px;
+}
+
+#portalRoot #view-zones .zones-required-visit-pill{
+  display:inline-flex;
+  align-items:center;
+  min-height:21px;
+  padding:2px 8px;
+  border:1px solid rgba(245,158,11,.32);
+  border-radius:999px;
+  background:#fff7ed;
+  color:#9a3412;
+  font-size:10px;
+  font-weight:800;
+  line-height:1.2;
+  white-space:nowrap;
+}
+
 #portalRoot #view-zones .zones-title{
   color:#061b3f !important;
   font-size:32px !important;

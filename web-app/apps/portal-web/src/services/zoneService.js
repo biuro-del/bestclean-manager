@@ -1,8 +1,8 @@
 import {
   deleteZoneForOrg,
-  insertZoneForOrg,
+  isPlatformSession,
   platformAuthHeaders,
-  updateZoneForOrg,
+  platformContextHeaders,
   zonesForOrg,
   zonesPageForOrg,
 } from './platformDataConnectService'
@@ -68,6 +68,15 @@ function toText(value) {
   return String(value ?? '').trim()
 }
 
+function toBoolean(value) {
+  return value === true || ['1', 'true', 'yes', 'tak'].includes(toText(value).toLowerCase())
+}
+
+function functionAllowsRequiredVisit(value) {
+  const normalized = toText(value).toUpperCase()
+  return Boolean(normalized) && !normalized.startsWith('START') && !normalized.startsWith('STOP')
+}
+
 function portalApiBase() {
   const raw = toText(import.meta.env.VITE_ADMIN_API_BASE || '/api').replace(/\/+$/, '')
   if (!raw) return '/api'
@@ -108,6 +117,51 @@ async function parsePortalApiResponse(response) {
   return body?.data ?? {}
 }
 
+async function portalZoneAuthHeaders() {
+  if (isPlatformSession()) {
+    return platformAuthHeaders()
+  }
+  const user = ensureFirebase()?.auth?.currentUser
+  if (!user) {
+    throw new Error('Sesja wygasła. Zaloguj się ponownie.')
+  }
+  return {
+    Authorization: `Bearer ${await user.getIdToken()}`,
+    ...platformContextHeaders(),
+  }
+}
+
+async function fetchRequiredVisitFlags(orgId) {
+  const search = new URLSearchParams({ orgId: toText(orgId) })
+  const response = await fetch(`${portalApiBase()}/portal/zones?${search.toString()}`, {
+    headers: {
+      ...(await portalZoneAuthHeaders()),
+      Accept: 'application/json',
+    },
+  })
+  const data = await parsePortalApiResponse(response)
+  return new Map(
+    (Array.isArray(data?.zones) ? data.zones : []).map((row) => [
+      toText(row?.zoneId),
+      row?.requiredVisit === true,
+    ]),
+  )
+}
+
+async function writeZoneThroughPortalApi(method, payload) {
+  const response = await fetch(`${portalApiBase()}/portal/zones`, {
+    method,
+    headers: {
+      ...(await portalZoneAuthHeaders()),
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+  const data = await parsePortalApiResponse(response)
+  return data?.zone ?? null
+}
+
 function mapZone(orgId, row) {
   const zoneId = toText(row?.ZoneId ?? row?.zoneId ?? row?.id)
   const clientId = normalizedZoneClientId(row?.clientId)
@@ -127,6 +181,7 @@ function mapZone(orgId, row) {
     name: toText(row?.zone),
     zone: toText(row?.zone),
     function: toText(row?.function),
+    requiredVisit: toBoolean(row?.requiredVisit),
     location: toText(row?.location),
     workerLogin,
     workerName,
@@ -191,8 +246,16 @@ export async function getZones(orgId, options = {}) {
     invalidateZonesCache(orgId)
   }
   return readZonesCached(orgId, async () => {
-    const rows = await fetchZoneRows(orgId)
-    return sortZonesForDisplay(rows.map((row) => mapZone(orgId, row)))
+    const [rows, requiredVisitFlags] = await Promise.all([
+      fetchZoneRows(orgId),
+      fetchRequiredVisitFlags(orgId),
+    ])
+    return sortZonesForDisplay(
+      rows.map((row) => ({
+        ...mapZone(orgId, row),
+        requiredVisit: requiredVisitFlags.get(toText(row?.ZoneId ?? row?.zoneId ?? row?.id)) === true,
+      })),
+    )
   })
 }
 
@@ -204,6 +267,8 @@ export async function getZoneById(orgId, zoneId) {
 export async function createZone(orgId, payload) {
   const zoneId = toText(payload?.zoneId ?? payload?.id ?? payload?.code ?? payload?.qr)
   const clientId = toText(payload?.clientId)
+  const functionName = toText(payload?.function)
+  const requiredVisit = functionAllowsRequiredVisit(functionName) && toBoolean(payload?.requiredVisit)
 
   if (!zoneId) {
     throw new Error('Pole zoneId jest wymagane dla createZone(orgId).')
@@ -217,13 +282,13 @@ export async function createZone(orgId, payload) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
-  ensureFirebase()
-  await insertZoneForOrg({
+  const saved = await writeZoneThroughPortalApi('POST', {
     orgId,
     zoneId,
     clientId,
     zone: payload?.name ?? payload?.zone ?? null,
-    function: payload?.function ?? null,
+    function: functionName || null,
+    requiredVisit,
     location: payload?.location ?? null,
     editedBy: payload?.editedBy ?? null,
     date: payload?.date ?? null,
@@ -231,12 +296,14 @@ export async function createZone(orgId, payload) {
   invalidateZonesCache(orgId)
 
   return {
+    ...saved,
     id: zoneId,
     zoneId,
     orgId,
     clientId,
     name: toText(payload?.name ?? payload?.zone),
-    function: toText(payload?.function),
+    function: functionName,
+    requiredVisit,
     location: toText(payload?.location),
     workerLogin: toText(payload?.workerLogin),
     workerName: toText(payload?.workerName),
@@ -249,6 +316,8 @@ export async function updateZone(orgId, zoneId, payload) {
   const clientId = toText(payload?.clientId)
   const existingZone = await getZoneById(orgId, zoneId)
   const generatedZoneQr = isGeneratedZoneQr(existingZone)
+  const functionName = generatedZoneQr ? toText(existingZone?.function) : toText(payload?.function)
+  const requiredVisit = functionAllowsRequiredVisit(functionName) && toBoolean(payload?.requiredVisit)
 
   if (!clientId && !generatedZoneQr) {
     throw new Error('Pole clientId jest wymagane dla updateZone(orgId, zoneId).')
@@ -258,13 +327,13 @@ export async function updateZone(orgId, zoneId, payload) {
     throw new Error('Brak konfiguracji Firebase. Uzupełnij web-app/.env.')
   }
 
-  ensureFirebase()
-  await updateZoneForOrg({
+  const saved = await writeZoneThroughPortalApi('PATCH', {
     orgId,
     zoneId: toText(zoneId),
     clientId: clientId || (generatedZoneQr ? LEGACY_UNASSIGNED_CLIENT_ID : null),
     zone: payload?.name ?? payload?.zone ?? null,
-    function: generatedZoneQr ? existingZone.function : payload?.function ?? null,
+    function: functionName || null,
+    requiredVisit,
     location: payload?.location ?? null,
     editedBy: payload?.editedBy ?? null,
     date: payload?.date ?? null,
@@ -272,11 +341,13 @@ export async function updateZone(orgId, zoneId, payload) {
   invalidateZonesCache(orgId)
 
   return {
+    ...saved,
     id: zoneId,
     orgId,
     clientId,
     name: toText(payload?.name ?? payload?.zone),
-    function: generatedZoneQr ? existingZone.function : toText(payload?.function),
+    function: functionName,
+    requiredVisit,
     location: toText(payload?.location),
     workerLogin: toText(payload?.workerLogin),
     workerName: toText(payload?.workerName),

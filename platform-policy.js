@@ -56,6 +56,8 @@ const PLATFORM_MUTATION_ALLOWLIST = new Set([
   'DeleteTaskForOrg',
   'InsertZoneForOrg',
   'UpdateZoneForOrg',
+  'InsertZoneWithRequiredVisitForOrg',
+  'UpdateZoneWithRequiredVisitForOrg',
   'DeleteZoneForOrg',
   'InsertWorkdayForOrg',
   'UpdateWorkdayForOrg',
