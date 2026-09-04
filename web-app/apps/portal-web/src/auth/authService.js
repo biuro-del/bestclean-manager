@@ -406,6 +406,7 @@ function buildSessionFromFirebase(user, context) {
     uid: user.uid,
     login: user.email ?? user.uid,
     name: user.displayName ?? user.email ?? user.uid,
+    photoUrl: user.photoURL ?? '',
     role: mapRole(context.role),
     roleCode: toText(context.role).toUpperCase(),
     workerId: toText(context.workerId),

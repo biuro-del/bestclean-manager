@@ -13,7 +13,6 @@ import {
   createFacilityManagerRegistrationIdempotencyKey,
   ensureSessionContext,
   getEmailPasswordLoginState,
-  getOrganizationProfile,
   getCleaningCompanyLegalDocuments,
   getSession,
   getStoredCleaningCompanyEmailLinkEmail,
@@ -21,7 +20,6 @@ import {
   linkEmailPasswordToCurrentUser,
   login,
   loginWithGoogle,
-  lookupCompanyByNip,
   logout,
   refreshEmailVerification,
   requestCleaningCompanyEmailLink,
@@ -32,8 +30,6 @@ import {
   resumeCleaningCompanyOnboardingForExistingGoogleAccount,
   retryFacilityManagerGoogleRegistration,
   requireAuth,
-  saveOrganizationProfile,
-  saveSession,
   selectOrganization,
   setOrganizationAuthScope,
   signInFacilityManagerWithGoogle,
@@ -119,7 +115,6 @@ let selectableOrganizations = []
 let pendingRegistration = null
 let activeRegistrationAttempt = null
 let pendingRegistrationNeedsVerification = false
-let companyRegistryMetadata = {}
 let cleaningCompanyLegalDocuments = null
 let cleaningCompanyOnboardingCommandId = ''
 let cleaningCompanyRegistrationAvailable = false
@@ -3627,15 +3622,45 @@ function cleanupPortalLazyRoutes() {
   portalNavigation = null
 }
 
+function topbarRoleLabel(roleCode = '') {
+  const labels = {
+    OWNER: 'Właściciel',
+    ADMIN: 'Administrator',
+    ADMINISTRATOR: 'Administrator',
+    SUPERADMIN: 'Administrator',
+    COORDINATOR: 'Koordynator',
+    MANAGER: 'Menedżer',
+    WORKER: 'Pracownik',
+    PLATFORM_OWNER: 'Właściciel platformy',
+  }
+  return labels[String(roleCode ?? '').trim().toUpperCase()] || 'Użytkownik'
+}
+
 function setUserChip(session) {
   const userName = document.getElementById('userName')
+  const userRole = document.getElementById('userRole')
+  const userAvatarImage = document.getElementById('userAvatarImage')
   const userDot = document.getElementById('userDot')
   const organizationChip = document.getElementById('organizationChip')
   const organizationName = document.getElementById('organizationName')
-  const companyProfileOpen = document.getElementById('companyProfileOpen')
 
   if (userName) {
     userName.textContent = session?.name ?? '-'
+  }
+
+  if (userRole) {
+    userRole.textContent = session ? topbarRoleLabel(session.roleCode) : 'Użytkownik'
+  }
+
+  if (userAvatarImage instanceof HTMLImageElement) {
+    const fallbackAvatar = '/assets/avatars/default-male.webp'
+    const photoUrl = String(session?.photoUrl ?? session?.photoURL ?? session?.avatarUrl ?? '').trim()
+    userAvatarImage.src = photoUrl || fallbackAvatar
+    userAvatarImage.alt = session?.name ? `Avatar użytkownika ${session.name}` : ''
+    userAvatarImage.onerror = () => {
+      userAvatarImage.onerror = null
+      userAvatarImage.src = fallbackAvatar
+    }
   }
 
   if (userDot) {
@@ -3652,10 +3677,6 @@ function setUserChip(session) {
     organizationChip.title = organizationChip.dataset.platform === 'true'
       ? 'Wróć do Panelu admina'
       : 'Zmień aktywną organizację'
-  }
-  if (companyProfileOpen) {
-    const roleCode = String(session?.roleCode ?? '').toUpperCase()
-    companyProfileOpen.hidden = !activeOrganizationName || !['OWNER', 'ADMIN', 'ADMINISTRATOR', 'SUPERADMIN'].includes(roleCode)
   }
 }
 
@@ -5986,7 +6007,7 @@ function bindRouteButtons(router) {
       return
     }
 
-    const sidebarOrdersAddButton = eventTargetClosest(event, '#sidebarOrdersAddBtn')
+    const sidebarOrdersAddButton = eventTargetClosest(event, '#sidebarOrdersAddBtn, #topbarOrdersAddBtn')
     if (sidebarOrdersAddButton) {
       event.preventDefault()
       void router.go('orders').then((ready) => {
@@ -7056,179 +7077,6 @@ function bindPlatformCenter(router) {
   return getCleanziAdminPanel(router).bind()
 }
 
-function setCompanyProfileMessage(message = '', tone = 'error') {
-  const node = document.getElementById('companyProfileMessage')
-  if (!node) return
-  node.textContent = message
-  node.dataset.tone = message ? tone : ''
-}
-
-function setCompanyProfileValue(id, value) {
-  const input = document.getElementById(id)
-  if (input instanceof HTMLInputElement) input.value = String(value ?? '')
-}
-
-function fillCompanyProfile(profile = {}) {
-  const form = document.getElementById('companyProfileForm')
-  if (form) form.dataset.version = String(Number(profile.version || 0))
-  setCompanyProfileValue('companyProfileNip', profile.nip)
-  setCompanyProfileValue('companyProfileRegon', profile.regon)
-  setCompanyProfileValue('companyProfileLegalName', profile.legalName)
-  setCompanyProfileValue('companyProfileAddress', profile.registeredAddress)
-  setCompanyProfileValue('companyProfilePostalCode', profile.postalCode)
-  setCompanyProfileValue('companyProfileCity', profile.city)
-  setCompanyProfileValue('companyProfileOwnerName', profile.ownerFullName)
-  setCompanyProfileValue('companyProfileBillingName', profile.billingName)
-  setCompanyProfileValue('companyProfileBillingNip', profile.billingNip)
-  setCompanyProfileValue('companyProfileBillingEmail', profile.billingEmail)
-  setCompanyProfileValue('companyProfileBillingAddress', profile.billingAddress)
-  setCompanyProfileValue('companyProfileBillingPostalCode', profile.billingPostalCode)
-  setCompanyProfileValue('companyProfileBillingCity', profile.billingCity)
-  companyRegistryMetadata = {
-    registryProvider: profile.registryProvider || '',
-    registryFetchedAt: profile.registryFetchedAt || null,
-  }
-}
-
-async function showCompanyProfileEditor(session, { required = false } = {}) {
-  const overlay = document.getElementById('companyProfileOverlay')
-  if (!overlay) return
-  const closeButton = document.getElementById('companyProfileClose')
-  const title = document.getElementById('companyProfileTitle')
-  const copy = document.getElementById('companyProfileCopy')
-  overlay.hidden = false
-  if (closeButton) closeButton.hidden = required
-  if (title) title.textContent = required ? 'Uzupełnij dane organizacji' : 'Profil firmy'
-  if (copy) {
-    copy.textContent = required
-      ? 'Uzupełnienie profilu jest wymagane przed dalszą pracą właściciela.'
-      : 'Zaktualizuj dane firmy lub pobierz je ponownie z GUS.'
-  }
-  setCompanyProfileMessage('Pobieranie profilu firmy...', 'success')
-  try {
-    const data = await getOrganizationProfile(session.activeOrgId)
-    fillCompanyProfile(data?.profile || {})
-    setCompanyProfileMessage('Uzupełnij wymagane dane i zapisz profil.', 'success')
-  } catch (error) {
-    setCompanyProfileMessage(error instanceof Error ? error.message : 'Nie udało się pobrać profilu firmy.')
-  }
-}
-
-async function showRequiredCompanyProfile(session) {
-  const overlay = document.getElementById('companyProfileOverlay')
-  const required = session?.onboardingRequired === true && String(session?.roleCode ?? '').toUpperCase() === 'OWNER'
-  if (!required) {
-    if (overlay) overlay.hidden = true
-    return
-  }
-  await showCompanyProfileEditor(session, { required: true })
-}
-
-function bindCompanyProfileOnboarding() {
-  const form = document.getElementById('companyProfileForm')
-  const lookup = document.getElementById('companyProfileLookup')
-  const logoutButton = document.getElementById('companyProfileLogout')
-  const closeButton = document.getElementById('companyProfileClose')
-  const openButton = document.getElementById('companyProfileOpen')
-  if (!form) return () => {}
-
-  const readValue = (id) => String(document.getElementById(id)?.value ?? '').trim()
-  const handleLookup = async () => {
-    lookup.disabled = true
-    setCompanyProfileMessage('Pobieranie danych z GUS...', 'success')
-    try {
-      const company = await lookupCompanyByNip(readValue('companyProfileNip'))
-      setCompanyProfileValue('companyProfileNip', company?.nip)
-      setCompanyProfileValue('companyProfileRegon', company?.regon)
-      setCompanyProfileValue('companyProfileLegalName', company?.legalName)
-      setCompanyProfileValue('companyProfileAddress', company?.registeredAddress)
-      setCompanyProfileValue('companyProfilePostalCode', company?.postalCode)
-      setCompanyProfileValue('companyProfileCity', company?.city)
-      companyRegistryMetadata = {
-        registryProvider: 'GUS_BIR1',
-        registryFetchedAt: new Date().toISOString(),
-      }
-      setCompanyProfileMessage(company?.cached ? 'Dane pobrano z bezpiecznej pamięci GUS.' : 'Dane pobrano z GUS.', 'success')
-    } catch (error) {
-      setCompanyProfileMessage(error instanceof Error ? error.message : 'Nie udało się pobrać danych z GUS.')
-    } finally {
-      lookup.disabled = false
-    }
-  }
-  const handleSubmit = async (event) => {
-    event.preventDefault()
-    const session = appState.session
-    if (!session?.activeOrgId) return
-    const saveButton = document.getElementById('companyProfileSave')
-    saveButton.disabled = true
-    setCompanyProfileMessage('Zapisywanie profilu...', 'success')
-    try {
-      const data = await saveOrganizationProfile(
-        session.activeOrgId,
-        Number(form.dataset.version || 0),
-        {
-          nip: readValue('companyProfileNip'),
-          regon: readValue('companyProfileRegon'),
-          legalName: readValue('companyProfileLegalName'),
-          registeredAddress: readValue('companyProfileAddress'),
-          postalCode: readValue('companyProfilePostalCode'),
-          city: readValue('companyProfileCity'),
-          countryCode: 'PL',
-          ownerFullName: readValue('companyProfileOwnerName'),
-          billingName: readValue('companyProfileBillingName'),
-          billingNip: readValue('companyProfileBillingNip'),
-          billingEmail: readValue('companyProfileBillingEmail'),
-          billingAddress: readValue('companyProfileBillingAddress'),
-          billingPostalCode: readValue('companyProfileBillingPostalCode'),
-          billingCity: readValue('companyProfileBillingCity'),
-          billingCountryCode: 'PL',
-          ...companyRegistryMetadata,
-        },
-      )
-      fillCompanyProfile(data?.profile || {})
-      if (!data?.completeness?.baseComplete) {
-        setCompanyProfileMessage(`Uzupełnij pola: ${(data?.completeness?.missingBase || []).join(', ')}.`)
-        return
-      }
-      session.onboardingRequired = false
-      session.onboardingStatus = 'COMPLETED'
-      session.organizationName = data.profile?.legalName || session.organizationName
-      session.orgName = session.organizationName
-      saveSession(session)
-      setUserChip(session)
-      document.getElementById('companyProfileOverlay').hidden = true
-      setCompanyProfileMessage('Profil firmy zapisano.', 'success')
-    } catch (error) {
-      setCompanyProfileMessage(error instanceof Error ? error.message : 'Nie udało się zapisać profilu firmy.')
-    } finally {
-      saveButton.disabled = false
-    }
-  }
-  const handleLogout = () => document.getElementById('logoutBtn')?.click()
-  const handleClose = () => {
-    const overlay = document.getElementById('companyProfileOverlay')
-    if (overlay) overlay.hidden = true
-  }
-  const handleOpen = () => {
-    const session = appState.session
-    const roleCode = String(session?.roleCode ?? '').toUpperCase()
-    if (!session?.activeOrgId || !['OWNER', 'ADMIN', 'ADMINISTRATOR', 'SUPERADMIN'].includes(roleCode)) return
-    void showCompanyProfileEditor(session, { required: false })
-  }
-  lookup?.addEventListener('click', handleLookup)
-  form.addEventListener('submit', handleSubmit)
-  logoutButton?.addEventListener('click', handleLogout)
-  closeButton?.addEventListener('click', handleClose)
-  openButton?.addEventListener('click', handleOpen)
-  return () => {
-    lookup?.removeEventListener('click', handleLookup)
-    form.removeEventListener('submit', handleSubmit)
-    logoutButton?.removeEventListener('click', handleLogout)
-    closeButton?.removeEventListener('click', handleClose)
-    openButton?.removeEventListener('click', handleOpen)
-  }
-}
-
 function bindTenantOrganizationSwitcher() {
   const chip = document.getElementById('organizationChip')
   if (!chip) return () => {}
@@ -7257,7 +7105,6 @@ async function activatePortalSession(session, router, { restoreRoute = false } =
   syncPlanFeaturePermissions()
   showPortal()
   setUserChip(session)
-  await showRequiredCompanyProfile(session)
 
   if (isFacilityManagerSession(session)) {
     clearStoredCurrentRoute()
@@ -9073,7 +8920,6 @@ export function mountPortalApp() {
     bindRouteButtons(navigation),
     bindPlatformLogin(navigation),
     bindPlatformCenter(navigation),
-    bindCompanyProfileOnboarding(),
     bindTenantOrganizationSwitcher(),
     bindLogout(),
     cleanupPortalLazyRoutes,

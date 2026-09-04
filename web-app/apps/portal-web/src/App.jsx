@@ -8,6 +8,7 @@ import './ui/styles/portalQuality.css'
 import './ui/styles/commandCenter.css'
 import './ui/styles/login.css'
 import './ui/styles/systemUiV3.css'
+import './ui/styles/navigationShellRedesign.css'
 
 function App() {
   useEffect(() => {

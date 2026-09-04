@@ -378,37 +378,6 @@ export const portalLayoutTemplate = `
 </section>
 
 <div class="app-bg" id="portalRoot" style="display:none;">
-  <div class="company-profile-overlay" id="companyProfileOverlay" role="dialog" aria-modal="true" aria-labelledby="companyProfileTitle" hidden>
-    <form class="company-profile-card" id="companyProfileForm">
-      <div>
-        <span class="login-card-kicker">PROFIL FIRMY</span>
-        <h2 id="companyProfileTitle">Uzupełnij dane organizacji</h2>
-        <p id="companyProfileCopy">Dane są wymagane od Ownera. Możesz wrócić do formularza po ponownym zalogowaniu.</p>
-      </div>
-      <div class="company-profile-grid">
-        <label>NIP<input id="companyProfileNip" name="nip" inputmode="numeric" maxlength="13" required /></label>
-        <button class="btn2" id="companyProfileLookup" type="button">Pobierz z GUS</button>
-        <label class="company-profile-wide">Nazwa prawna<input id="companyProfileLegalName" name="legalName" maxlength="300" required /></label>
-        <label class="company-profile-wide">Pełny adres<input id="companyProfileAddress" name="registeredAddress" maxlength="1000" required /></label>
-        <label>REGON<input id="companyProfileRegon" name="regon" maxlength="14" /></label>
-        <label>Kod pocztowy<input id="companyProfilePostalCode" name="postalCode" maxlength="12" /></label>
-        <label>Miasto<input id="companyProfileCity" name="city" maxlength="120" /></label>
-        <label class="company-profile-wide">Imię i nazwisko właściciela<input id="companyProfileOwnerName" name="ownerFullName" maxlength="200" required /></label>
-        <label class="company-profile-wide">Nazwa do rozliczeń<input id="companyProfileBillingName" name="billingName" maxlength="300" /></label>
-        <label>NIP do rozliczeń<input id="companyProfileBillingNip" name="billingNip" maxlength="13" /></label>
-        <label>Email rozliczeniowy<input id="companyProfileBillingEmail" name="billingEmail" type="email" maxlength="160" /></label>
-        <label class="company-profile-wide">Adres rozliczeniowy<input id="companyProfileBillingAddress" name="billingAddress" maxlength="1000" /></label>
-        <label>Kod pocztowy rozliczeń<input id="companyProfileBillingPostalCode" name="billingPostalCode" maxlength="12" /></label>
-        <label>Miasto rozliczeń<input id="companyProfileBillingCity" name="billingCity" maxlength="120" /></label>
-      </div>
-      <div class="company-profile-message" id="companyProfileMessage" aria-live="polite"></div>
-      <div class="company-profile-actions">
-        <button class="btn primary" id="companyProfileSave" type="submit">Zapisz profil firmy</button>
-        <button class="btn2" id="companyProfileClose" type="button">Zamknij</button>
-        <button class="btn2" id="companyProfileLogout" type="button">Wyloguj</button>
-      </div>
-    </form>
-  </div>
   ${platformAdminTemplate}
   <div class="app-shell">
     <div class="app-body">
@@ -438,7 +407,7 @@ export const portalLayoutTemplate = `
         </button>
 
         <button class="menu-order-add" id="sidebarOrdersAddBtn" type="button">
-          <span class="menu-order-add-icon" aria-hidden="true">+</span>
+          <span class="menu-order-add-icon" aria-hidden="true"><i class="ph ph-plus"></i></span>
           <span class="mi-label">Dodaj zlecenie</span>
         </button>
 
@@ -452,84 +421,62 @@ export const portalLayoutTemplate = `
             aria-pressed="false"
             title="Zwin menu"
           >
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+            <i class="ph ph-caret-left" aria-hidden="true"></i>
           </button>
         </div>
 
         <div class="menu">
           <button class="menu-item active" data-route="dashboard" type="button">
-            <span class="mi-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5v8a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1v-8z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </span>
+            <span class="mi-ico" aria-hidden="true"><i class="ph ph-squares-four"></i></span>
             <span class="mi-label">Pulpit</span>
           </button>
           <button class="menu-item" data-route="events" type="button">
-            <span class="mi-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </span>
+            <span class="mi-ico" aria-hidden="true"><i class="ph ph-bell-ringing"></i></span>
             <span class="mi-label">Zdarzenia</span>
           </button>
           <button class="menu-section" type="button" data-toggle="orders">
-            <span class="mi-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M8 4h8l2 2v14H6V6l2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 10h6M9 14h6M9 18h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-            </span>
+            <span class="mi-ico" aria-hidden="true"><i class="ph ph-clipboard-text"></i></span>
             <span class="mi-label">Zlecenia</span>
-            <span class="chev">▼</span>
+            <span class="chev" aria-hidden="true"><i class="ph ph-caret-down"></i></span>
           </button>
           <div class="submenu" id="submenu-orders">
             <button class="submenu-item" data-route="orders" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M5 6h14M5 12h14M5 18h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-              </span>
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-list-bullets"></i></span>
               <span class="mi-label">Lista zlecen</span>
             </button>
             <button class="submenu-item" data-route="ordersMap" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 21s7-5.2 7-11a7 7 0 1 0-14 0c0 5.8 7 11 7 11Z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="1.8"/></svg>
-              </span>
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-map-trifold"></i></span>
               <span class="mi-label">Mapa</span>
             </button>
           </div>
           <button class="menu-item" data-route="calendar" type="button">
-            <span class="mi-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 3v4M16 3v4M4 10h16M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-            </span>
+            <span class="mi-ico" aria-hidden="true"><i class="ph ph-calendar-dots"></i></span>
             <span class="mi-label">Kalendarz</span>
             <span class="menu-task-badge" id="menuCalendarTaskDueCount" hidden>0</span>
           </button>
           <button class="menu-section" type="button" data-toggle="kanban">
-            <span class="mi-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="5" height="14" rx="1.5" stroke="currentColor" stroke-width="1.8"/><rect x="10.5" y="5" width="5" height="10" rx="1.5" stroke="currentColor" stroke-width="1.8"/><rect x="17" y="5" width="3" height="7" rx="1.5" stroke="currentColor" stroke-width="1.8"/></svg>
-            </span>
+            <span class="mi-ico" aria-hidden="true"><i class="ph ph-kanban"></i></span>
             <span class="mi-label">Centrum zadań</span>
             <span class="menu-task-badge" id="menuKanbanTaskDueCount" hidden>0</span>
-            <span class="chev">▼</span>
+            <span class="chev" aria-hidden="true"><i class="ph ph-caret-down"></i></span>
           </button>
           <div class="submenu submenu-kanban" id="submenu-kanban">
             <button class="submenu-item" type="button" data-kanban-menu-section="home">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-9.5Z" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"/></svg>
-              </span>
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-house"></i></span>
               <span class="mi-label">Strona główna</span>
             </button>
             <button class="submenu-item" type="button" data-kanban-menu-section="tasks">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="m8.5 12.2 2.2 2.2 4.8-5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9"/></svg>
-              </span>
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-check-circle"></i></span>
               <span class="mi-label">Moje zadania</span>
               <span class="menu-task-badge kanban-submenu-count" data-kanban-my-count hidden>0</span>
             </button>
             <button class="submenu-item" type="button" data-kanban-menu-section="inbox">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M5 18h14l-1.4-2.2V11a5.6 5.6 0 0 0-11.2 0v4.8L5 18Z" stroke="currentColor" stroke-linejoin="round" stroke-width="1.8"/><path d="M10 20a2 2 0 0 0 4 0" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"/></svg>
-              </span>
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-tray"></i></span>
               <span class="mi-label">Skrzynka odbiorcza</span>
               <span class="kanban-submenu-dot" data-kanban-inbox-dot hidden></span>
             </button>
             <button class="submenu-item kanban-submenu-create" id="kanbanMenuCreateBtn" type="button">
-              <span class="mi-ico" aria-hidden="true">+</span>
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-plus-circle"></i></span>
               <span class="mi-label">Utwórz zadanie</span>
             </button>
             <div class="kanban-menu-heading">Projekty / klienci</div>
@@ -537,45 +484,33 @@ export const portalLayoutTemplate = `
             <button class="kanban-menu-more" id="kanbanPortalMenuShowMore" type="button" hidden>Pokaż więcej</button>
           </div>
           <button class="menu-item" data-route="contractProfitability" data-profitability-entry type="button">
-            <span class="mi-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V9m6 10V5m6 14v-7m4 7H2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="m4 7 5-4 6 5 5-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </span>
+            <span class="mi-ico" aria-hidden="true"><i class="ph ph-chart-line-up"></i></span>
             <span class="mi-label">Rentowność kontraktów</span>
           </button>
           <div class="menu-group-title">OPERACJE</div>
 
           <button class="menu-section" type="button" data-toggle="clients">
-            <span class="mi-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M16 20v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM18 8a3 3 0 1 1 0 6M22 20v-1a4 4 0 0 0-3-3.87" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </span>
-            <span class="mi-label">Klienci</span><span class="chev">▼</span>
+            <span class="mi-ico" aria-hidden="true"><i class="ph ph-users-three"></i></span>
+            <span class="mi-label">Klienci</span><span class="chev" aria-hidden="true"><i class="ph ph-caret-down"></i></span>
           </button>
           <div class="submenu" id="submenu-clients">
             <button class="submenu-item" data-route="clientProfile" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="12" r="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M14 10h4M14 14h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-              </span>
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-identification-card"></i></span>
               <span class="mi-label">Profil klienta</span>
             </button>
           </div>
 
           <button class="menu-section" type="button" data-toggle="objects" aria-controls="submenu-objects" aria-expanded="false">
-            <span class="mi-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M3 9l9-5 9 5-9 5-9-5zM3 14l9 5 9-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </span>
-            <span class="mi-label">Obiekty</span><span class="chev">▼</span>
+            <span class="mi-ico" aria-hidden="true"><i class="ph ph-buildings"></i></span>
+            <span class="mi-label">Obiekty</span><span class="chev" aria-hidden="true"><i class="ph ph-caret-down"></i></span>
           </button>
           <div class="submenu" id="submenu-objects">
             <button class="submenu-item" data-route="zones" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 21s7-5.2 7-11a7 7 0 1 0-14 0c0 5.8 7 11 7 11z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="1.8"/></svg>
-              </span>
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-map-pin-area"></i></span>
               <span class="mi-label">Strefy</span>
             </button>
             <button class="submenu-item" data-route="audits" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v6c0 4.8-3 7.8-7 9-4-1.2-7-4.2-7-9V6l7-3z" stroke="currentColor" stroke-width="1.8"/><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </span>
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-shield-check"></i></span>
               <span class="mi-label">Audyty</span>
             </button>
           </div>
@@ -583,22 +518,16 @@ export const portalLayoutTemplate = `
           <div class="menu-group-title">ZASOBY</div>
 
           <button class="menu-section" type="button" data-toggle="workers">
-            <span class="mi-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 14a4 4 0 0 1 8 0M12 11a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-            </span>
-            <span class="mi-label">Pracownicy</span><span class="chev">▼</span>
+            <span class="mi-ico" aria-hidden="true"><i class="ph ph-identification-badge"></i></span>
+            <span class="mi-label">Pracownicy</span><span class="chev" aria-hidden="true"><i class="ph ph-caret-down"></i></span>
           </button>
           <div class="submenu" id="submenu-workers">
             <button class="submenu-item" data-route="workerProfile" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M4 20a8 8 0 0 1 16 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-              </span>
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-users"></i></span>
               <span class="mi-label">Lista pracowników</span>
             </button>
             <button class="submenu-item" data-route="workdayStopProposals" type="button">
-              <span class="mi-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="17" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 9h8M8 14l2 2 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </span>
+              <span class="mi-ico" aria-hidden="true"><i class="ph ph-clipboard-text"></i></span>
               <span class="mi-label">Godziny do weryfikacji</span>
             </button>
           </div>
@@ -606,10 +535,8 @@ export const portalLayoutTemplate = `
           <div class="menu-group-title">RAPORTY</div>
 
           <button class="menu-section" type="button" data-toggle="reports" data-route="reports" data-report-section="home" aria-controls="submenu-reports">
-            <span class="mi-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M4 19V9M10 19V5M16 19v-8M22 19V3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M3 20h19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-            </span>
-            <span class="mi-label">Raporty</span><span class="chev">▼</span>
+            <span class="mi-ico" aria-hidden="true"><i class="ph ph-chart-bar"></i></span>
+            <span class="mi-label">Raporty</span><span class="chev" aria-hidden="true"><i class="ph ph-caret-down"></i></span>
           </button>
           <div class="submenu" id="submenu-reports">
             <button class="submenu-item" data-report-section="podsumowanie" type="button">
@@ -637,9 +564,7 @@ export const portalLayoutTemplate = `
           <div class="menu-group-title">USTAWIENIA</div>
 
           <button class="menu-item" type="button" data-route="settings">
-            <span class="mi-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15l1.2 2.1-2.1 2.1-2.1-1.2a8 8 0 0 1-2 .8L14 21h-4l-.4-2.2a8 8 0 0 1-2-.8l-2.1 1.2-2.1-2.1L4.6 15a8 8 0 0 1-.8-2L1.6 12l2.2-1a8 8 0 0 1 .8-2L3.4 6.9l2.1-2.1 2.1 1.2a8 8 0 0 1 2-.8L10 3h4l.4 2.2a8 8 0 0 1 2 .8l2.1-1.2 2.1 2.1-1.2 2.1a8 8 0 0 1 .8 2l2.2 1-2.2 1a8 8 0 0 1-.8 2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
-            </span>
+            <span class="mi-ico" aria-hidden="true"><i class="ph ph-gear-six"></i></span>
             <span class="mi-label">Ustawienia</span>
           </button>
         </div>
@@ -649,10 +574,7 @@ export const portalLayoutTemplate = `
         <header class="header">
           <div class="topbar-search" id="topbarGlobalSearch" role="search" aria-label="Szukaj sekcji, podsekcji i pracowników">
             <span class="topbar-search-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
-                <path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-              </svg>
+              <i class="ph ph-magnifying-glass"></i>
             </span>
             <input
               class="topbar-search-input"
@@ -669,23 +591,17 @@ export const portalLayoutTemplate = `
           </div>
 
           <div class="header-right">
-            <button class="topbar-action-btn" type="button" aria-label="Powiadomienia" title="Powiadomienia">
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M6 9a6 6 0 1 1 12 0v4.5l1.4 2.3a1 1 0 0 1-.9 1.5H5.5a1 1 0 0 1-.9-1.5L6 13.5V9z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-                <path d="M10 20a2 2 0 0 0 4 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-              </svg>
-            </button>
-            <button class="topbar-action-btn" type="button" aria-label="Szybkie akcje" title="Szybkie akcje">
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 3v18M3 12h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-              </svg>
-            </button>
+            <div class="topbar-actions" aria-label="Szybkie akcje">
+              <button class="topbar-action-btn" data-route="events" type="button" aria-label="Powiadomienia" title="Powiadomienia">
+                <i class="ph ph-bell" aria-hidden="true"></i>
+              </button>
+              <button class="topbar-action-btn topbar-action-btn--primary" id="topbarOrdersAddBtn" type="button" aria-label="Dodaj zlecenie" title="Dodaj zlecenie">
+                <i class="ph ph-plus" aria-hidden="true"></i>
+              </button>
+            </div>
             <div class="subscription-chip" id="subscriptionChip" data-tone="active" title="Pakiet organizacji" hidden>
               <span class="subscription-chip-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <path d="M4 7.5 8.2 4l3.8 3.5L15.8 4 20 7.5 18.2 18H5.8L4 7.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-                  <path d="M7 14.5h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                </svg>
+                <i class="ph ph-crown-simple"></i>
               </span>
               <span class="subscription-chip-copy">
                 <span class="subscription-chip-label">Pakiet</span>
@@ -697,21 +613,24 @@ export const portalLayoutTemplate = `
               </span>
             </div>
             <button class="organization-chip" id="organizationChip" type="button" title="Aktywna organizacja" hidden>
+              <span class="organization-chip-icon" aria-hidden="true"><i class="ph ph-buildings"></i></span>
               <span class="organization-chip-label">Organizacja</span>
               <span class="organization-chip-name" id="organizationName"></span>
             </button>
-            <button class="btn2" id="companyProfileOpen" type="button" hidden>Profil firmy</button>
-            <div class="user-chip" id="userChip" title="Użytkownik">
+            <button class="user-chip" id="userChip" data-route="settingsProfile" type="button" title="Przejdź do profilu użytkownika">
               <span class="user-avatar" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.8"/>
-                  <path d="M5 21a7 7 0 0 1 14 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-                </svg>
+                <img id="userAvatarImage" src="/assets/avatars/default-male.webp" alt="" referrerpolicy="no-referrer" />
+                <span class="user-avatar-status" id="userDot"></span>
               </span>
-              <span class="name" id="userName">-</span>
-              <span class="dot" id="userDot" aria-hidden="true"></span>
-            </div>
-            <button class="btn2 danger" id="logoutBtn" type="button" title="Wyloguj">Wyloguj</button>
+              <span class="user-chip-copy">
+                <span class="name" id="userName">-</span>
+                <span class="user-role" id="userRole">Użytkownik</span>
+              </span>
+              <i class="ph ph-caret-down user-chip-caret" aria-hidden="true"></i>
+            </button>
+            <button class="btn2 danger" id="logoutBtn" type="button" title="Wyloguj">
+              <i class="ph ph-sign-out" aria-hidden="true"></i><span>Wyloguj</span>
+            </button>
           </div>
         </header>
 
