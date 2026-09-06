@@ -23,10 +23,11 @@ mechanizmem.
 
 ## Role testowe
 
-- `portal_app` — LOGIN reprezentujący istniejący backend portalu; zachowuje
-  szerokie prawa do kanonicznych źródeł.
+- `workforce_schedule_session` — ograniczony LOGIN osobnego poola Grafiku; bez
+  bezpośrednich praw do tabel Grafiku ani wspólnych katalogów źródłowych.
 - `workforce_schedule_app` — NOLOGIN, NOINHERIT; po jawnej zmianie roli ma prawa
-  tylko do Grafiku i tylko odczyt źródeł.
+  tylko do tabel Grafiku oraz do wąskich funkcji `SECURITY DEFINER`; nie ma
+  surowego odczytu źródeł.
 - `migration_runner` — ograniczony LOGIN, który może wyłącznie przełączyć się na
   właściciela migracji.
 - `workforce_schedule_owner` — NOLOGIN, NOINHERIT; ograniczony właściciel nowych
@@ -54,20 +55,30 @@ node --test test/workforce-schedule-pg17-harness.test.js
 
 ## Zakres weryfikacji
 
-- minimalny fixture `organizations`, `organization_member`, `worker` i
-  `service_object` dla dwóch organizacji;
+- minimalny fixture `organizations`, `organization_member`,
+  `organization_subscription`, `worker` i `client` dla dwóch organizacji,
+  obejmujący także nieaktywne, puste oraz nieznane statusy obiektów;
 - wykonanie migracji przez `migration_runner`, z przełączeniem roli wykonywanym
   fail-closed wewnątrz migracji;
+- odrzucenie i pełny rollback migracji przy globalnym lub schematowym
+  `DEFAULT ACL` właściciela nadającym `portal_app` prawa do tabel, sekwencji albo
+  funkcji;
+- odrzucenie wstrzykniętych przed postflightem praw tabelowych, kolumnowych,
+  sekwencyjnych i funkcyjnych oraz potwierdzenie braku pozostałych obiektów po
+  każdym rollbacku;
 - ograniczenia właściciela funkcji SECURITY DEFINER;
-- `schemaReady()` z prawdziwym `session_user=portal_app` i
+- `schemaReady()` z prawdziwym `session_user=workforce_schedule_session` i
   `current_user=workforce_schedule_app`;
 - synchronizacja katalogów, konfiguracja, utworzenie, odczyt, edycja,
   archiwizacja i wewnętrzna publikacja zmiany;
 - dokładne efekty publikacji `{delivery:false, notifications:false,
   downstream:false}`;
 - izolacja RLS między organizacjami;
-- brak zapisu do `organizations`, `organization_member`, `worker` i
-  `service_object` po przełączeniu na rolę Grafiku;
+- odmowa surowego `SELECT` i zapisu do `organizations`,
+  `organization_member`, `organization_subscription`, `worker` i `client` dla
+  loginu sesyjnego oraz roli Grafiku;
+- dokładna autoryzacja pary `orgId + uid` przed `SET LOCAL ROLE` oraz odmowa
+  odczytu katalogu innej organizacji przez funkcje po ustawieniu kontekstu;
 - niezmienność pełnych fixture'ów źródłowych;
 - fail-closed dla błędnego `USAGE`, grant option, członkostwa w roli właściciela
   i praw zapisu do źródeł;

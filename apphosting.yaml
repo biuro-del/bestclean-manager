@@ -114,6 +114,12 @@ env:
     value: "example"
     availability:
       - BUILD
+  # Independent Grafik stays hidden in the client until its isolated database
+  # role, schema and runtime flag pass a separate production gate.
+  - variable: VITE_WORKFORCE_SCHEDULE_MODE
+    value: disabled
+    availability:
+      - BUILD
   - variable: FIREBASE_DATACONNECT_LOCATION
     value: "europe-west3"
     availability:
@@ -157,6 +163,38 @@ env:
     availability:
       - RUNTIME
   - variable: DB_NAME
+    value: iclean-room-database
+    availability:
+      - RUNTIME
+  # Grafik stays dormant in the baseline deployment. Dedicated credential
+  # references are intentionally added only in the separately reviewed
+  # activation candidate, so a missing Grafik secret cannot block deployment
+  # of unrelated portal changes.
+  - variable: WORKFORCE_SCHEDULE_ENABLED
+    value: "false"
+    availability:
+      - RUNTIME
+  - variable: WORKFORCE_SCHEDULE_DELIVERY_ENABLED
+    value: "false"
+    availability:
+      - RUNTIME
+  - variable: WORKFORCE_SCHEDULE_NOTIFICATIONS_ENABLED
+    value: "false"
+    availability:
+      - RUNTIME
+  - variable: WORKFORCE_SCHEDULE_DOWNSTREAM_ENABLED
+    value: "false"
+    availability:
+      - RUNTIME
+  - variable: WORKFORCE_SCHEDULE_DB_CONNECTOR
+    value: cloudsql
+    availability:
+      - RUNTIME
+  - variable: WORKFORCE_SCHEDULE_DB_AUTH_TYPE
+    value: PASSWORD
+    availability:
+      - RUNTIME
+  - variable: WORKFORCE_SCHEDULE_DB_NAME
     value: iclean-room-database
     availability:
       - RUNTIME

@@ -9,6 +9,7 @@ const { getDataConnect: getAdminDataConnect } = require('firebase-admin/data-con
 const { Pool } = require('pg')
 const { AuthTypes, Connector, IpAddressTypes } = require('@google-cloud/cloud-sql-connector')
 const { resolvePgPassword } = require('./cloud-sql-pg-auth')
+const { resolveWorkforceScheduleDbAuthType } = require('./workforce-schedule-db-auth')
 const { Compute, GoogleAuth, OAuth2Client } = require('google-auth-library')
 const {
   buildOrganizationSummary,
@@ -74,7 +75,10 @@ const { createProfitabilityApi } = require('./profitability-api')
 const { createWorkdayReconciliationApi } = require('./workday-reconciliation-api')
 const { createWorkdayStopProposalApi } = require('./workday-stop-proposal-api')
 const { createWorkTimeDaysApi } = require('./work-time-days-api')
-const { createWorkforceScheduleApi } = require('./workforce-schedule-api')
+const {
+  WORKFORCE_SCHEDULE_SESSION_ROLE: WORKFORCE_SCHEDULE_DB_SESSION_ROLE,
+  createWorkforceScheduleApi,
+} = require('./workforce-schedule-api')
 const { mapProposal } = require('./workday-stop-proposal-repository')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
@@ -261,6 +265,10 @@ let platformFirebaseAdminInitialized = false
 let dbPool = null
 let cloudSqlConnector = null
 let cloudSqlOptionsPromise = null
+let workforceScheduleDbPool = null
+let workforceScheduleDbPoolPromise = null
+let workforceScheduleCloudSqlConnector = null
+let workforceScheduleCloudSqlOptionsPromise = null
 let facilityManagerRegistrationServicePromise = null
 let facilityManagerFirestoreRateGatePromise = null
 let facilityManagerRegistrationFirestorePromise = null
@@ -2145,6 +2153,305 @@ async function getCloudSqlConnectorOptions() {
   }
 
   return cloudSqlOptionsPromise
+}
+
+function workforceScheduleDbError(code, message, statusCode = 503) {
+  const error = new Error(code)
+  error.statusCode = statusCode
+  error.publicCode = code
+  error.publicMessage = message
+  return error
+}
+
+function getWorkforceScheduleCloudSqlAuthType() {
+  const authTypeName = resolveWorkforceScheduleDbAuthType(
+    process.env.WORKFORCE_SCHEDULE_DB_AUTH_TYPE,
+  )
+  const authType = AuthTypes[authTypeName]
+  if (!authType) {
+    throw workforceScheduleDbError(
+      'WORKFORCE_SCHEDULE_DB_AUTH_TYPE_INVALID',
+      'Tryb uwierzytelniania bazy Grafiku jest nieprawidlowy.',
+    )
+  }
+  return authType
+}
+
+function getWorkforceScheduleDbNumber(name, fallback) {
+  const parsed = Number(process.env[name])
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function getWorkforceScheduleDbSslOptions(sslEnabled) {
+  if (!sslEnabled) return undefined
+  return {
+    rejectUnauthorized: !isFalse(process.env.WORKFORCE_SCHEDULE_DB_SSL_REJECT_UNAUTHORIZED),
+  }
+}
+
+function resolveWorkforceScheduleDbConnectorMode(value) {
+  const mode = normalizeText(value).toLowerCase()
+  if (!mode) {
+    throw workforceScheduleDbError(
+      'WORKFORCE_SCHEDULE_DB_CONNECTOR_MISSING',
+      'Brakuje jawnego trybu polaczenia z baza Grafiku.',
+    )
+  }
+  if (!['cloudsql', 'direct'].includes(mode)) {
+    throw workforceScheduleDbError(
+      'WORKFORCE_SCHEDULE_DB_CONNECTOR_INVALID',
+      'Tryb polaczenia z baza Grafiku jest nieprawidlowy.',
+    )
+  }
+  return mode
+}
+
+function resolveWorkforceScheduleCloudSqlIpType(value) {
+  const name = normalizeText(value || 'PUBLIC').toUpperCase()
+  const ipType = IpAddressTypes[name]
+  if (!ipType) {
+    throw workforceScheduleDbError(
+      'WORKFORCE_SCHEDULE_CLOUD_SQL_IP_TYPE_INVALID',
+      'Typ adresu Cloud SQL dla Grafiku jest nieprawidlowy.',
+    )
+  }
+  return ipType
+}
+
+function readWorkforceScheduleDbConfig() {
+  if (!isWorkforceScheduleEnabled()) {
+    throw workforceScheduleDbError(
+      'WORKFORCE_SCHEDULE_DISABLED',
+      'Grafik nie jest aktywny w tym srodowisku.',
+      404,
+    )
+  }
+
+  const connectorMode = resolveWorkforceScheduleDbConnectorMode(
+    process.env.WORKFORCE_SCHEDULE_DB_CONNECTOR,
+  )
+  const host = normalizeText(process.env.WORKFORCE_SCHEDULE_DB_HOST)
+  const database = normalizeText(process.env.WORKFORCE_SCHEDULE_DB_NAME)
+  const user = normalizeText(process.env.WORKFORCE_SCHEDULE_DB_USER)
+  const password = String(process.env.WORKFORCE_SCHEDULE_DB_PASS ?? '')
+  const port = getWorkforceScheduleDbNumber('WORKFORCE_SCHEDULE_DB_PORT', 5432)
+  const authType = getWorkforceScheduleCloudSqlAuthType()
+  const useIamDatabaseAuth = authType === AuthTypes.IAM
+  const useCloudSqlConnector = connectorMode === 'cloudsql'
+  const sslEnabled = isTrue(process.env.WORKFORCE_SCHEDULE_DB_SSL)
+
+  if (user !== WORKFORCE_SCHEDULE_DB_SESSION_ROLE) {
+    throw workforceScheduleDbError(
+      'WORKFORCE_SCHEDULE_DB_CREDENTIALS_NOT_READY',
+      'Dedykowane konto bazy Grafiku nie jest poprawnie skonfigurowane.',
+    )
+  }
+  if (!database || (!useIamDatabaseAuth && !password)) {
+    throw workforceScheduleDbError(
+      'WORKFORCE_SCHEDULE_DB_CONFIG_MISSING',
+      'Brakuje dedykowanej konfiguracji bazy Grafiku.',
+    )
+  }
+  if (useCloudSqlConnector && !CLOUD_SQL_CONNECTION_NAME) {
+    throw workforceScheduleDbError(
+      'WORKFORCE_SCHEDULE_DB_CONFIG_MISSING',
+      'Brakuje nazwy instancji Cloud SQL dla Grafiku.',
+    )
+  }
+  if (!useCloudSqlConnector && !host) {
+    throw workforceScheduleDbError(
+      'WORKFORCE_SCHEDULE_DB_CONFIG_MISSING',
+      'Brakuje hosta bazy Grafiku.',
+    )
+  }
+
+  return {
+    authType,
+    database,
+    host,
+    password,
+    port,
+    sslEnabled,
+    useCloudSqlConnector,
+    useIamDatabaseAuth,
+    user,
+  }
+}
+
+async function getWorkforceScheduleCloudSqlConnectorOptions(authType) {
+  if (!workforceScheduleCloudSqlOptionsPromise) {
+    workforceScheduleCloudSqlConnector = workforceScheduleCloudSqlConnector
+      || new Connector({ auth: createCloudSqlConnectorAuth() })
+    workforceScheduleCloudSqlOptionsPromise = workforceScheduleCloudSqlConnector
+      .getOptions({
+        instanceConnectionName: CLOUD_SQL_CONNECTION_NAME,
+        ipType: resolveWorkforceScheduleCloudSqlIpType(
+          process.env.WORKFORCE_SCHEDULE_CLOUD_SQL_IP_TYPE,
+        ),
+        authType,
+      })
+      .then((options) => ({
+        ...options,
+        stream: wrapCloudSqlPostgresStream(options?.stream),
+      }))
+      .catch((error) => {
+        workforceScheduleCloudSqlOptionsPromise = null
+        throw error
+      })
+  }
+  return workforceScheduleCloudSqlOptionsPromise
+}
+
+function registerWorkforceSchedulePoolErrorHandler(pool) {
+  pool.on('error', (error) => {
+    const candidate = normalizeText(error?.code).toUpperCase()
+    const safeCode = /^[A-Z0-9][A-Z0-9_]{0,31}$/.test(candidate) ? candidate : 'UNKNOWN'
+    console.error('[workforce-schedule-db] idle client error', safeCode)
+  })
+  return pool
+}
+
+async function createWorkforceScheduleDbPool() {
+  const config = readWorkforceScheduleDbConfig()
+  const commonOptions = {
+    application_name: 'cleanzi_workforce_schedule',
+    database: config.database,
+    user: config.user,
+    password: resolvePgPassword({
+      useIamDatabaseAuth: config.useIamDatabaseAuth,
+      password: config.password,
+    }),
+    max: getWorkforceScheduleDbNumber('WORKFORCE_SCHEDULE_DB_POOL_MAX', 3),
+    idleTimeoutMillis: getWorkforceScheduleDbNumber('WORKFORCE_SCHEDULE_DB_IDLE_TIMEOUT_MS', 30000),
+    connectionTimeoutMillis: getWorkforceScheduleDbNumber(
+      'WORKFORCE_SCHEDULE_DB_CONNECT_TIMEOUT_MS',
+      30000,
+    ),
+  }
+
+  if (config.useCloudSqlConnector) {
+    const connectorOptions = await getWorkforceScheduleCloudSqlConnectorOptions(config.authType)
+    return registerWorkforceSchedulePoolErrorHandler(new Pool({
+      ...connectorOptions,
+      ...commonOptions,
+    }))
+  }
+
+  return registerWorkforceSchedulePoolErrorHandler(new Pool({
+    ...commonOptions,
+    host: config.host,
+    port: config.port,
+    ssl: getWorkforceScheduleDbSslOptions(config.sslEnabled),
+  }))
+}
+
+async function getWorkforceScheduleDbPool() {
+  if (!isWorkforceScheduleEnabled()) {
+    throw workforceScheduleDbError(
+      'WORKFORCE_SCHEDULE_DISABLED',
+      'Grafik nie jest aktywny w tym srodowisku.',
+      404,
+    )
+  }
+  if (workforceScheduleDbPool) return workforceScheduleDbPool
+  if (!workforceScheduleDbPoolPromise) {
+    workforceScheduleDbPoolPromise = createWorkforceScheduleDbPool()
+      .then((pool) => {
+        workforceScheduleDbPool = pool
+        return pool
+      })
+      .catch((error) => {
+        workforceScheduleDbPoolPromise = null
+        throw error
+      })
+  }
+  return workforceScheduleDbPoolPromise
+}
+
+async function resetWorkforceScheduleDbConnectionCache() {
+  const pendingPool = workforceScheduleDbPoolPromise
+  const currentConnector = workforceScheduleCloudSqlConnector
+  let currentPool = workforceScheduleDbPool
+
+  workforceScheduleDbPool = null
+  workforceScheduleDbPoolPromise = null
+  workforceScheduleCloudSqlConnector = null
+  workforceScheduleCloudSqlOptionsPromise = null
+
+  if (!currentPool && pendingPool) {
+    try {
+      currentPool = await pendingPool
+    } catch {
+      currentPool = null
+    }
+  }
+  if (currentPool) {
+    try {
+      await currentPool.end()
+    } catch {
+      // best effort only
+    }
+  }
+  if (currentConnector) {
+    try {
+      await currentConnector.close()
+    } catch {
+      // best effort only
+    }
+  }
+}
+
+async function verifyWorkforceScheduleDbSession(client) {
+  const result = await client.query(
+    'select session_user::text as session_user, current_user::text as current_user',
+  )
+  const state = result.rows?.[0]
+  if (state?.session_user !== WORKFORCE_SCHEDULE_DB_SESSION_ROLE
+      || state?.current_user !== WORKFORCE_SCHEDULE_DB_SESSION_ROLE) {
+    throw workforceScheduleDbError(
+      'WORKFORCE_SCHEDULE_DB_SESSION_INVALID',
+      'Polaczenie Grafiku nie uzywa dedykowanej roli sesyjnej.',
+    )
+  }
+}
+
+async function connectWorkforceScheduleDbClient() {
+  if (!isWorkforceScheduleEnabled()) {
+    throw workforceScheduleDbError(
+      'WORKFORCE_SCHEDULE_DISABLED',
+      'Grafik nie jest aktywny w tym srodowisku.',
+      404,
+    )
+  }
+
+  const maxAttempts = Math.max(
+    1,
+    getWorkforceScheduleDbNumber('WORKFORCE_SCHEDULE_DB_CONNECT_RETRY_ATTEMPTS', 3),
+  )
+  let lastError = null
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let client = null
+    try {
+      const pool = await getWorkforceScheduleDbPool()
+      client = await pool.connect()
+      await verifyWorkforceScheduleDbSession(client)
+      return client
+    } catch (error) {
+      lastError = error
+      client?.release?.(true)
+      const canRetry = attempt < maxAttempts
+        && (isDatabaseSslBadCertificateError(error) || isDatabaseTransientConnectionError(error))
+      if (!canRetry) throw error
+      await resetWorkforceScheduleDbConnectionCache()
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt))
+    }
+  }
+
+  throw lastError || workforceScheduleDbError(
+    'WORKFORCE_SCHEDULE_DB_CONNECTION_FAILED',
+    'Nie udalo sie polaczyc z baza Grafiku.',
+  )
 }
 
 async function getDbPool() {
@@ -4515,6 +4822,40 @@ function workforceScheduleAccessError(statusCode, code, message) {
   return error
 }
 
+function isWorkforceScheduleOrganizationKindAllowed(value) {
+  return normalizeText(value).toUpperCase() === 'CLEANING_PROVIDER'
+}
+
+async function getWorkforceScheduleRequesterMembership(client, orgId, uid) {
+  const result = await client.query(
+    `select role, status, worker_id, organization_kind, organization_status,
+            onboarding_status, organization_deleted_at, plan_code,
+            subscription_status, trial_ends_at, current_period_ends_at,
+            active_worker_id
+       from public.workforce_schedule_authorize_session($1::text, $2::text)`,
+    [orgId, uid],
+  )
+  const membership = result.rows[0] ?? null
+  if (!membership) return null
+
+  const organizationStatus = normalizeText(membership.organization_status).toUpperCase()
+  const onboardingStatus = normalizeText(membership.onboarding_status).toUpperCase()
+  const subscriptionAccess = evaluateSubscriptionAccess({
+    planCode: membership.plan_code,
+    status: membership.subscription_status,
+    trialEndsAt: membership.trial_ends_at,
+  })
+  if (
+    !['ACTIVE', 'TRIAL'].includes(organizationStatus)
+    || onboardingStatus !== 'COMPLETED'
+    || membership.organization_deleted_at
+    || !subscriptionAccess.allowed
+  ) {
+    return null
+  }
+  return membership
+}
+
 async function authorizeWorkforceSchedule(client, { orgId, uid, action }) {
   if (!isWorkforceScheduleEnabled()) {
     throw workforceScheduleAccessError(
@@ -4524,7 +4865,7 @@ async function authorizeWorkforceSchedule(client, { orgId, uid, action }) {
     )
   }
 
-  const membership = await getRequesterMembership(client, orgId, uid)
+  const membership = await getWorkforceScheduleRequesterMembership(client, orgId, uid)
   if (normalizeText(membership?.role).toUpperCase() === PLATFORM_ROLE) {
     throw workforceScheduleAccessError(
       403,
@@ -4533,33 +4874,22 @@ async function authorizeWorkforceSchedule(client, { orgId, uid, action }) {
     )
   }
   assertMembershipPlanCapability(membership, 'workforceScheduling')
+  if (!isWorkforceScheduleOrganizationKindAllowed(membership?.organization_kind)) {
+    throw workforceScheduleAccessError(
+      403,
+      'WORKFORCE_SCHEDULE_ORGANIZATION_KIND_FORBIDDEN',
+      'Grafik jest dostepny wylacznie dla firmy sprzatajacej.',
+    )
+  }
 
   const workerId = normalizeText(membership?.worker_id)
-  if (!workerId) {
+  if (!workerId || normalizeText(membership?.active_worker_id) !== workerId) {
     throw workforceScheduleAccessError(
       403,
       'WORKFORCE_SCHEDULE_ACTIVE_WORKER_REQUIRED',
       'Grafik wymaga aktywnego profilu pracownika w organizacji.',
     )
   }
-  const workerResult = await client.query(
-    `select worker_id
-       from public.worker
-      where org_id = $1::text
-        and worker_id = $2::text
-        and active is true
-        and upper(btrim(status)) = 'ACTIVE'
-      limit 1`,
-    [orgId, workerId],
-  )
-  if (!workerResult.rows[0]) {
-    throw workforceScheduleAccessError(
-      403,
-      'WORKFORCE_SCHEDULE_ACTIVE_WORKER_REQUIRED',
-      'Grafik wymaga aktywnego profilu pracownika w organizacji.',
-    )
-  }
-
   const normalizedAction = normalizeText(action).toUpperCase()
   const role = normalizeRequesterRole(membership.role)
   const allowed = normalizedAction === 'READ'
@@ -11012,7 +11342,9 @@ const workdayStopProposalApi = createWorkdayStopProposalApi({
 
 const workforceScheduleApi = createWorkforceScheduleApi({
   authorize: authorizeWorkforceSchedule,
-  connectDbClient,
+  connectDbClient: connectWorkforceScheduleDbClient,
+  getRequestId: () => getPlatformRequestContext()?.requestId,
+  logHandledError: (entry) => console.error(JSON.stringify(entry)),
   parseBearerToken,
   readJsonBody,
   sendApiError,
@@ -11086,8 +11418,8 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
     return
   }
   if (workforceScheduleApi.matches(requestUrl.pathname)) {
-    workforceScheduleApi.handle(req, res, requestUrl).catch((error) => {
-      sendApiError(res, 500, 'WORKFORCE_SCHEDULE_ERROR', error?.message || 'Unexpected workforce schedule error.')
+    workforceScheduleApi.handle(req, res, requestUrl).catch(() => {
+      sendApiError(res, 500, 'WORKFORCE_SCHEDULE_ERROR', 'Nie udalo sie bezpiecznie obsluzyc Grafiku.')
     })
     return
   }

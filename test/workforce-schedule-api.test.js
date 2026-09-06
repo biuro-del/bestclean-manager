@@ -10,6 +10,7 @@ function fixture(options = {}) {
   const calls = []
   const responses = []
   const errors = []
+  const handledErrorLogs = []
   let body = options.body || {}
   const repository = {
     async setTenantContext(orgId) { calls.push(['tenant', orgId]) },
@@ -31,7 +32,11 @@ function fixture(options = {}) {
     async publish(input) { calls.push(['publish', input]); return { publicationId: input.publicationId, visibility: 'INTERNAL_ONLY', effects: input.effects, published: input.shifts } },
     ...options.repository,
   }
-  const roleState = { sessionUser: 'portal_app', currentUser: 'portal_app', transactionOpen: false }
+  const roleState = {
+    sessionUser: 'workforce_schedule_session',
+    currentUser: 'workforce_schedule_session',
+    transactionOpen: false,
+  }
   const client = {
     async query(sql) {
       const normalized = String(sql).trim().toLowerCase()
@@ -71,9 +76,18 @@ function fixture(options = {}) {
       if (options.authorizeError) throw options.authorizeError
       return { role: 'ADMIN', scope: 'ALL' }
     },
-    async connectDbClient() { calls.push(['connect']); return client },
+    async connectDbClient() {
+      calls.push(['connect'])
+      if (options.connectError) throw options.connectError
+      return client
+    },
     createId: (() => { let id = 0; return () => `id-${++id}` })(),
     createRepository() { return repository },
+    getRequestId() { return options.requestId === undefined ? 'req-test' : options.requestId },
+    async logHandledError(entry) {
+      handledErrorLogs.push(entry)
+      if (options.logHandledErrorError) throw options.logHandledErrorError
+    },
     parseBearerToken() { calls.push(['token']); return options.token === undefined ? 'TOKEN' : options.token },
     async readJsonBody() { calls.push(['body']); return body },
     sendApiError(_res, status, code, message, details) { errors.push({ status, code, message, details }) },
@@ -84,7 +98,17 @@ function fixture(options = {}) {
       return options.decoded || { uid: 'uid-1' }
     },
   })
-  return { api, calls, client, errors, repository, responses, roleState, setBody(value) { body = value } }
+  return {
+    api,
+    calls,
+    client,
+    errors,
+    handledErrorLogs,
+    repository,
+    responses,
+    roleState,
+    setBody(value) { body = value },
+  }
 }
 
 test('router dopasowuje wyłącznie własny namespace Grafiku', () => {
@@ -109,6 +133,83 @@ test('brak tokenu jest odrzucany przed body i połączeniem z bazą', async () =
   assert.equal(f.errors[0].status, 401)
   assert.equal(f.calls.some(([name]) => name === 'body'), false)
   assert.equal(f.calls.some(([name]) => name === 'connect'), false)
+  assert.equal(f.handledErrorLogs.length, 0)
+})
+
+test('obsluzony blad operacyjny 503 zapisuje jeden minimalny rekord strukturalny', async () => {
+  const operationalError = new Error('raw database message must not be logged')
+  operationalError.statusCode = 503
+  operationalError.publicCode = 'WORKFORCE_SCHEDULE_DB_CONFIG_MISSING'
+  operationalError.publicMessage = 'Brakuje konfiguracji bazy Grafiku.'
+  const f = fixture({ connectError: operationalError, requestId: 'req-123' })
+
+  await f.api.handle(
+    { method: 'GET' },
+    {},
+    new URL('http://localhost/api/portal/workforce-schedule/bootstrap?orgId=bestclean&from=2026-08-24&to=2026-08-30'),
+  )
+
+  assert.equal(f.errors[0].status, 503)
+  assert.deepEqual(f.handledErrorLogs, [{
+    code: 'WORKFORCE_SCHEDULE_DB_CONFIG_MISSING',
+    status: 503,
+    requestId: 'req-123',
+    operation: 'bootstrap',
+  }])
+  assert.deepEqual(Object.keys(f.handledErrorLogs[0]), ['code', 'status', 'requestId', 'operation'])
+})
+
+test('log bledu 5xx nie zawiera bledu DB, tokenu, body ani sekretow', async () => {
+  const sensitiveError = new Error('DB_SUPER_SECRET password=do-not-log')
+  sensitiveError.code = 'XX000'
+  sensitiveError.detail = 'private database detail'
+  sensitiveError.query = 'select * from private_table'
+  sensitiveError.token = 'FIREBASE_TOKEN_SECRET'
+  sensitiveError.body = { secret: 'BODY_SECRET' }
+  const f = fixture({
+    body: { secret: 'REQUEST_BODY_SECRET' },
+    connectError: sensitiveError,
+    requestId: 'req-safe-500\nREQUEST_ID_SECRET',
+  })
+
+  await f.api.handle(
+    { method: 'GET', headers: { authorization: 'Bearer HEADER_TOKEN_SECRET' } },
+    {},
+    new URL('http://localhost/api/portal/workforce-schedule/bootstrap?orgId=bestclean&from=2026-08-24&to=2026-08-30'),
+  )
+
+  assert.equal(f.errors[0].code, 'WORKFORCE_SCHEDULE_FAILED')
+  assert.deepEqual(f.handledErrorLogs, [{
+    code: 'WORKFORCE_SCHEDULE_FAILED',
+    status: 500,
+    requestId: '',
+    operation: 'bootstrap',
+  }])
+  assert.doesNotMatch(
+    JSON.stringify(f.handledErrorLogs),
+    /DB_SUPER_SECRET|do-not-log|private database|private_table|FIREBASE_TOKEN_SECRET|BODY_SECRET|HEADER_TOKEN_SECRET|REQUEST_ID_SECRET/,
+  )
+})
+
+test('awaria loggera nie zastepuje bezpiecznej odpowiedzi 5xx', async () => {
+  const operationalError = Object.assign(new Error('internal detail'), {
+    statusCode: 503,
+    publicCode: 'WORKFORCE_SCHEDULE_SCHEMA_NOT_READY',
+    publicMessage: 'Schemat bazy Grafiku nie jest jeszcze aktywny.',
+  })
+  const f = fixture({
+    connectError: operationalError,
+    logHandledErrorError: new Error('logging sink unavailable'),
+  })
+
+  await f.api.handle(
+    { method: 'GET' },
+    {},
+    new URL('http://localhost/api/portal/workforce-schedule/bootstrap?orgId=bestclean&from=2026-08-24&to=2026-08-30'),
+  )
+
+  assert.equal(f.errors[0].status, 503)
+  assert.equal(f.errors[0].code, 'WORKFORCE_SCHEDULE_SCHEMA_NOT_READY')
 })
 
 test('token odrzucony przez portalowy verifier kończy się 401 przed połączeniem z bazą', async () => {
@@ -140,9 +241,9 @@ test('bootstrap jest transakcją read only i przekazuje org po autoryzacji', asy
   assert.ok(authorizeIndex < roleIndex)
   assert.ok(roleIndex < tenantIndex)
   assert.ok(tenantIndex < schemaIndex)
-  assert.equal(f.roleState.currentUser, 'portal_app')
+  assert.equal(f.roleState.currentUser, 'workforce_schedule_session')
   assert.deepEqual(await f.client.query('select current_user::text as current_user'), {
-    rows: [{ current_user: 'portal_app' }],
+    rows: [{ current_user: 'workforce_schedule_session' }],
   })
 })
 
@@ -151,7 +252,7 @@ test('brak schematu kończy transakcję rollbackiem i jawnym 503', async () => {
   await f.api.handle({ method: 'GET' }, {}, new URL('http://localhost/api/portal/workforce-schedule/bootstrap?orgId=bestclean&from=2026-08-24&to=2026-08-30'))
   assert.equal(f.errors[0].status, 503)
   assert.ok(f.calls.some(([name, sql]) => name === 'sql' && sql === 'rollback'))
-  assert.equal(f.roleState.currentUser, 'portal_app')
+  assert.equal(f.roleState.currentUser, 'workforce_schedule_session')
   assert.ok(f.calls.some(([name, sql]) => name === 'sql' && sql.includes('select session_user::text as session_user')))
 })
 
@@ -162,7 +263,7 @@ test('brak SET ROLE zatrzymuje Grafik i bezpiecznie cofa transakcję', async () 
   assert.equal(f.errors[0].code, 'WORKFORCE_SCHEDULE_DB_ROLE_NOT_READY')
   assert.ok(f.calls.findIndex(([name]) => name === 'authorize') < f.calls.findIndex(([name, sql]) => name === 'sql' && sql === 'set local role workforce_schedule_app'))
   assert.equal(f.calls.some(([name]) => name === 'tenant'), false)
-  assert.equal(f.roleState.currentUser, 'portal_app')
+  assert.equal(f.roleState.currentUser, 'workforce_schedule_session')
 })
 
 test('nieudany COMMIT niszczy połączenie zamiast zwracać je do poola', async () => {

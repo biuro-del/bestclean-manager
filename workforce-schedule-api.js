@@ -18,7 +18,7 @@ const { createWorkforceScheduleRepository } = require('./workforce-schedule-repo
 const WORKFORCE_SCHEDULE_BASE_PATH = '/api/portal/workforce-schedule'
 const WORKFORCE_SCHEDULE_MAX_BODY_BYTES = 256 * 1024
 const WORKFORCE_SCHEDULE_DB_ROLE = 'workforce_schedule_app'
-const WORKFORCE_SCHEDULE_SESSION_ROLE = 'portal_app'
+const WORKFORCE_SCHEDULE_SESSION_ROLE = 'workforce_schedule_session'
 
 function apiError(statusCode, code, message, details) {
   return new WorkforceScheduleError(statusCode, code, message, details)
@@ -58,10 +58,24 @@ function publicError(error) {
   return apiError(500, 'WORKFORCE_SCHEDULE_FAILED', 'Nie udało się bezpiecznie obsłużyć Grafiku.')
 }
 
+function safeLogCode(value) {
+  const normalized = text(value).toUpperCase()
+  return /^[A-Z][A-Z0-9_]{0,127}$/.test(normalized)
+    ? normalized
+    : 'WORKFORCE_SCHEDULE_FAILED'
+}
+
+function safeLogRequestId(value) {
+  const normalized = text(value)
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(normalized) ? normalized : ''
+}
+
 function ensureDependencies(dependencies) {
   const required = [
     'authorize',
     'connectDbClient',
+    'getRequestId',
+    'logHandledError',
     'parseBearerToken',
     'readJsonBody',
     'sendApiError',
@@ -96,6 +110,8 @@ function createWorkforceScheduleApi(dependencies = {}) {
   const {
     authorize,
     connectDbClient,
+    getRequestId,
+    logHandledError,
     parseBearerToken,
     readJsonBody,
     sendApiError,
@@ -107,6 +123,30 @@ function createWorkforceScheduleApi(dependencies = {}) {
 
   if (typeof createRepository !== 'function' || typeof createId !== 'function') {
     throw new TypeError('Workforce schedule API factories are incomplete.')
+  }
+
+  async function logHandledServerError(mapped, operation) {
+    const status = Number(mapped?.statusCode)
+    if (!Number.isInteger(status) || status < 500 || status > 599) return
+
+    let requestId = ''
+    try {
+      requestId = safeLogRequestId(getRequestId())
+    } catch {
+      requestId = ''
+    }
+
+    const entry = Object.freeze({
+      code: safeLogCode(mapped?.code),
+      status,
+      requestId,
+      operation,
+    })
+    try {
+      await logHandledError(entry)
+    } catch {
+      // Logging is best effort and must never replace the safe API response.
+    }
   }
 
   function matches(pathname) {
@@ -452,6 +492,7 @@ function createWorkforceScheduleApi(dependencies = {}) {
       return await handlePublication(req, res, identity)
     } catch (caught) {
       const mapped = publicError(caught)
+      await logHandledServerError(mapped, match.resource)
       sendApiError(res, mapped.statusCode, mapped.code, mapped.message, mapped.details)
     }
   }

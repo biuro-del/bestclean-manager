@@ -13,13 +13,18 @@ const {
   EFFECTS,
   EXACT_CONFIRMATION,
   FIXTURE_SQL,
+  ACL_SENTINEL_ROLE,
+  MIGRATION_PATH,
   MIGRATION_OWNER_ROLE,
   MIGRATION_RUNNER_ROLE,
+  POSTFLIGHT_ACL_BARRIER,
   RUN_ARGUMENT,
+  SCHEDULE_SESSION_ROLE,
   SCHEDULE_RUNTIME_ROLE,
   assertSafeUnmodifiedTarget,
   parseLaunchConfiguration,
 } = require(harnessPath)
+const migrationSource = fs.readFileSync(MIGRATION_PATH, 'utf8')
 
 function validLaunch(overrides = {}) {
   return {
@@ -106,36 +111,43 @@ test('preflight odrzuca wszystko poza pustym, lokalnym PostgreSQL 17', () => {
   assert.throws(() => assertSafeUnmodifiedTarget({ ...target, owns_database: false }, safeTarget), /TEST_DATABASE_OWNER_REQUIRED/)
 })
 
-test('fixture jest minimalny, dwutenantowy i rozdziela szeroki portal od runtime Grafiku', () => {
-  for (const table of ['organizations', 'organization_member', 'worker', 'service_object']) {
+test('fixture jest minimalny, dwutenantowy i rozdziela sesję od runtime Grafiku', () => {
+  for (const table of ['organizations', 'organization_member', 'organization_subscription', 'worker', 'client']) {
     assert.match(FIXTURE_SQL, new RegExp(`create table public\\.${table}\\b`, 'i'))
   }
   for (const column of [
     'worker_id_normalized',
     'login_normalized',
     'auth_uid',
-    'archived_at',
+    'client_id',
   ]) {
     assert.match(FIXTURE_SQL, new RegExp(`\\b${column}\\b`, 'i'))
   }
   assert.match(FIXTURE_SQL, /harness-alpha/)
   assert.match(FIXTURE_SQL, /harness-beta/)
-  assert.match(FIXTURE_SQL, /create role portal_app[\s\S]*login[\s\S]*nosuperuser[\s\S]*nobypassrls/i)
+  assert.match(FIXTURE_SQL, /'CLEANING_PROVIDER'/)
+  assert.doesNotMatch(FIXTURE_SQL, /'CLEANING_COMPANY'/)
+  assert.match(FIXTURE_SQL, /create role workforce_schedule_session[\s\S]*login[\s\S]*noinherit[\s\S]*nosuperuser[\s\S]*nobypassrls/i)
   assert.match(FIXTURE_SQL, /create role workforce_schedule_app[\s\S]*nologin[\s\S]*noinherit[\s\S]*nosuperuser[\s\S]*nobypassrls/i)
   assert.match(FIXTURE_SQL, /create role workforce_schedule_owner[\s\S]*nologin[\s\S]*noinherit[\s\S]*nosuperuser[\s\S]*nobypassrls/i)
   assert.match(FIXTURE_SQL, /create role migration_runner[\s\S]*login[\s\S]*nosuperuser[\s\S]*nobypassrls/i)
-  assert.match(FIXTURE_SQL, /grant workforce_schedule_app to portal_app[\s\S]*admin false[\s\S]*inherit false[\s\S]*set true/i)
+  assert.match(FIXTURE_SQL, /grant workforce_schedule_app to workforce_schedule_session[\s\S]*admin false[\s\S]*inherit false[\s\S]*set true/i)
   assert.match(FIXTURE_SQL, /grant workforce_schedule_owner to migration_runner[\s\S]*admin false[\s\S]*inherit false[\s\S]*set true/i)
-  assert.match(FIXTURE_SQL, /grant select on table[\s\S]*public\.worker[\s\S]*public\.service_object[\s\S]*to workforce_schedule_app/i)
-  assert.doesNotMatch(FIXTURE_SQL, /grant select on table\s+public\.organizations,[\s\S]*to workforce_schedule_app/i)
-  assert.match(FIXTURE_SQL, /grant select, insert, update, delete on table[\s\S]*public\.worker[\s\S]*public\.service_object[\s\S]*to portal_app/i)
+  assert.match(FIXTURE_SQL, /grant select on table[\s\S]*public\.organization_subscription[\s\S]*public\.worker[\s\S]*public\.client[\s\S]*to workforce_schedule_owner/i)
+  assert.doesNotMatch(FIXTURE_SQL, /grant\s+select[\s\S]*?to\s+workforce_schedule_(?:app|session)\s*;/i)
+  assert.doesNotMatch(FIXTURE_SQL, /portal_app/i)
+  assert.equal(SCHEDULE_SESSION_ROLE, 'workforce_schedule_session')
   assert.equal(SCHEDULE_RUNTIME_ROLE, 'workforce_schedule_app')
   assert.equal(MIGRATION_OWNER_ROLE, 'workforce_schedule_owner')
   assert.equal(MIGRATION_RUNNER_ROLE, 'migration_runner')
   assert.match(FIXTURE_SQL, /grant usage on schema public to workforce_schedule_owner/i)
   assert.doesNotMatch(FIXTURE_SQL, /grant usage on schema public to workforce_schedule_owner with grant option/i)
   assert.match(FIXTURE_SQL, /grant create on schema public to workforce_schedule_owner/i)
-  assert.match(FIXTURE_SQL, /grant update on table public\.worker, public\.service_object[\s\S]*to workforce_schedule_owner/i)
+  assert.match(FIXTURE_SQL, /grant update on table public\.worker, public\.client[\s\S]*to workforce_schedule_owner/i)
+  assert.match(FIXTURE_SQL, /'Aktywny'/)
+  assert.match(FIXTURE_SQL, /'Nieaktywny'/)
+  assert.match(FIXTURE_SQL, /'FUTURE_STATUS'/)
+  assert.match(FIXTURE_SQL, /'CLIENT-NULL'[\s\S]*null/i)
 })
 
 test('runner nie sprząta zewnętrznej bazy i pokrywa pełny kontrakt integracyjny', () => {
@@ -153,9 +165,20 @@ test('runner nie sprząta zewnętrznej bazy i pokrywa pełny kontrakt integracyj
   assert.match(harnessSource, /update public\.\$\{table\}/)
   assert.match(harnessSource, /delete from public\.\$\{table\}/)
   assert.match(harnessSource, /second migration execution unexpectedly succeeded/i)
+  assert.equal(ACL_SENTINEL_ROLE, 'portal_app')
+  assert.equal(POSTFLIGHT_ACL_BARRIER, '-- WORKFORCE_SCHEDULE_POSTFLIGHT_ACL_BARRIER')
+  assert.match(harnessSource, /assertUnsafeDefaultAclRejected/)
+  assert.match(harnessSource, /alter default privileges for role \$\{MIGRATION_OWNER_ROLE\}/i)
+  assert.match(harnessSource, /assertAclPostflightRejectsDrift/)
+  assert.match(harnessSource, /assertPreexistingScheduleFunctionRejected/)
+  assert.match(harnessSource, /assertRoleGraphPreflightRejected/)
+  assert.match(harnessSource, /session_direct_edges: 1/)
+  assert.match(harnessSource, /session_set_roles: \[SCHEDULE_RUNTIME_ROLE\]/)
+  assert.match(harnessSource, /app_graph_empty: true/)
+  assert.match(harnessSource, /assertNoScheduleObjects/)
   assert.deepEqual(EFFECTS, { delivery: false, notifications: false, downstream: false })
-  assert.match(harnessSource, /session_user: 'portal_app'[\s\S]*current_user: 'portal_app'/)
-  assert.match(harnessSource, /has_table_privilege\('portal_app', 'public\.workforce_schedule_settings', 'SELECT'\)/)
+  assert.match(harnessSource, /session_user: SCHEDULE_SESSION_ROLE[\s\S]*current_user: SCHEDULE_SESSION_ROLE/)
+  assert.match(harnessSource, /has_table_privilege\('workforce_schedule_session', 'public\.workforce_schedule_settings', 'SELECT'\)/)
   assert.match(harnessSource, /inherited_select: false/)
   assert.match(harnessSource, /set local role \$\{SCHEDULE_RUNTIME_ROLE\}/)
   assert.match(harnessSource, /session_user: MIGRATION_RUNNER_ROLE/)
@@ -171,6 +194,25 @@ test('runner nie sprząta zewnętrznej bazy i pokrywa pełny kontrakt integracyj
   assert.match(harnessSource, /schedule_role_noinherit: true/)
 })
 
+test('migracja fail-closed audytuje default ACL i pelny allowlist nowych obiektow', () => {
+  assert.match(migrationSource, /from pg_default_acl default_acl[\s\S]*?default_acl\.defaclobjtype in \('r', 'S', 'f'\)/)
+  assert.match(migrationSource, /WORKFORCE_SCHEDULE_UNSAFE_DEFAULT_ACL/)
+  assert.match(migrationSource, /WORKFORCE_SCHEDULE_UNSAFE_DEFAULT_ACL_POSTFLIGHT/)
+  assert.match(migrationSource, /WORKFORCE_SCHEDULE_TABLE_ACL_POSTFLIGHT_FAILED/)
+  assert.match(migrationSource, /WORKFORCE_SCHEDULE_COLUMN_ACL_POSTFLIGHT_FAILED/)
+  assert.match(migrationSource, /WORKFORCE_SCHEDULE_SEQUENCE_ACL_POSTFLIGHT_FAILED/)
+  assert.match(migrationSource, /WORKFORCE_SCHEDULE_FUNCTION_ACL_POSTFLIGHT_FAILED/)
+  assert.match(migrationSource, /WORKFORCE_SCHEDULE_FUNCTION_ALLOWLIST_POSTFLIGHT_FAILED/)
+  assert.match(migrationSource, /WORKFORCE_SCHEDULE_SESSION_ROLE_GRAPH_MISMATCH/)
+  assert.match(migrationSource, /WORKFORCE_SCHEDULE_APP_ROLE_GRAPH_MISMATCH/)
+  assert.match(migrationSource, /attribute\.attacl/)
+  assert.match(migrationSource, /relation\.relkind = 'S'/)
+  assert.match(migrationSource, /acldefault\('s', relation\.relowner\)/)
+  assert.match(migrationSource, /function_row\.proacl/)
+  assert.match(migrationSource, /from portal_app/i)
+  assert.doesNotMatch(migrationSource, /grant[^;]*\bto\s+portal_app\b/i)
+})
+
 test('schemaReady jest testowane na celowo osłabionych uprawnieniach i każda próba kończy się ROLLBACK', () => {
   assert.match(
     harnessSource,
@@ -178,8 +220,8 @@ test('schemaReady jest testowane na celowo osłabionych uprawnieniach i każda p
   )
   assert.match(harnessSource, /with grant option/i)
   assert.match(harnessSource, /grant \$\{quoteIdentifier\(ownerUser\)\} to \$\{SCHEDULE_RUNTIME_ROLE\}/i)
-  assert.match(harnessSource, /grant update, delete on table public\.worker, public\.service_object to \$\{SCHEDULE_RUNTIME_ROLE\}/i)
-  assert.match(harnessSource, /set local session authorization portal_app/i)
+  assert.match(harnessSource, /grant update, delete on table public\.worker, public\.client to \$\{SCHEDULE_RUNTIME_ROLE\}/i)
+  assert.match(harnessSource, /set local session authorization \$\{SCHEDULE_SESSION_ROLE\}/i)
   assert.match(harnessSource, /create policy workforce_schedule_harness_permissive/i)
   assert.match(harnessSource, /permissivePolicy\.readiness\.ready, false/)
   assert.match(harnessSource, /alter policy workforce_schedule_settings_tenant_policy[\s\S]*\) or true/i)
@@ -189,7 +231,10 @@ test('schemaReady jest testowane na celowo osłabionych uprawnieniach i każda p
   assert.match(harnessSource, /grant update \(title\)[\s\S]*workforce_schedule_shift_revision/i)
   assert.match(harnessSource, /workforce_schedule_shift_revision:UPDATE:EXCESS/i)
   assert.match(harnessSource, /runtime:SCHEMA_USAGE/)
-  assert.match(harnessSource, /:EXECUTE_GRANT_OPTION/)
+  assert.match(harnessSource, /runtime:SESSION_ROLE_GRAPH/)
+  assert.match(harnessSource, /runtime:SESSION_SET_GRAPH/)
+  assert.match(harnessSource, /runtime:APP_ROLE_GRAPH/)
+  assert.match(harnessSource, /:FUNCTION_ACL'[\s\S]*?:UNEXPECTED_EXECUTE'/)
   assert.match(harnessSource, /:OWNER_MEMBERSHIP/)
   assert.match(harnessSource, /:UPDATE:EXCESS/)
   assert.ok((harnessSource.match(/client\.query\('rollback'\)/g) || []).length >= 2)

@@ -19,31 +19,40 @@ const REQUIRED_RELATIONS = Object.freeze([
 const SOURCE_RELATIONS = Object.freeze([
   'public.organizations',
   'public.organization_member',
+  'public.organization_subscription',
   'public.worker',
-  'public.service_object',
+  'public.client',
 ])
 
-const SOURCE_SELECT_RELATIONS = Object.freeze([
-  'public.organization_member',
-  'public.worker',
-  'public.service_object',
-])
+// Kept as an exported compatibility constant: runtime roles intentionally have
+// no direct SELECT on any shared source relation.
+const SOURCE_SELECT_RELATIONS = Object.freeze([])
 
 const SOURCE_FORBIDDEN_PRIVILEGES = Object.freeze({
-  'public.organizations': ['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'],
-  'public.organization_member': ['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'],
-  'public.worker': ['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'],
-  'public.service_object': ['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'],
+  'public.organizations': ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'],
+  'public.organization_member': ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'],
+  'public.organization_subscription': ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'],
+  'public.worker': ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'],
+  'public.client': ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'],
 })
 
-const REQUIRED_FUNCTIONS = Object.freeze([
+const SESSION_FUNCTIONS = Object.freeze([
+  'public.workforce_schedule_authorize_session(text,text)',
+])
+
+const RUNTIME_FUNCTIONS = Object.freeze([
+  'public.workforce_schedule_actor_is_active(text)',
+  'public.workforce_schedule_read_active_workers(text)',
+  'public.workforce_schedule_read_active_objects(text)',
   'public.workforce_schedule_lock_worker_sources(text,text[])',
   'public.workforce_schedule_lock_object_sources(text,text[])',
 ])
 
+const REQUIRED_FUNCTIONS = Object.freeze([...SESSION_FUNCTIONS, ...RUNTIME_FUNCTIONS])
+
 const WORKFORCE_SCHEDULE_DB_ROLE = 'workforce_schedule_app'
 const WORKFORCE_SCHEDULE_OWNER_ROLE = 'workforce_schedule_owner'
-const WORKFORCE_SCHEDULE_SESSION_ROLE = 'portal_app'
+const WORKFORCE_SCHEDULE_SESSION_ROLE = 'workforce_schedule_session'
 
 const WORKFORCE_SCHEDULE_SCHEMA_MARKER = 'cleanzi.workforce_schedule.core.v1'
 
@@ -264,14 +273,12 @@ function createWorkforceScheduleRepository(client) {
                     and replace(replace(replace(
                       regexp_replace(lower(policy.qual), '[[:space:]()]', '', 'g'),
                       '::text', ''), 'public.', ''), 'pg_catalog.', '') = format(
-                        'org_id=nullifcurrent_setting''cleanzi.org_id'',true,''''andexistsselect1fromorganization_memberworkforce_schedule_memberwhereworkforce_schedule_member.org_id=%I.org_idandworkforce_schedule_member.uid=nullifcurrent_setting''cleanzi.actor_uid'',true,''''andworkforce_schedule_member.status=''active''',
-                        split_part(required.relation_name, '.', 2)
+                        'org_id=nullifcurrent_setting''cleanzi.org_id'',true,''''andworkforce_schedule_actor_is_activeorg_id'
                       )
                     and replace(replace(replace(
                       regexp_replace(lower(policy.with_check), '[[:space:]()]', '', 'g'),
                       '::text', ''), 'public.', ''), 'pg_catalog.', '') = format(
-                        'org_id=nullifcurrent_setting''cleanzi.org_id'',true,''''andexistsselect1fromorganization_memberworkforce_schedule_memberwhereworkforce_schedule_member.org_id=%I.org_idandworkforce_schedule_member.uid=nullifcurrent_setting''cleanzi.actor_uid'',true,''''andworkforce_schedule_member.status=''active''',
-                        split_part(required.relation_name, '.', 2)
+                        'org_id=nullifcurrent_setting''cleanzi.org_id'',true,''''andworkforce_schedule_actor_is_activeorg_id'
                       )
               ) as policy_ready
          from unnest($1::text[]) as required(relation_name)
@@ -381,17 +388,12 @@ function createWorkforceScheduleRepository(client) {
 
     const sourceResult = await client.query(
       `select required.relation_name,
-              to_regclass(required.relation_name) is not null as relation_ready,
-              case when required.relation_name = any($2::text[])
-                then has_table_privilege(current_user, required.relation_name, 'SELECT')
-                else true
-              end as select_ready
+              to_regclass(required.relation_name) is not null as relation_ready
          from unnest($1::text[]) as required(relation_name)`,
-      [SOURCE_RELATIONS, SOURCE_SELECT_RELATIONS],
+      [SOURCE_RELATIONS],
     )
     for (const row of sourceResult.rows) {
       if (row.relation_ready !== true) missing.push(`${text(row.relation_name)}:SOURCE`)
-      if (row.select_ready !== true) missing.push(`${text(row.relation_name)}:SELECT`)
     }
 
     const sourceForbiddenRequirements = Object.entries(SOURCE_FORBIDDEN_PRIVILEGES)
@@ -416,25 +418,78 @@ function createWorkforceScheduleRepository(client) {
       }
     }
 
+    const functionAllowlistResult = await client.query(
+      `select count(*)::integer as function_count,
+              coalesce(bool_and(
+                replace(format(
+                  '%I.%I(%s)',
+                  namespace.nspname,
+                  function_row.proname,
+                  pg_catalog.oidvectortypes(function_row.proargtypes)
+                ), ' ', '') = any($1::text[])
+              ), false) as only_allowed
+         from pg_proc function_row
+         join pg_namespace namespace on namespace.oid = function_row.pronamespace
+        where namespace.nspname = 'public'
+          and function_row.proname like 'workforce\\_schedule\\_%' escape '\\'`,
+      [REQUIRED_FUNCTIONS],
+    )
+    const functionAllowlist = functionAllowlistResult.rows[0]
+    if (!functionAllowlist
+        || Number(functionAllowlist.function_count) !== REQUIRED_FUNCTIONS.length
+        || functionAllowlist.only_allowed !== true) {
+      missing.push('runtime:FUNCTION_ALLOWLIST')
+    }
+
     const functionResult = await client.query(
       `select required.function_signature,
               target.oid is not null as function_ready,
               coalesce(target.prosecdef, false) as security_definer,
               coalesce(target.proowner = (select oid from pg_roles where rolname = $2::text), false) as expected_owner,
-              coalesce(target.proconfig @> array['search_path=pg_catalog']::text[], false) as fixed_search_path,
+               coalesce(target.proconfig = array['search_path=pg_catalog']::text[], false) as fixed_search_path,
+               coalesce(target.prokind = 'f' and not target.proleakproof, false) as safe_function_kind,
+               coalesce(target.prolang = (select oid from pg_language where lanname = 'sql'), false) as expected_language,
+               coalesce(case
+                 when required.function_signature = any(array[
+                   'public.workforce_schedule_authorize_session(text,text)',
+                   'public.workforce_schedule_actor_is_active(text)',
+                   'public.workforce_schedule_read_active_workers(text)',
+                   'public.workforce_schedule_read_active_objects(text)'
+                 ]::text[]) then target.provolatile = 's'
+                 else target.provolatile = 'v'
+               end, false) as expected_volatility,
               case when target.oid is null then false
-                   else has_function_privilege(current_user, target.oid, 'EXECUTE') end as execute_ready,
+                   when required.function_signature = any($3::text[])
+                     then has_function_privilege(session_user, target.oid, 'EXECUTE')
+                   else has_function_privilege(current_user, target.oid, 'EXECUTE')
+              end as execute_ready,
+              case when target.oid is null then true
+                   when required.function_signature = any($3::text[])
+                     then has_function_privilege(current_user, target.oid, 'EXECUTE')
+                   else has_function_privilege(session_user, target.oid, 'EXECUTE')
+              end as unexpected_execute,
               case when target.oid is null then false
                    else not pg_has_role(current_user, target.proowner, 'MEMBER')
                     and not pg_has_role(current_user, target.proowner, 'SET') end as no_owner_membership,
               case
                 when target.oid is null then false
+                when required.function_signature = 'public.workforce_schedule_authorize_session(text,text)'
+                  then has_table_privilege(target.proowner, 'public.organizations', 'SELECT')
+                   and has_table_privilege(target.proowner, 'public.organization_member', 'SELECT')
+                   and has_table_privilege(target.proowner, 'public.organization_subscription', 'SELECT')
+                   and has_table_privilege(target.proowner, 'public.worker', 'SELECT')
+                when required.function_signature = 'public.workforce_schedule_actor_is_active(text)'
+                  then has_table_privilege(target.proowner, 'public.organization_member', 'SELECT')
+                when required.function_signature = 'public.workforce_schedule_read_active_workers(text)'
+                  then has_table_privilege(target.proowner, 'public.worker', 'SELECT')
+                when required.function_signature = 'public.workforce_schedule_read_active_objects(text)'
+                  then has_table_privilege(target.proowner, 'public.client', 'SELECT')
                 when required.function_signature like '%lock_worker_sources%'
                   then has_table_privilege(target.proowner, 'public.worker', 'SELECT')
                    and has_table_privilege(target.proowner, 'public.worker', 'UPDATE')
-                else has_table_privilege(target.proowner, 'public.service_object', 'SELECT')
-                   and has_table_privilege(target.proowner, 'public.service_object', 'UPDATE')
-              end as owner_lock_ready,
+                else has_table_privilege(target.proowner, 'public.client', 'SELECT')
+                   and has_table_privilege(target.proowner, 'public.client', 'UPDATE')
+              end as owner_source_ready,
               case when target.oid is null then false else not exists (
                 select 1
                   from aclexplode(coalesce(target.proacl, acldefault('f', target.proowner))) privilege
@@ -442,32 +497,31 @@ function createWorkforceScheduleRepository(client) {
               ) end as no_public_execute,
               case when target.oid is null then false else not exists (
                 select 1
-                  from aclexplode(coalesce(target.proacl, acldefault('f', target.proowner))) privilege
-                 where privilege.grantee = (select oid from pg_roles where rolname = session_user)
-                   and privilege.privilege_type = 'EXECUTE'
-              ) end as no_session_execute,
-              case when target.oid is null then false else not exists (
-                with recursive accessible_roles(role_oid) as (
-                  select oid
-                    from pg_roles
-                   where rolname = current_user
-                  union
-                  select membership.roleid
-                    from pg_auth_members membership
-                    join accessible_roles child on child.role_oid = membership.member
-                )
-                select 1
-                  from aclexplode(coalesce(target.proacl, acldefault('f', target.proowner))) privilege
-                 where privilege.privilege_type = 'EXECUTE'
-                   and privilege.is_grantable
-                   and (
-                     privilege.grantee = 0
-                     or privilege.grantee in (select role_oid from accessible_roles)
-                   )
-              ) end as no_execute_grant_option
+                  from aclexplode(
+                    case
+                      when target.proacl is null then acldefault('f', target.proowner)
+                      when cardinality(target.proacl) > 0 then target.proacl
+                      else null::aclitem[]
+                    end
+                  ) privilege
+                 where privilege.grantee not in (
+                         target.proowner,
+                         case when required.function_signature = any($3::text[])
+                           then (select oid from pg_roles where rolname = session_user)
+                           else (select oid from pg_roles where rolname = current_user)
+                         end
+                       )
+                    or (
+                      privilege.grantee = case when required.function_signature = any($3::text[])
+                        then (select oid from pg_roles where rolname = session_user)
+                        else (select oid from pg_roles where rolname = current_user)
+                      end
+                      and (privilege.privilege_type <> 'EXECUTE' or privilege.is_grantable)
+                    )
+              ) end as exact_acl
          from unnest($1::text[]) as required(function_signature)
          left join pg_proc target on target.oid = to_regprocedure(required.function_signature)`,
-      [REQUIRED_FUNCTIONS, WORKFORCE_SCHEDULE_OWNER_ROLE],
+      [REQUIRED_FUNCTIONS, WORKFORCE_SCHEDULE_OWNER_ROLE, SESSION_FUNCTIONS],
     )
     for (const row of functionResult.rows) {
       const signature = text(row.function_signature)
@@ -476,12 +530,15 @@ function createWorkforceScheduleRepository(client) {
         if (row.security_definer !== true) missing.push(`${signature}:SECURITY_DEFINER`)
         if (row.expected_owner !== true) missing.push(`${signature}:OWNER`)
         if (row.fixed_search_path !== true) missing.push(`${signature}:SEARCH_PATH`)
+        if (row.safe_function_kind !== true) missing.push(`${signature}:FUNCTION_KIND`)
+        if (row.expected_language !== true) missing.push(`${signature}:LANGUAGE`)
+        if (row.expected_volatility !== true) missing.push(`${signature}:VOLATILITY`)
         if (row.execute_ready !== true) missing.push(`${signature}:EXECUTE`)
+        if (row.unexpected_execute !== false) missing.push(`${signature}:UNEXPECTED_EXECUTE`)
         if (row.no_owner_membership !== true) missing.push(`${signature}:OWNER_MEMBERSHIP`)
-        if (row.owner_lock_ready !== true) missing.push(`${signature}:OWNER_LOCK_PRIVILEGE`)
+        if (row.owner_source_ready !== true) missing.push(`${signature}:OWNER_SOURCE_PRIVILEGE`)
         if (row.no_public_execute !== true) missing.push(`${signature}:PUBLIC_EXECUTE`)
-        if (row.no_session_execute !== true) missing.push(`${signature}:SESSION_EXECUTE`)
-        if (row.no_execute_grant_option !== true) missing.push(`${signature}:EXECUTE_GRANT_OPTION`)
+        if (row.exact_acl !== true) missing.push(`${signature}:FUNCTION_ACL`)
       }
     }
 
@@ -515,8 +572,40 @@ function createWorkforceScheduleRepository(client) {
                      or membership.inherit_option
                      or not membership.set_option
                    )
-              ) as role_switch_exact,
-              not exists (
+               ) as role_switch_exact,
+               (
+                 select count(*) = 1
+                    and bool_and(
+                      membership.roleid = role.oid
+                      and membership.set_option
+                      and not membership.inherit_option
+                      and not membership.admin_option
+                    )
+                   from pg_auth_members membership
+                  where membership.member = session_role.oid
+               ) as exact_session_role_graph,
+               not exists (
+                 with recursive set_reachable(role_oid) as (
+                   select membership.roleid
+                     from pg_auth_members membership
+                    where membership.member = session_role.oid
+                      and membership.set_option
+                   union
+                   select membership.roleid
+                     from pg_auth_members membership
+                     join set_reachable parent on parent.role_oid = membership.member
+                    where membership.set_option
+                 )
+                 select 1
+                   from set_reachable
+                  where set_reachable.role_oid <> role.oid
+               ) as exact_session_set_graph,
+               not exists (
+                 select 1
+                   from pg_auth_members membership
+                  where membership.member = role.oid
+               ) as empty_runtime_role_graph,
+               not exists (
                 with recursive inherited(role_oid) as (
                   select membership.roleid
                     from pg_auth_members membership
@@ -613,8 +702,8 @@ function createWorkforceScheduleRepository(client) {
         WORKFORCE_SCHEDULE_SESSION_ROLE,
         WORKFORCE_SCHEDULE_DB_ROLE,
         WORKFORCE_SCHEDULE_OWNER_ROLE,
-        REQUIRED_RELATIONS,
-        REQUIRED_FUNCTIONS,
+        [...REQUIRED_RELATIONS, ...SOURCE_RELATIONS],
+        RUNTIME_FUNCTIONS,
       ],
     )
     const security = securityResult.rows[0]
@@ -624,6 +713,9 @@ function createWorkforceScheduleRepository(client) {
     if (!security || security.restricted_role !== true) missing.push('runtime:RLS_BYPASS')
     if (!security || security.role_switch_ready !== true) missing.push('runtime:ROLE_MEMBERSHIP')
     if (!security || security.role_switch_exact !== true) missing.push('runtime:ROLE_MEMBERSHIP_OPTIONS')
+    if (!security || security.exact_session_role_graph !== true) missing.push('runtime:SESSION_ROLE_GRAPH')
+    if (!security || security.exact_session_set_graph !== true) missing.push('runtime:SESSION_SET_GRAPH')
+    if (!security || security.empty_runtime_role_graph !== true) missing.push('runtime:APP_ROLE_GRAPH')
     if (!security || security.no_inherited_runtime !== true) missing.push('runtime:ROLE_INHERIT')
     if (!security || security.no_privileged_membership !== true) missing.push('runtime:PRIVILEGED_MEMBERSHIP')
     if (!security || security.session_no_privileged_membership !== true) missing.push('runtime:SESSION_PRIVILEGED_MEMBERSHIP')
@@ -675,7 +767,8 @@ function createWorkforceScheduleRepository(client) {
       `select location_id, source_object_id, name, short_name, color, soft_color, status, version
          from public.workforce_schedule_location
         where org_id = $1::text
-        order by case when status = 'ACTIVE' then 0 else 1 end, name asc, location_id asc`,
+          and status = 'ACTIVE'
+        order by name asc, location_id asc`,
       [orgId],
     )
     return result.rows.map(mapLocation)
@@ -861,17 +954,9 @@ function createWorkforceScheduleRepository(client) {
 
   async function readActiveRoster(orgId) {
     const result = await client.query(
-      `select lower(btrim(w.worker_id_normalized)) as source_worker_id_normalized,
-              nullif(lower(btrim(coalesce(nullif(w.login_normalized, ''), w.login))), '') as source_worker_login,
-              nullif(btrim(w.auth_uid), '') as source_auth_uid,
-              coalesce(nullif(btrim(w.full_name), ''), nullif(btrim(w.login), ''), w.worker_id) as display_name,
-              nullif(btrim(w.role), '') as role_snapshot
-         from public.worker w
-        where w.org_id = $1::text
-          and w.active is true
-          and upper(btrim(w.status)) = 'ACTIVE'
-          and nullif(btrim(w.worker_id_normalized), '') is not null
-        order by display_name asc, source_worker_id_normalized asc`,
+      `select source_worker_id_normalized, source_worker_login, source_auth_uid,
+              display_name, role_snapshot
+         from public.workforce_schedule_read_active_workers($1::text)`,
       [orgId],
     )
     return result.rows
@@ -879,14 +964,8 @@ function createWorkforceScheduleRepository(client) {
 
   async function readActiveObjects(orgId) {
     const result = await client.query(
-      `select btrim(o.object_id) as source_object_id,
-              coalesce(nullif(btrim(o.name), ''), btrim(o.object_id)) as display_name
-         from public.service_object o
-        where o.org_id = $1::text
-          and nullif(btrim(o.object_id), '') is not null
-          and upper(btrim(o.status)) = 'ACTIVE'
-          and o.archived_at is null
-        order by display_name asc, source_object_id asc`,
+      `select source_object_id, display_name
+         from public.workforce_schedule_read_active_objects($1::text)`,
       [orgId],
     )
     return result.rows
@@ -1125,12 +1204,15 @@ function createWorkforceScheduleRepository(client) {
     const expected = [...new Set(sourceObjectIds.map(text).filter(Boolean))].sort()
     if (!expected.length) return
     const result = await client.query(
-      `select source_object_id, status, archived
+      `select source_object_id, active, status
          from public.workforce_schedule_lock_object_sources($1::text, $2::text[])`,
       [orgId, expected],
     )
     const active = new Set(result.rows
-      .filter((row) => text(row.status).toUpperCase() === 'ACTIVE' && row.archived !== true)
+      .filter((row) => (
+        row.active === true
+        && ['ACTIVE', 'AKTYWNY'].includes(text(row.status).toUpperCase())
+      ))
       .map((row) => text(row.source_object_id)))
     const unavailable = expected.filter((sourceObjectId) => !active.has(sourceObjectId))
     if (unavailable.length) {
@@ -1380,20 +1462,14 @@ function createWorkforceScheduleRepository(client) {
     )
     const people = await client.query(
       `${cte}
-       select s.shift_id, a.person_id, p.status,
-              (w.org_id is not null) as source_active
+       select s.shift_id, a.person_id, p.status
          from schedule s
          join public.workforce_schedule_shift_revision_assignee a
            on a.org_id = s.org_id and a.shift_id = s.shift_id and a.revision_no = s.revision_no
          left join public.workforce_schedule_person p
            on p.org_id = a.org_id and p.person_id = a.person_id
-         left join public.worker w
-           on w.org_id = p.org_id
-          and lower(btrim(w.worker_id_normalized)) = p.source_worker_id_normalized
-          and w.active is true
-          and upper(btrim(w.status)) = 'ACTIVE'
         where (s.shift_id = any($2::text[]) or s.business_date between $3::date and $4::date)
-          and (p.person_id is null or p.status <> 'ACTIVE' or w.org_id is null)`,
+          and (p.person_id is null or p.status <> 'ACTIVE')`,
       params,
     )
     const locations = await client.query(
@@ -1402,11 +1478,8 @@ function createWorkforceScheduleRepository(client) {
          from schedule s
          left join public.workforce_schedule_location l
            on l.org_id = s.org_id and l.location_id = s.location_id
-         left join public.service_object o
-           on o.org_id = l.org_id and btrim(o.object_id) = l.source_object_id
-          and upper(btrim(o.status)) = 'ACTIVE' and o.archived_at is null
         where (s.shift_id = any($2::text[]) or s.business_date between $3::date and $4::date)
-          and (l.location_id is null or l.status <> 'ACTIVE' or o.object_id is null)`,
+          and (l.location_id is null or l.status <> 'ACTIVE')`,
       params,
     )
     const overlaps = await client.query(
@@ -1536,6 +1609,8 @@ module.exports = {
   REQUIRED_FUNCTIONS,
   REQUIRED_PRIVILEGES,
   REQUIRED_RELATIONS,
+  RUNTIME_FUNCTIONS,
+  SESSION_FUNCTIONS,
   SOURCE_RELATIONS,
   SOURCE_FORBIDDEN_PRIVILEGES,
   SOURCE_SELECT_RELATIONS,

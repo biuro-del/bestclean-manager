@@ -9,7 +9,14 @@ Kalendarza, zadań, kodów QR, ewidencji pracy lub przejazdów.
 Jedynymi wejściami z platformy są katalogi referencyjne:
 
 - aktywni pracownicy, identyfikowani stabilnym ID pracownika;
-- aktywne obiekty, identyfikowane stabilnym ID obiektu.
+- aktywne obiekty firmy sprzątającej z istniejącego katalogu `client`,
+  identyfikowane stabilnym `client_id`.
+
+Grafik nie korzysta z nieobecnego na produkcji `service_object` ani z
+`facility_manager_object`, który należy do odrębnej domeny zarządcy obiektu.
+Do katalogu trafiają wyłącznie rekordy ze statusem `ACTIVE` lub `Aktywny`;
+status pusty, nieznany, nieaktywny albo archiwalny jest traktowany jako
+nieaktywny.
 
 Nazwy są snapshotem prezentacyjnym. Relacje Grafiku opierają się na ID, nigdy na
 nazwie lub adresie.
@@ -58,23 +65,54 @@ projektem i wymaga nowego kontraktu oraz jawnego włączenia efektu.
   zatwierdzać; `COORDINATOR` ma wyłącznie podgląd.
 - Każda operacja jest ograniczona do organizacji z aktywnego kontekstu.
 - Tabele `workforce_schedule_*` mają wymuszone RLS oraz minimalne granty.
-- Dedykowana rola `workforce_schedule_app` ma do katalogów źródłowych wyłącznie
-  odczyt. Blokady użytych rekordów pracowników i obiektów wykonują dwie wąskie
-  funkcje `SECURITY DEFINER`, należące do `workforce_schedule_owner`.
-- Sesja backendu działa jako `portal_app`, a każda transakcja Grafiku jawnie i
-  lokalnie przełącza się na `workforce_schedule_app`; po `COMMIT` lub `ROLLBACK`
-  bieżąca rola musi wrócić do `portal_app`.
+- Migracja przed i po DDL audytuje surowe `pg_default_acl` właściciela. Każdy
+  domyślny grant dla roli innej niż `workforce_schedule_owner` zatrzymuje i
+  wycofuje migrację. Końcowy allowlist obejmuje ACL tabel, kolumn, sekwencji i
+  funkcji, więc `portal_app` ani inna rola nie może odziedziczyć dostępu.
+- Login `workforce_schedule_session` i rola wykonawcza
+  `workforce_schedule_app` nie mają bezpośredniego `SELECT` ani praw zapisu do
+  wspólnych tabel `organizations`, `organization_member`,
+  `organization_subscription`, `worker` i `client`. Autoryzację, filtrowany
+  odczyt aktywnych katalogów oraz blokady użytych rekordów realizują wyłącznie
+  wąskie funkcje `SECURITY DEFINER` należące do
+  `workforce_schedule_owner`, ze stałym `search_path=pg_catalog` i dokładnym
+  allowlistem `EXECUTE`.
+- Token Firebase jest weryfikowany przez backend przed wywołaniem funkcji
+  autoryzacyjnej. Funkcja bazy potwierdza wyłącznie dokładną parę `orgId + uid`;
+  sama baza nie zastępuje kryptograficznej weryfikacji tokenu Firebase.
+- Grafik ma osobny pool i login `workforce_schedule_session`, zasilany wyłącznie
+  przez `WORKFORCE_SCHEDULE_DB_USER` oraz `WORKFORCE_SCHEDULE_DB_PASS`. Nie
+  korzysta z `DB_USER`, `DB_PASS` ani członkostwa `portal_app`.
+- Uśpiona konfiguracja `apphosting.yaml` celowo nie wskazuje jeszcze sekretów
+  loginu Grafiku. Referencje do nich wolno dodać dopiero w osobnym kandydacie
+  aktywacyjnym, po utworzeniu aktywnych wersji i nadaniu dostępu kontu runtime;
+  dzięki temu brak nowych sekretów nie blokuje wdrożeń niezwiązanych z Grafikiem.
+- Tryb logowania do bazy jest wymagany osobno jako
+  `WORKFORCE_SCHEDULE_DB_AUTH_TYPE=PASSWORD`. Nie dziedziczy
+  `CLOUD_SQL_AUTH_TYPE` ani `DB_AUTH_TYPE`; brak, `IAM` lub inna wartość
+  zatrzymuje uruchomienie Grafiku z bezpiecznym błędem 503. IAM wymaga osobnego
+  projektu roli Cloud SQL i nie jest obsługiwany przez obecny natywny login.
+- Każda transakcja Grafiku jawnie i lokalnie przełącza się na
+  `workforce_schedule_app`; po `COMMIT` lub `ROLLBACK` bieżąca rola musi wrócić
+  do `workforce_schedule_session`.
 - Migracja jest addytywnym kandydatem; nie uruchamia się automatycznie.
 
 ## Warunki aktywacji
 
 Przed pierwszym włączeniem produkcyjnym trzeba osobno utworzyć ograniczone role i
-członkostwa, wykonać migrację na PostgreSQL 17, sprawdzić kontrakt uprawnień,
+członkostwa, ustawić dwa dedykowane sekrety, wykonać migrację na PostgreSQL 17,
+sprawdzić kontrakt uprawnień,
 izolację dwóch organizacji oraz uwierzytelniony przepływ przeglądarkowy. Dopiero
 po tych bramkach można osobno ustawić backendowe
 `WORKFORCE_SCHEDULE_ENABLED=true` i frontendowe
 `VITE_WORKFORCE_SCHEDULE_MODE=live`. Flagi `DELIVERY`, `NOTIFICATIONS` i
 `DOWNSTREAM` pozostają `false`.
+
+Autoryzacja dopuszcza wyłącznie kanoniczny typ organizacji
+`CLEANING_PROVIDER`. Organizacja z pustym, historycznym albo innym typem jest
+odrzucana. Przed aktywacją trzeba więc wykonać osobny audyt tylko do odczytu dla
+organizacji docelowej; ewentualna klasyfikacja lub backfill danych wymaga osobnej
+zgody i nie jest częścią tej migracji.
 
 Wycofanie aplikacyjne jest bezstratne: wyłącz oba przełączniki aktywujące i
 pozostaw addytywny schemat w bazie. Nie ma automatycznego skryptu `DROP`, ponieważ

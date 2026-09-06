@@ -1,6 +1,6 @@
 -- ADDITIVE CANDIDATE ONLY. Do not run without separate database approval.
--- Grafik is an independent domain. It reads only canonical workers and objects
--- into snapshots and has no foreign keys to worker, service_object, client, task, order,
+-- Grafik is an independent domain. It reads only canonical workers and clients
+-- into snapshots and has no foreign keys to worker, client, task, order,
 -- calendar, QR, workday or event data.
 
 begin;
@@ -17,10 +17,11 @@ declare
   privilege_name text;
   checked_role text;
   checked_role_row record;
-  portal_role record;
+  schedule_session_role record;
   migration_role record;
   role_membership record;
   missing_source text;
+  unsafe_default_acl text;
 begin
   foreach target_relation in array array[
     'workforce_schedule_settings',
@@ -41,23 +42,45 @@ begin
     end if;
   end loop;
 
-  foreach target_function in array array[
-    'public.workforce_schedule_lock_worker_sources(text,text[])',
-    'public.workforce_schedule_lock_object_sources(text,text[])'
-  ]
-  loop
-    if to_regprocedure(target_function) is not null then
-      raise exception 'Refusing to reuse pre-existing function %. Perform a separate audited reconciliation.', target_function;
-    end if;
-  end loop;
+  -- Refuse every pre-existing schedule function, including unknown overloads.
+  -- Checking only the six expected signatures would let an older or hostile
+  -- workforce_schedule_* overload survive this additive migration.
+  select format(
+           '%I.%I(%s)',
+           namespace.nspname,
+           function_row.proname,
+           pg_catalog.oidvectortypes(function_row.proargtypes)
+         )
+    into target_function
+    from pg_proc function_row
+    join pg_namespace namespace on namespace.oid = function_row.pronamespace
+   where namespace.nspname = 'public'
+     and function_row.proname like 'workforce\_schedule\_%' escape '\'
+   order by function_row.proname, function_row.oid
+   limit 1;
+  if target_function is not null then
+    raise exception 'Refusing to reuse pre-existing function %. Perform a separate audited reconciliation.', target_function;
+  end if;
 
   select string_agg(required.table_name || '.' || required.column_name, ', ' order by required.table_name, required.column_name)
     into missing_source
     from (values
       ('organizations', 'org_id'),
+      ('organizations', 'owner_worker_id'),
+      ('organizations', 'organization_kind'),
+      ('organizations', 'status'),
+      ('organizations', 'onboarding_status'),
+      ('organizations', 'deleted_at'),
       ('organization_member', 'org_id'),
       ('organization_member', 'uid'),
+      ('organization_member', 'role'),
+      ('organization_member', 'worker_id'),
       ('organization_member', 'status'),
+      ('organization_subscription', 'org_id'),
+      ('organization_subscription', 'plan_code'),
+      ('organization_subscription', 'status'),
+      ('organization_subscription', 'trial_ends_at'),
+      ('organization_subscription', 'current_period_ends_at'),
       ('worker', 'org_id'),
       ('worker', 'login'),
       ('worker', 'login_normalized'),
@@ -68,11 +91,10 @@ begin
       ('worker', 'role'),
       ('worker', 'active'),
       ('worker', 'status'),
-      ('service_object', 'org_id'),
-      ('service_object', 'object_id'),
-      ('service_object', 'name'),
-      ('service_object', 'status'),
-      ('service_object', 'archived_at')
+      ('client', 'org_id'),
+      ('client', 'client_id'),
+      ('client', 'name'),
+      ('client', 'status')
     ) as required(table_name, column_name)
    where not exists (
      select 1
@@ -99,7 +121,7 @@ begin
      or migration_role.rolcreatedb or migration_role.rolreplication then
     raise exception 'Migration session role must be a restricted LOGIN role.';
   end if;
-  if session_user in ('portal_app', 'workforce_schedule_app', 'workforce_schedule_owner') then
+  if session_user in ('workforce_schedule_session', 'workforce_schedule_app', 'workforce_schedule_owner') then
     raise exception 'Migration requires a separate restricted session role.';
   end if;
   if exists (
@@ -120,15 +142,15 @@ begin
     raise exception 'Migration session role inherits a privileged database role.';
   end if;
 
-  select * into portal_role from pg_roles where rolname = 'portal_app';
-  if not found or not portal_role.rolcanlogin
-     or portal_role.rolsuper or portal_role.rolbypassrls or portal_role.rolcreaterole
-     or portal_role.rolcreatedb or portal_role.rolreplication then
-    raise exception 'Required session role portal_app must be a restricted LOGIN role.';
+  select * into schedule_session_role from pg_roles where rolname = 'workforce_schedule_session';
+  if not found or not schedule_session_role.rolcanlogin or schedule_session_role.rolinherit
+     or schedule_session_role.rolsuper or schedule_session_role.rolbypassrls or schedule_session_role.rolcreaterole
+     or schedule_session_role.rolcreatedb or schedule_session_role.rolreplication then
+    raise exception 'Required session role workforce_schedule_session must be a restricted LOGIN role.';
   end if;
   if exists (
     with recursive accessible(roleid) as (
-      select roleid from pg_auth_members where member = portal_role.oid
+      select roleid from pg_auth_members where member = schedule_session_role.oid
       union
       select membership.roleid
         from pg_auth_members membership
@@ -141,7 +163,7 @@ begin
         or accessible_role.rolcreaterole or accessible_role.rolcreatedb
         or accessible_role.rolreplication or left(accessible_role.rolname, 3) = 'pg_'
   ) then
-    raise exception 'Session role portal_app is a member of a privileged database role.';
+    raise exception 'Session role workforce_schedule_session is a member of a privileged database role.';
   end if;
 
   foreach checked_role in array array['workforce_schedule_app', 'workforce_schedule_owner']
@@ -174,22 +196,106 @@ begin
     end if;
   end loop;
 
+  -- Default privileges belong to the object-creating role and are inherited
+  -- before object-level REVOKE statements run. Refuse every non-owner default
+  -- grant, both database-global and for public, so no unrelated role can receive
+  -- transient or future access to schedule tables, sequences or functions.
+  select string_agg(
+           format(
+             '%s:%s:%s:%s%s',
+             case default_acl.defaclobjtype
+               when 'r' then 'TABLE'
+               when 'S' then 'SEQUENCE'
+               when 'f' then 'FUNCTION'
+               else default_acl.defaclobjtype::text
+             end,
+             case when default_acl.defaclnamespace = 0 then '*'
+                  else namespace.nspname end,
+             case when privilege.grantee = 0 then 'PUBLIC'
+                  else coalesce(grantee.rolname, privilege.grantee::text) end,
+             privilege.privilege_type,
+             case when privilege.is_grantable then ':GRANT_OPTION' else '' end
+           ),
+           ', ' order by default_acl.defaclobjtype, default_acl.defaclnamespace,
+                        privilege.grantee, privilege.privilege_type
+         )
+    into unsafe_default_acl
+    from pg_default_acl default_acl
+    left join pg_namespace namespace on namespace.oid = default_acl.defaclnamespace
+    cross join lateral aclexplode(
+      case when cardinality(default_acl.defaclacl) > 0
+           then default_acl.defaclacl else null::aclitem[] end
+    ) privilege
+    left join pg_roles grantee on grantee.oid = privilege.grantee
+   where default_acl.defaclrole = (select oid from pg_roles where rolname = 'workforce_schedule_owner')
+     and default_acl.defaclnamespace in (0, (select oid from pg_namespace where nspname = 'public'))
+     and default_acl.defaclobjtype in ('r', 'S', 'f')
+     and privilege.grantee <> default_acl.defaclrole;
+  if unsafe_default_acl is not null then
+    raise exception 'WORKFORCE_SCHEDULE_UNSAFE_DEFAULT_ACL: %', unsafe_default_acl;
+  end if;
+
   select membership.* into role_membership
     from pg_auth_members membership
-   where membership.member = portal_role.oid
+   where membership.member = schedule_session_role.oid
      and membership.roleid = (select oid from pg_roles where rolname = 'workforce_schedule_app');
   if not found or not role_membership.set_option
      or role_membership.inherit_option or role_membership.admin_option then
-    raise exception 'portal_app membership in workforce_schedule_app must be SET TRUE, INHERIT FALSE, ADMIN FALSE.';
+    raise exception 'workforce_schedule_session membership in workforce_schedule_app must be SET TRUE, INHERIT FALSE, ADMIN FALSE.';
   end if;
   if exists (
     select 1
       from pg_auth_members membership
-     where membership.member = portal_role.oid
+     where membership.member = schedule_session_role.oid
        and membership.roleid = (select oid from pg_roles where rolname = 'workforce_schedule_app')
        and (membership.admin_option or membership.inherit_option or not membership.set_option)
   ) then
-    raise exception 'portal_app has an unexpected workforce_schedule_app membership edge.';
+    raise exception 'workforce_schedule_session has an unexpected workforce_schedule_app membership edge.';
+  end if;
+
+  -- The runtime SET ROLE graph is an exact allowlist, not merely a check that
+  -- the expected edge exists. The login may assume only workforce_schedule_app,
+  -- and workforce_schedule_app must not be able to continue into another role.
+  if (select count(*) <> 1
+        from pg_auth_members membership
+       where membership.member = schedule_session_role.oid)
+     or exists (
+       select 1
+         from pg_auth_members membership
+        where membership.member = schedule_session_role.oid
+          and (
+            membership.roleid <> (select oid from pg_roles where rolname = 'workforce_schedule_app')
+            or not membership.set_option
+            or membership.inherit_option
+            or membership.admin_option
+          )
+     ) then
+    raise exception 'WORKFORCE_SCHEDULE_SESSION_ROLE_GRAPH_MISMATCH: session may SET only workforce_schedule_app.';
+  end if;
+  if exists (
+    select 1
+      from pg_auth_members membership
+     where membership.member = (select oid from pg_roles where rolname = 'workforce_schedule_app')
+  ) then
+    raise exception 'WORKFORCE_SCHEDULE_APP_ROLE_GRAPH_MISMATCH: workforce_schedule_app must not be a member of another role.';
+  end if;
+  if exists (
+    with recursive set_reachable(roleid) as (
+      select membership.roleid
+        from pg_auth_members membership
+       where membership.member = schedule_session_role.oid
+         and membership.set_option
+      union
+      select membership.roleid
+        from pg_auth_members membership
+        join set_reachable parent on parent.roleid = membership.member
+       where membership.set_option
+    )
+    select 1
+      from set_reachable
+     where roleid <> (select oid from pg_roles where rolname = 'workforce_schedule_app')
+  ) then
+    raise exception 'WORKFORCE_SCHEDULE_SESSION_SET_GRAPH_MISMATCH: session can SET an unexpected role.';
   end if;
 
   select membership.* into role_membership
@@ -210,11 +316,11 @@ begin
     raise exception 'Migration role has an unexpected workforce_schedule_owner membership edge.';
   end if;
 
-  if pg_has_role('portal_app', 'workforce_schedule_owner', 'MEMBER')
-     or pg_has_role('portal_app', 'workforce_schedule_owner', 'SET')
+  if pg_has_role('workforce_schedule_session', 'workforce_schedule_owner', 'MEMBER')
+     or pg_has_role('workforce_schedule_session', 'workforce_schedule_owner', 'SET')
      or pg_has_role('workforce_schedule_app', 'workforce_schedule_owner', 'MEMBER')
      or pg_has_role('workforce_schedule_app', 'workforce_schedule_owner', 'SET') then
-    raise exception 'Portal and schedule runtime roles must not be able to assume workforce_schedule_owner.';
+    raise exception 'Schedule session and runtime roles must not be able to assume workforce_schedule_owner.';
   end if;
 
   if not has_schema_privilege('workforce_schedule_app', 'public', 'USAGE') then
@@ -228,32 +334,38 @@ begin
     raise exception 'workforce_schedule_owner needs USAGE and CREATE on schema public.';
   end if;
 
-  foreach target_relation in array array['organization_member', 'worker', 'service_object']
+  -- Neither database login nor runtime role may scan shared multi-tenant source
+  -- catalogs. Reviewed SECURITY DEFINER functions below expose only one
+  -- authorized membership or the active rows for the transaction tenant.
+  foreach checked_role in array array['workforce_schedule_session', 'workforce_schedule_app']
   loop
-    if not has_table_privilege('workforce_schedule_app', format('public.%I', target_relation), 'SELECT') then
-      raise exception 'Runtime role workforce_schedule_app needs SELECT on public.%.', target_relation;
-    end if;
-  end loop;
-  foreach target_relation in array array['organizations', 'organization_member', 'worker', 'service_object']
-  loop
-    foreach privilege_name in array array['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN']
+    foreach target_relation in array array[
+      'organizations', 'organization_member', 'organization_subscription', 'worker', 'client'
+    ]
     loop
-      if has_table_privilege('workforce_schedule_app', format('public.%I', target_relation), privilege_name)
-         or (case
-              when privilege_name in ('INSERT', 'UPDATE', 'REFERENCES')
-                then has_any_column_privilege('workforce_schedule_app', format('public.%I', target_relation), privilege_name)
-              else false
-            end) then
-        raise exception 'Runtime role workforce_schedule_app must not have source write privilege % on public.%.', privilege_name, target_relation;
-      end if;
+      foreach privilege_name in array array[
+        'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'
+      ]
+      loop
+        if has_table_privilege(checked_role, format('public.%I', target_relation), privilege_name)
+           or (case
+                when privilege_name in ('SELECT', 'INSERT', 'UPDATE', 'REFERENCES')
+                  then has_any_column_privilege(checked_role, format('public.%I', target_relation), privilege_name)
+                else false
+              end) then
+          raise exception 'Role % must not have source privilege % on public.%.', checked_role, privilege_name, target_relation;
+        end if;
+      end loop;
     end loop;
   end loop;
 
-  if not has_table_privilege('workforce_schedule_owner', 'public.organization_member', 'SELECT')
+  if not has_table_privilege('workforce_schedule_owner', 'public.organizations', 'SELECT')
+     or not has_table_privilege('workforce_schedule_owner', 'public.organization_member', 'SELECT')
+     or not has_table_privilege('workforce_schedule_owner', 'public.organization_subscription', 'SELECT')
      or not has_table_privilege('workforce_schedule_owner', 'public.organizations', 'REFERENCES') then
     raise exception 'workforce_schedule_owner lacks source policy or foreign-key privileges.';
   end if;
-  foreach target_relation in array array['worker', 'service_object']
+  foreach target_relation in array array['worker', 'client']
   loop
     if not has_table_privilege('workforce_schedule_owner', format('public.%I', target_relation), 'SELECT')
        or not has_table_privilege('workforce_schedule_owner', format('public.%I', target_relation), 'UPDATE') then
@@ -264,6 +376,143 @@ end
 $$;
 
 set local role workforce_schedule_owner;
+
+-- The session login receives one narrow authorization lookup. Firebase token
+-- verification remains an application responsibility; this function only
+-- prevents the database login from scanning shared membership/source tables.
+create function public.workforce_schedule_authorize_session(
+  p_org_id text,
+  p_uid text
+)
+returns table (
+  role text,
+  status text,
+  worker_id text,
+  organization_kind text,
+  organization_status text,
+  onboarding_status text,
+  organization_deleted_at text,
+  plan_code text,
+  subscription_status text,
+  trial_ends_at text,
+  current_period_ends_at text,
+  active_worker_id text
+)
+language sql
+stable
+security definer
+set search_path = pg_catalog
+as $function$
+  select (
+           case
+             when nullif(organization_source.owner_worker_id, '') is not null
+              and organization_source.owner_worker_id = member_source.worker_id then 'OWNER'
+             else member_source.role
+           end
+         )::text,
+         member_source.status::text,
+         member_source.worker_id::text,
+         organization_source.organization_kind::text,
+         organization_source.status::text,
+         organization_source.onboarding_status::text,
+         organization_source.deleted_at::text,
+         subscription_source.plan_code::text,
+         subscription_source.status::text,
+         subscription_source.trial_ends_at::text,
+         subscription_source.current_period_ends_at::text,
+         worker_source.worker_id::text
+    from public.organization_member member_source
+    join public.organizations organization_source
+      on organization_source.org_id = member_source.org_id
+    left join public.organization_subscription subscription_source
+      on subscription_source.org_id = member_source.org_id
+    left join public.worker worker_source
+      on worker_source.org_id = member_source.org_id
+     and worker_source.worker_id = member_source.worker_id
+     and worker_source.active is true
+     and upper(btrim(worker_source.status)) = 'ACTIVE'
+   where member_source.org_id = p_org_id
+     and member_source.uid = p_uid
+     and member_source.status = 'ACTIVE'
+   limit 1
+$function$;
+
+-- All RLS policies and source readers use the same transaction-local tenant
+-- and actor predicate. The function discloses only a boolean to runtime.
+create function public.workforce_schedule_actor_is_active(p_org_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = pg_catalog
+as $function$
+  select p_org_id = nullif(current_setting('cleanzi.org_id', true), '')
+     and nullif(current_setting('cleanzi.actor_uid', true), '') is not null
+     and exists (
+       select 1
+         from public.organization_member member_source
+        where member_source.org_id = p_org_id
+          and member_source.uid = nullif(current_setting('cleanzi.actor_uid', true), '')
+          and member_source.status = 'ACTIVE'
+     )
+$function$;
+
+create function public.workforce_schedule_read_active_workers(p_org_id text)
+returns table (
+  source_worker_id_normalized text,
+  source_worker_login text,
+  source_auth_uid text,
+  display_name text,
+  role_snapshot text
+)
+language sql
+stable
+security definer
+set search_path = pg_catalog
+as $function$
+  select lower(btrim(worker_source.worker_id_normalized)),
+         nullif(lower(btrim(coalesce(nullif(worker_source.login_normalized, ''), worker_source.login))), ''),
+         nullif(btrim(worker_source.auth_uid), ''),
+         coalesce(
+           nullif(btrim(worker_source.full_name), ''),
+           nullif(btrim(worker_source.login), ''),
+           worker_source.worker_id
+         )::text,
+         nullif(btrim(worker_source.role), '')
+    from public.worker worker_source
+   where worker_source.org_id = p_org_id
+     and public.workforce_schedule_actor_is_active(p_org_id)
+     and worker_source.active is true
+     and upper(btrim(worker_source.status)) = 'ACTIVE'
+     and nullif(btrim(worker_source.worker_id_normalized), '') is not null
+   order by coalesce(
+              nullif(btrim(worker_source.full_name), ''),
+              nullif(btrim(worker_source.login), ''),
+              worker_source.worker_id
+            ) asc,
+            lower(btrim(worker_source.worker_id_normalized)) asc
+$function$;
+
+create function public.workforce_schedule_read_active_objects(p_org_id text)
+returns table (
+  source_object_id text,
+  display_name text
+)
+language sql
+stable
+security definer
+set search_path = pg_catalog
+as $function$
+  select btrim(object_source.client_id),
+         coalesce(nullif(btrim(object_source.name), ''), btrim(object_source.client_id))::text
+    from public.client object_source
+   where object_source.org_id = p_org_id
+     and public.workforce_schedule_actor_is_active(p_org_id)
+     and nullif(btrim(object_source.client_id), '') is not null
+     and upper(btrim(coalesce(object_source.status, ''))) = any(array['ACTIVE', 'AKTYWNY']::text[])
+   order by coalesce(nullif(btrim(object_source.name), ''), btrim(object_source.client_id)) asc,
+            btrim(object_source.client_id) asc
+$function$;
 
 -- Row locks on canonical catalogs require UPDATE privilege in PostgreSQL even
 -- for SELECT ... FOR SHARE. Narrow SECURITY DEFINER functions retain the locks
@@ -288,13 +537,7 @@ as $function$
    where worker_source.org_id = p_org_id
      and lower(btrim(worker_source.worker_id_normalized)) = any(p_worker_ids)
      and p_org_id = nullif(current_setting('cleanzi.org_id', true), '')
-     and exists (
-       select 1
-         from public.organization_member schedule_member
-        where schedule_member.org_id = p_org_id
-          and schedule_member.uid = nullif(current_setting('cleanzi.actor_uid', true), '')
-          and schedule_member.status = 'ACTIVE'
-     )
+     and public.workforce_schedule_actor_is_active(p_org_id)
    order by lower(btrim(worker_source.worker_id_normalized))
    for share of worker_source
 $function$;
@@ -305,44 +548,73 @@ create function public.workforce_schedule_lock_object_sources(
 )
 returns table (
   source_object_id text,
-  status text,
-  archived boolean
+  active boolean,
+  status text
 )
 language sql
 security definer
 set search_path = pg_catalog
 as $function$
-  select btrim(object_source.object_id),
-         upper(btrim(object_source.status)),
-         object_source.archived_at is not null
-    from public.service_object object_source
+  select btrim(object_source.client_id),
+         upper(btrim(coalesce(object_source.status, ''))) = any(array['ACTIVE', 'AKTYWNY']::text[]),
+         upper(btrim(coalesce(object_source.status, '')))
+    from public.client object_source
    where object_source.org_id = p_org_id
-     and btrim(object_source.object_id) = any(p_object_ids)
+     and btrim(object_source.client_id) = any(p_object_ids)
      and p_org_id = nullif(current_setting('cleanzi.org_id', true), '')
-     and exists (
-       select 1
-         from public.organization_member schedule_member
-        where schedule_member.org_id = p_org_id
-          and schedule_member.uid = nullif(current_setting('cleanzi.actor_uid', true), '')
-          and schedule_member.status = 'ACTIVE'
-     )
-   order by btrim(object_source.object_id)
+     and public.workforce_schedule_actor_is_active(p_org_id)
+   order by btrim(object_source.client_id)
    for share of object_source
 $function$;
 
 revoke all privileges on function
+  public.workforce_schedule_authorize_session(text, text),
+  public.workforce_schedule_actor_is_active(text),
+  public.workforce_schedule_read_active_workers(text),
+  public.workforce_schedule_read_active_objects(text),
   public.workforce_schedule_lock_worker_sources(text, text[]),
   public.workforce_schedule_lock_object_sources(text, text[])
-from public, portal_app, workforce_schedule_app;
+from public, workforce_schedule_session, workforce_schedule_app, migration_runner;
+
+-- portal_app is deliberately not part of the Grafik role graph. It is optional
+-- in a fresh database, so revoke it dynamically only when it exists.
+do $revoke_portal_function_acl$
+begin
+  if to_regrole('portal_app') is not null then
+    execute 'revoke all privileges on function
+      public.workforce_schedule_lock_worker_sources(text, text[]),
+      public.workforce_schedule_lock_object_sources(text, text[]),
+      public.workforce_schedule_authorize_session(text, text),
+      public.workforce_schedule_actor_is_active(text),
+      public.workforce_schedule_read_active_workers(text),
+      public.workforce_schedule_read_active_objects(text)
+      from portal_app';
+  end if;
+end
+$revoke_portal_function_acl$;
 
 grant execute on function
+  public.workforce_schedule_actor_is_active(text),
+  public.workforce_schedule_read_active_workers(text),
+  public.workforce_schedule_read_active_objects(text),
   public.workforce_schedule_lock_worker_sources(text, text[]),
   public.workforce_schedule_lock_object_sources(text, text[])
 to workforce_schedule_app;
 
--- Execute both SECURITY DEFINER bodies once without touching business rows.
+grant execute on function
+  public.workforce_schedule_authorize_session(text, text)
+to workforce_schedule_session;
+
+-- Execute all six SECURITY DEFINER bodies once without touching business rows.
 do $$
 begin
+  perform *
+    from public.workforce_schedule_authorize_session('__migration_probe__', '__migration_probe__');
+  perform public.workforce_schedule_actor_is_active('__migration_probe__');
+  perform *
+    from public.workforce_schedule_read_active_workers('__migration_probe__');
+  perform *
+    from public.workforce_schedule_read_active_objects('__migration_probe__');
   perform *
     from public.workforce_schedule_lock_worker_sources('__migration_probe__', array[]::text[]);
   perform *
@@ -673,23 +945,13 @@ begin
       'create policy %I on public.%I as permissive for all to workforce_schedule_app
        using (
          org_id = nullif(current_setting(''cleanzi.org_id'', true), '''')
-         and exists (
-           select 1 from public.organization_member workforce_schedule_member
-            where workforce_schedule_member.org_id = %I.org_id
-              and workforce_schedule_member.uid = nullif(current_setting(''cleanzi.actor_uid'', true), '''')
-              and workforce_schedule_member.status = ''ACTIVE''
-         )
+         and public.workforce_schedule_actor_is_active(org_id)
        )
        with check (
          org_id = nullif(current_setting(''cleanzi.org_id'', true), '''')
-         and exists (
-           select 1 from public.organization_member workforce_schedule_member
-            where workforce_schedule_member.org_id = %I.org_id
-              and workforce_schedule_member.uid = nullif(current_setting(''cleanzi.actor_uid'', true), '''')
-              and workforce_schedule_member.status = ''ACTIVE''
-         )
+         and public.workforce_schedule_actor_is_active(org_id)
        )',
-      policy_name, table_name, table_name, table_name
+      policy_name, table_name
     );
   end loop;
 end
@@ -707,7 +969,57 @@ revoke all privileges on table
   public.workforce_schedule_publication,
   public.workforce_schedule_publication_item,
   public.workforce_schedule_audit
-from public, portal_app, workforce_schedule_app;
+from public, workforce_schedule_session, workforce_schedule_app, migration_runner;
+
+do $revoke_portal_table_acl$
+declare
+  schedule_table name;
+begin
+  if to_regrole('portal_app') is not null then
+    for schedule_table in
+      select relation.relname
+        from pg_class relation
+        join pg_namespace namespace on namespace.oid = relation.relnamespace
+       where namespace.nspname = 'public'
+         and relation.relkind in ('r', 'p')
+         and relation.relname like 'workforce\_schedule\_%' escape '\'
+    loop
+      execute format(
+        'revoke all privileges on table public.%I from portal_app',
+        schedule_table
+      );
+    end loop;
+  end if;
+end
+$revoke_portal_table_acl$;
+
+-- The current schema does not require sequences. Keep their boundary explicit
+-- so a later identity/sequence addition cannot silently inherit default ACL.
+do $revoke_schedule_sequence_acl$
+declare
+  schedule_sequence name;
+begin
+  for schedule_sequence in
+    select relation.relname
+      from pg_class relation
+      join pg_namespace namespace on namespace.oid = relation.relnamespace
+     where namespace.nspname = 'public'
+       and relation.relkind = 'S'
+       and relation.relname like 'workforce\_schedule\_%' escape '\'
+  loop
+    execute format(
+      'revoke all privileges on sequence public.%I from public, workforce_schedule_session, workforce_schedule_app, migration_runner',
+      schedule_sequence
+    );
+    if to_regrole('portal_app') is not null then
+      execute format(
+        'revoke all privileges on sequence public.%I from portal_app',
+        schedule_sequence
+      );
+    end if;
+  end loop;
+end
+$revoke_schedule_sequence_acl$;
 
 grant select, insert, update on table
   public.workforce_schedule_settings,
@@ -729,6 +1041,7 @@ grant insert on table
   public.workforce_schedule_audit
 to workforce_schedule_app;
 
+-- WORKFORCE_SCHEDULE_POSTFLIGHT_ACL_BARRIER
 do $$
 declare
   table_name text;
@@ -738,32 +1051,113 @@ declare
   policy_row record;
   policy_count integer;
   expected_policy_expression text;
+  unsafe_default_acl text;
 begin
   if current_user <> 'workforce_schedule_owner' then
     raise exception 'Migration postflight must run as workforce_schedule_owner.';
+  end if;
+
+  if (select count(*) <> 1
+        from pg_auth_members membership
+       where membership.member = (select oid from pg_roles where rolname = 'workforce_schedule_session'))
+     or exists (
+       select 1
+         from pg_auth_members membership
+        where membership.member = (select oid from pg_roles where rolname = 'workforce_schedule_session')
+          and (
+            membership.roleid <> (select oid from pg_roles where rolname = 'workforce_schedule_app')
+            or not membership.set_option
+            or membership.inherit_option
+            or membership.admin_option
+          )
+     ) then
+    raise exception 'WORKFORCE_SCHEDULE_SESSION_ROLE_GRAPH_POSTFLIGHT_FAILED';
+  end if;
+  if exists (
+    with recursive set_reachable(roleid) as (
+      select membership.roleid
+        from pg_auth_members membership
+       where membership.member = (select oid from pg_roles where rolname = 'workforce_schedule_session')
+         and membership.set_option
+      union
+      select membership.roleid
+        from pg_auth_members membership
+        join set_reachable parent on parent.roleid = membership.member
+       where membership.set_option
+    )
+    select 1
+      from set_reachable
+     where roleid <> (select oid from pg_roles where rolname = 'workforce_schedule_app')
+  ) then
+    raise exception 'WORKFORCE_SCHEDULE_SESSION_SET_GRAPH_POSTFLIGHT_FAILED';
+  end if;
+  if exists (
+    select 1
+      from pg_auth_members membership
+     where membership.member = (select oid from pg_roles where rolname = 'workforce_schedule_app')
+  ) then
+    raise exception 'WORKFORCE_SCHEDULE_APP_ROLE_GRAPH_POSTFLIGHT_FAILED';
+  end if;
+
+  -- Recheck the raw catalog after object creation. This closes the window in
+  -- which an administrator could change owner defaults between preflight and
+  -- DDL; object ACL checks below independently validate the resulting objects.
+  select string_agg(
+           format(
+             '%s:%s:%s:%s%s',
+             case default_acl.defaclobjtype
+               when 'r' then 'TABLE'
+               when 'S' then 'SEQUENCE'
+               when 'f' then 'FUNCTION'
+               else default_acl.defaclobjtype::text
+             end,
+             case when default_acl.defaclnamespace = 0 then '*'
+                  else namespace.nspname end,
+             case when privilege.grantee = 0 then 'PUBLIC'
+                  else coalesce(grantee.rolname, privilege.grantee::text) end,
+             privilege.privilege_type,
+             case when privilege.is_grantable then ':GRANT_OPTION' else '' end
+           ),
+           ', ' order by default_acl.defaclobjtype, default_acl.defaclnamespace,
+                        privilege.grantee, privilege.privilege_type
+         )
+    into unsafe_default_acl
+    from pg_default_acl default_acl
+    left join pg_namespace namespace on namespace.oid = default_acl.defaclnamespace
+    cross join lateral aclexplode(
+      case when cardinality(default_acl.defaclacl) > 0
+           then default_acl.defaclacl else null::aclitem[] end
+    ) privilege
+    left join pg_roles grantee on grantee.oid = privilege.grantee
+   where default_acl.defaclrole = (select oid from pg_roles where rolname = 'workforce_schedule_owner')
+     and default_acl.defaclnamespace in (0, (select oid from pg_namespace where nspname = 'public'))
+     and default_acl.defaclobjtype in ('r', 'S', 'f')
+     and privilege.grantee <> default_acl.defaclrole;
+  if unsafe_default_acl is not null then
+    raise exception 'WORKFORCE_SCHEDULE_UNSAFE_DEFAULT_ACL_POSTFLIGHT: %', unsafe_default_acl;
   end if;
   if not has_schema_privilege('workforce_schedule_app', 'public', 'USAGE')
      or has_schema_privilege('workforce_schedule_app', 'public', 'CREATE') then
     raise exception 'Runtime schema boundary postflight failed for workforce_schedule_app.';
   end if;
 
-  foreach table_name in array array['organization_member', 'worker', 'service_object']
+  foreach table_name in array array[
+    'organizations', 'organization_member', 'organization_subscription', 'worker', 'client'
+  ]
   loop
-    if not has_table_privilege('workforce_schedule_app', format('public.%I', table_name), 'SELECT') then
-      raise exception 'Runtime source SELECT postflight failed for public.%.', table_name;
-    end if;
-  end loop;
-  foreach table_name in array array['organizations', 'organization_member', 'worker', 'service_object']
-  loop
-    foreach privilege_name in array array['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN']
+    foreach privilege_name in array array[
+      'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER', 'MAINTAIN'
+    ]
     loop
       if has_table_privilege('workforce_schedule_app', format('public.%I', table_name), privilege_name)
+         or has_table_privilege('workforce_schedule_session', format('public.%I', table_name), privilege_name)
          or (case
-              when privilege_name in ('INSERT', 'UPDATE', 'REFERENCES')
+              when privilege_name in ('SELECT', 'INSERT', 'UPDATE', 'REFERENCES')
                 then has_any_column_privilege('workforce_schedule_app', format('public.%I', table_name), privilege_name)
+                  or has_any_column_privilege('workforce_schedule_session', format('public.%I', table_name), privilege_name)
               else false
             end) then
-        raise exception 'Runtime source boundary postflight failed: privilege % on public.%.', privilege_name, table_name;
+        raise exception 'Runtime/session source boundary postflight failed: privilege % on public.%.', privilege_name, table_name;
       end if;
     end loop;
   end loop;
@@ -803,10 +1197,8 @@ begin
     select * into policy_row from pg_policies
      where schemaname = 'public' and tablename = table_name
        and policyname = table_name || '_tenant_policy';
-    expected_policy_expression := format(
-      'org_id=nullifcurrent_setting''cleanzi.org_id'',true,''''andexistsselect1fromorganization_memberworkforce_schedule_memberwhereworkforce_schedule_member.org_id=%I.org_idandworkforce_schedule_member.uid=nullifcurrent_setting''cleanzi.actor_uid'',true,''''andworkforce_schedule_member.status=''active''',
-      table_name
-    );
+    expected_policy_expression :=
+      'org_id=nullifcurrent_setting''cleanzi.org_id'',true,''''andworkforce_schedule_actor_is_activeorg_id';
     if not found
        or policy_row.permissive <> 'PERMISSIVE'
        or policy_row.cmd <> 'ALL'
@@ -904,46 +1296,224 @@ begin
     end loop;
   end loop;
 
+  -- Raw ACL allowlist for every schedule table. This catches direct grants to
+  -- portal_app or any unrelated role, including grants inherited from owner
+  -- defaults. Runtime privileges must also match the table's exact write model.
+  if exists (
+    select 1
+      from pg_class relation
+      join pg_namespace namespace on namespace.oid = relation.relnamespace
+      cross join lateral aclexplode(
+        case
+          when relation.relacl is null then acldefault('r', relation.relowner)
+          when cardinality(relation.relacl) > 0 then relation.relacl
+          else null::aclitem[]
+        end
+      ) privilege
+     where namespace.nspname = 'public'
+       and relation.relkind in ('r', 'p')
+       and relation.relname like 'workforce\_schedule\_%' escape '\'
+       and (
+         privilege.grantee not in (
+           (select oid from pg_roles where rolname = 'workforce_schedule_owner'),
+           (select oid from pg_roles where rolname = 'workforce_schedule_app')
+         )
+         or (
+           privilege.grantee = (select oid from pg_roles where rolname = 'workforce_schedule_app')
+           and (
+             privilege.is_grantable
+             or not (
+               (
+                 relation.relname = any(array[
+                   'workforce_schedule_settings',
+                   'workforce_schedule_location',
+                   'workforce_schedule_person',
+                   'workforce_schedule_shift',
+                   'workforce_schedule_command'
+                 ]::name[])
+                 and privilege.privilege_type = any(array['SELECT', 'INSERT', 'UPDATE']::text[])
+               )
+               or (
+                 relation.relname = any(array[
+                   'workforce_schedule_shift_revision',
+                   'workforce_schedule_shift_revision_assignee',
+                   'workforce_schedule_shift_instruction',
+                   'workforce_schedule_publication'
+                 ]::name[])
+                 and privilege.privilege_type = any(array['SELECT', 'INSERT']::text[])
+               )
+               or (
+                 relation.relname = any(array[
+                   'workforce_schedule_publication_item',
+                   'workforce_schedule_audit'
+                 ]::name[])
+                 and privilege.privilege_type = 'INSERT'
+               )
+             )
+           )
+         )
+       )
+  ) then
+    raise exception 'WORKFORCE_SCHEDULE_TABLE_ACL_POSTFLIGHT_FAILED';
+  end if;
+
+  -- No schedule column uses a separate ACL. Any entry is privilege drift,
+  -- regardless of whether it belongs to runtime, portal_app or another role.
+  if exists (
+    select 1
+      from pg_class relation
+      join pg_namespace namespace on namespace.oid = relation.relnamespace
+      join pg_attribute attribute on attribute.attrelid = relation.oid
+       and attribute.attnum > 0 and not attribute.attisdropped
+      cross join lateral aclexplode(
+        case when cardinality(attribute.attacl) > 0
+             then attribute.attacl else null::aclitem[] end
+      ) privilege
+     where namespace.nspname = 'public'
+       and relation.relkind in ('r', 'p')
+       and relation.relname like 'workforce\_schedule\_%' escape '\'
+  ) then
+    raise exception 'WORKFORCE_SCHEDULE_COLUMN_ACL_POSTFLIGHT_FAILED';
+  end if;
+
+  -- The V1 schema has no sequence consumer. If a schedule sequence appears,
+  -- it must remain owner-only until a separately reviewed contract grants it.
+  if exists (
+    select 1
+      from pg_class relation
+      join pg_namespace namespace on namespace.oid = relation.relnamespace
+     where namespace.nspname = 'public'
+       and relation.relkind = 'S'
+       and relation.relname like 'workforce\_schedule\_%' escape '\'
+       and (
+         relation.relowner <> (select oid from pg_roles where rolname = 'workforce_schedule_owner')
+         or exists (
+           select 1
+             from aclexplode(
+               case
+                 when relation.relacl is null then acldefault('s', relation.relowner)
+                 when cardinality(relation.relacl) > 0 then relation.relacl
+                 else null::aclitem[]
+               end
+             ) privilege
+            where privilege.grantee <> relation.relowner
+         )
+       )
+  ) then
+    raise exception 'WORKFORCE_SCHEDULE_SEQUENCE_ACL_POSTFLIGHT_FAILED';
+  end if;
+
+  -- Exactly these six signatures may exist in the namespace. An unknown helper
+  -- or overload is a separate executable surface and fails the migration.
+  if (select count(*) <> 6
+        from pg_proc function_row
+        join pg_namespace namespace on namespace.oid = function_row.pronamespace
+       where namespace.nspname = 'public'
+         and function_row.proname like 'workforce\_schedule\_%' escape '\')
+     or exists (
+       select 1
+         from pg_proc function_row
+         join pg_namespace namespace on namespace.oid = function_row.pronamespace
+        where namespace.nspname = 'public'
+          and function_row.proname like 'workforce\_schedule\_%' escape '\'
+          and not exists (
+            select 1
+              from unnest(array[
+                to_regprocedure('public.workforce_schedule_authorize_session(text,text)'),
+                to_regprocedure('public.workforce_schedule_actor_is_active(text)'),
+                to_regprocedure('public.workforce_schedule_read_active_workers(text)'),
+                to_regprocedure('public.workforce_schedule_read_active_objects(text)'),
+                to_regprocedure('public.workforce_schedule_lock_worker_sources(text,text[])'),
+                to_regprocedure('public.workforce_schedule_lock_object_sources(text,text[])')
+              ]::oid[]) allowed(function_oid)
+             where allowed.function_oid = function_row.oid
+          )
+     ) then
+    raise exception 'WORKFORCE_SCHEDULE_FUNCTION_ALLOWLIST_POSTFLIGHT_FAILED';
+  end if;
+
   foreach function_signature in array array[
+    'public.workforce_schedule_authorize_session(text,text)',
+    'public.workforce_schedule_actor_is_active(text)',
+    'public.workforce_schedule_read_active_workers(text)',
+    'public.workforce_schedule_read_active_objects(text)',
     'public.workforce_schedule_lock_worker_sources(text,text[])',
     'public.workforce_schedule_lock_object_sources(text,text[])'
   ]
   loop
     select function_row.prosecdef as security_definer,
            function_row.proowner = (select oid from pg_roles where rolname = 'workforce_schedule_owner') as expected_owner,
-           coalesce(function_row.proconfig @> array['search_path=pg_catalog']::text[], false) as fixed_search_path,
-           has_function_privilege('workforce_schedule_app', function_row.oid, 'EXECUTE') as execute_ready,
-           has_function_privilege('portal_app', function_row.oid, 'EXECUTE') as session_execute,
+           function_row.proconfig = array['search_path=pg_catalog']::text[] as fixed_search_path,
+           function_row.prokind = 'f' and not function_row.proleakproof as safe_function_kind,
+           function_row.prolang = (select oid from pg_language where lanname = 'sql') as expected_language,
+           case
+             when function_signature = any(array[
+               'public.workforce_schedule_authorize_session(text,text)',
+               'public.workforce_schedule_actor_is_active(text)',
+               'public.workforce_schedule_read_active_workers(text)',
+               'public.workforce_schedule_read_active_objects(text)'
+             ]::text[]) then function_row.provolatile = 's'
+             else function_row.provolatile = 'v'
+           end as expected_volatility,
+           case when function_signature = 'public.workforce_schedule_authorize_session(text,text)'
+             then has_function_privilege('workforce_schedule_session', function_row.oid, 'EXECUTE')
+             else has_function_privilege('workforce_schedule_app', function_row.oid, 'EXECUTE')
+           end as execute_ready,
+           case when function_signature = 'public.workforce_schedule_authorize_session(text,text)'
+             then has_function_privilege('workforce_schedule_app', function_row.oid, 'EXECUTE')
+             else has_function_privilege('workforce_schedule_session', function_row.oid, 'EXECUTE')
+           end as unexpected_execute,
            pg_has_role('workforce_schedule_app', function_row.proowner, 'MEMBER')
              or pg_has_role('workforce_schedule_app', function_row.proowner, 'SET')
-             or pg_has_role('portal_app', function_row.proowner, 'MEMBER')
-             or pg_has_role('portal_app', function_row.proowner, 'SET') as runtime_owner_membership,
+             or pg_has_role('workforce_schedule_session', function_row.proowner, 'MEMBER')
+             or pg_has_role('workforce_schedule_session', function_row.proowner, 'SET') as runtime_owner_membership,
            case
+             when function_signature = 'public.workforce_schedule_authorize_session(text,text)'
+               then has_table_privilege(function_row.proowner, 'public.organizations', 'SELECT')
+                and has_table_privilege(function_row.proowner, 'public.organization_member', 'SELECT')
+                and has_table_privilege(function_row.proowner, 'public.organization_subscription', 'SELECT')
+                and has_table_privilege(function_row.proowner, 'public.worker', 'SELECT')
+             when function_signature = 'public.workforce_schedule_actor_is_active(text)'
+               then has_table_privilege(function_row.proowner, 'public.organization_member', 'SELECT')
+             when function_signature = 'public.workforce_schedule_read_active_workers(text)'
+               then has_table_privilege(function_row.proowner, 'public.worker', 'SELECT')
+             when function_signature = 'public.workforce_schedule_read_active_objects(text)'
+               then has_table_privilege(function_row.proowner, 'public.client', 'SELECT')
              when function_signature like '%lock_worker_sources%'
                then has_table_privilege(function_row.proowner, 'public.worker', 'SELECT')
                 and has_table_privilege(function_row.proowner, 'public.worker', 'UPDATE')
-             else has_table_privilege(function_row.proowner, 'public.service_object', 'SELECT')
-                and has_table_privilege(function_row.proowner, 'public.service_object', 'UPDATE')
-           end as owner_lock_ready,
+             else has_table_privilege(function_row.proowner, 'public.client', 'SELECT')
+                and has_table_privilege(function_row.proowner, 'public.client', 'UPDATE')
+           end as owner_source_ready,
            exists (
              select 1
                from aclexplode(coalesce(function_row.proacl, acldefault('f', function_row.proowner))) privilege
               where privilege.grantee = 0 and privilege.privilege_type = 'EXECUTE'
            ) as public_execute,
-           exists (
-             with recursive accessible_roles(role_oid) as (
-               select oid from pg_roles where rolname = 'workforce_schedule_app'
-               union
-               select membership.roleid
-                 from pg_auth_members membership
-                 join accessible_roles child on child.role_oid = membership.member
-             )
+           not exists (
              select 1
-               from aclexplode(coalesce(function_row.proacl, acldefault('f', function_row.proowner))) privilege
-              where privilege.privilege_type = 'EXECUTE'
-                and privilege.is_grantable
-                and (privilege.grantee = 0 or privilege.grantee in (select role_oid from accessible_roles))
-           ) as runtime_grant_option
+               from aclexplode(
+                 case
+                   when function_row.proacl is null then acldefault('f', function_row.proowner)
+                   when cardinality(function_row.proacl) > 0 then function_row.proacl
+                   else null::aclitem[]
+                 end
+               ) privilege
+              where privilege.grantee not in (
+                      function_row.proowner,
+                      case when function_signature = 'public.workforce_schedule_authorize_session(text,text)'
+                        then (select oid from pg_roles where rolname = 'workforce_schedule_session')
+                        else (select oid from pg_roles where rolname = 'workforce_schedule_app')
+                      end
+                    )
+                 or (
+                   privilege.grantee = case when function_signature = 'public.workforce_schedule_authorize_session(text,text)'
+                     then (select oid from pg_roles where rolname = 'workforce_schedule_session')
+                     else (select oid from pg_roles where rolname = 'workforce_schedule_app')
+                   end
+                   and (privilege.privilege_type <> 'EXECUTE' or privilege.is_grantable)
+                 )
+           ) as exact_acl
       into function_state
       from pg_proc function_row
      where function_row.oid = to_regprocedure(function_signature);
@@ -951,15 +1521,58 @@ begin
        or function_state.security_definer is not true
        or function_state.expected_owner is not true
        or function_state.fixed_search_path is not true
+       or function_state.safe_function_kind is not true
+       or function_state.expected_language is not true
+       or function_state.expected_volatility is not true
        or function_state.execute_ready is not true
-       or function_state.session_execute is true
+       or function_state.unexpected_execute is true
        or function_state.runtime_owner_membership is true
-       or function_state.owner_lock_ready is not true
+       or function_state.owner_source_ready is not true
        or function_state.public_execute is true
-       or function_state.runtime_grant_option is true then
-      raise exception 'Source lock function postflight failed for %.', function_signature;
+       or function_state.exact_acl is not true then
+      raise exception 'WORKFORCE_SCHEDULE_FUNCTION_POSTFLIGHT_FAILED: %', function_signature;
     end if;
   end loop;
+
+  -- Every schedule function is owner-controlled. The authorization lookup is
+  -- executable only by the session login; every other helper is executable
+  -- only after SET LOCAL ROLE workforce_schedule_app.
+  if exists (
+    select 1
+      from pg_proc function_row
+      join pg_namespace namespace on namespace.oid = function_row.pronamespace
+     where namespace.nspname = 'public'
+       and function_row.proname like 'workforce\_schedule\_%' escape '\'
+       and (
+         function_row.proowner <> (select oid from pg_roles where rolname = 'workforce_schedule_owner')
+          or exists (
+            select 1
+             from aclexplode(
+               case
+                 when function_row.proacl is null then acldefault('f', function_row.proowner)
+                 when cardinality(function_row.proacl) > 0 then function_row.proacl
+                 else null::aclitem[]
+               end
+             ) privilege
+             where privilege.grantee not in (
+                     function_row.proowner,
+                     case when function_row.proname = 'workforce_schedule_authorize_session'
+                       then (select oid from pg_roles where rolname = 'workforce_schedule_session')
+                       else (select oid from pg_roles where rolname = 'workforce_schedule_app')
+                     end
+                   )
+                or (
+                  privilege.grantee = case when function_row.proname = 'workforce_schedule_authorize_session'
+                    then (select oid from pg_roles where rolname = 'workforce_schedule_session')
+                    else (select oid from pg_roles where rolname = 'workforce_schedule_app')
+                  end
+                  and (privilege.privilege_type <> 'EXECUTE' or privilege.is_grantable)
+                )
+         )
+       )
+  ) then
+    raise exception 'WORKFORCE_SCHEDULE_FUNCTION_ACL_POSTFLIGHT_FAILED';
+  end if;
 
   if exists (
     with recursive accessible_roles(role_oid) as (
@@ -1012,9 +1625,9 @@ begin
     )
     select 1 from relation_acl privilege
      where privilege.grantee = 0
-        or privilege.grantee = (select oid from pg_roles where rolname = 'portal_app')
+        or privilege.grantee = (select oid from pg_roles where rolname = 'workforce_schedule_session')
   ) then
-    raise exception 'PUBLIC or portal_app received a direct workforce schedule table privilege.';
+    raise exception 'PUBLIC or workforce_schedule_session received a direct workforce schedule table privilege.';
   end if;
 end
 $$;
@@ -1023,6 +1636,6 @@ commit;
 
 -- This migration intentionally creates no outbox and no worker-app delivery path.
 -- Required read-only preflight before a separately approved execution:
--- select rolname, rolbypassrls from pg_roles where rolname = 'portal_app';
+-- select rolname, rolbypassrls from pg_roles where rolname = 'workforce_schedule_session';
 -- select table_name, privilege_type from information_schema.role_table_grants
---  where grantee = 'portal_app' and table_name like 'workforce_schedule_%';
+--  where grantee = 'workforce_schedule_session' and table_name like 'workforce_schedule_%';

@@ -39,11 +39,53 @@ test('endpoint Grafiku jest lokalnym API z osobną autoryzacją i nie wpada do o
     serverSource.indexOf('async function authorizeWorkforceSchedule'),
     serverSource.indexOf('function assertMembershipPlanCapability'),
   )
+  const membership = serverSource.slice(
+    serverSource.indexOf('async function getWorkforceScheduleRequesterMembership'),
+    serverSource.indexOf('async function authorizeWorkforceSchedule'),
+  )
   assert.match(authorization, /WORKFORCE_SCHEDULE_PLATFORM_CONTEXT_FORBIDDEN/)
   assert.match(authorization, /assertMembershipPlanCapability\(membership, 'workforceScheduling'\)/)
-  assert.match(authorization, /from public\.worker/)
-  assert.match(authorization, /active is true/)
-  assert.match(authorization, /upper\(btrim\(status\)\) = 'ACTIVE'/)
+  assert.match(authorization, /getWorkforceScheduleRequesterMembership\(client, orgId, uid\)/)
+  assert.doesNotMatch(authorization, /getRequesterMembership\(client/)
+  assert.match(authorization, /WORKFORCE_SCHEDULE_ORGANIZATION_KIND_FORBIDDEN/)
+  assert.match(
+    authorization,
+    /!isWorkforceScheduleOrganizationKindAllowed\(membership\?\.organization_kind\)/,
+  )
+  assert.match(membership, /from public\.workforce_schedule_authorize_session\(\$1::text, \$2::text\)/)
+  assert.doesNotMatch(
+    membership,
+    /from public\.organization_member|join public\.(?:organizations|organization_subscription|worker)/,
+  )
+  assert.doesNotMatch(membership, /platformRepository|facility_manager/)
   assert.match(authorization, /normalizedAction === 'CONFIGURE'/)
   assert.match(authorization, /\['EDIT', 'PUBLISH'\]/)
+})
+
+test('Grafik dopuszcza tylko kanoniczny typ CLEANING_PROVIDER i odmawia brak lub stary typ organizacji', () => {
+  const source = functionBlock(
+    'isWorkforceScheduleOrganizationKindAllowed',
+    'getWorkforceScheduleRequesterMembership',
+  ).replace(/\s*async\s*$/, '')
+  const loadGuard = new Function(
+    'normalizeText',
+    `${source}\nreturn isWorkforceScheduleOrganizationKindAllowed`,
+  )
+  const guard = loadGuard((value) => String(value ?? '').trim())
+
+  assert.equal(guard('CLEANING_PROVIDER'), true)
+  assert.equal(guard(null), false)
+  assert.equal(guard(''), false)
+  assert.equal(guard('   '), false)
+  assert.equal(guard('CLEANING_COMPANY'), false)
+  assert.equal(guard('FACILITY_MANAGER'), false)
+})
+
+test('zewnetrzny fallback Grafiku nie ujawnia surowego bledu', () => {
+  const routeStart = serverSource.indexOf('if (workforceScheduleApi.matches(requestUrl.pathname))')
+  const routeEnd = serverSource.indexOf('if (workdayReconciliationApi.matches(requestUrl.pathname))', routeStart)
+  assert.ok(routeStart >= 0 && routeEnd > routeStart)
+  const route = serverSource.slice(routeStart, routeEnd)
+  assert.match(route, /'WORKFORCE_SCHEDULE_ERROR'/)
+  assert.doesNotMatch(route, /error\?\.message|error\.message/)
 })

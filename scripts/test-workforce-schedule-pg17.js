@@ -22,10 +22,20 @@ const EXACT_CONFIRMATION = 'I_CONFIRM_THIS_IS_A_DISPOSABLE_LOCAL_POSTGRESQL_17_D
 const DATABASE_URL_ENV = 'TEST_WORKFORCE_SCHEDULE_DATABASE_URL'
 const EPHEMERAL_DATABASE_PATTERN = /^(?:cleanzi_)?workforce_schedule_ephemeral_[a-z0-9_]+$/
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
+const SCHEDULE_SESSION_ROLE = 'workforce_schedule_session'
 const SCHEDULE_RUNTIME_ROLE = 'workforce_schedule_app'
 const MIGRATION_OWNER_ROLE = 'workforce_schedule_owner'
 const MIGRATION_RUNNER_ROLE = 'migration_runner'
-const SOURCE_TABLES = Object.freeze(['organizations', 'organization_member', 'worker', 'service_object'])
+const ACL_SENTINEL_ROLE = 'portal_app'
+const ROLE_GRAPH_SENTINEL_ROLE = 'workforce_schedule_source_reader'
+const POSTFLIGHT_ACL_BARRIER = '-- WORKFORCE_SCHEDULE_POSTFLIGHT_ACL_BARRIER'
+const SOURCE_TABLES = Object.freeze([
+  'organizations',
+  'organization_member',
+  'organization_subscription',
+  'worker',
+  'client',
+])
 const EFFECTS = Object.freeze({
   delivery: false,
   notifications: false,
@@ -33,33 +43,48 @@ const EFFECTS = Object.freeze({
 })
 
 const FIXTURE_SQL = String.raw`
-create role portal_app
-  login nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
+create role workforce_schedule_session
+  login noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
 create role workforce_schedule_app
   nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
 create role workforce_schedule_owner
   nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
 create role migration_runner
   login nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
-grant workforce_schedule_app to portal_app
+grant workforce_schedule_app to workforce_schedule_session
   with admin false, inherit false, set true;
 grant workforce_schedule_owner to migration_runner
   with admin false, inherit false, set true;
 
 revoke create on schema public from public;
-revoke create on schema public from portal_app;
+revoke create on schema public from workforce_schedule_session;
 revoke create on schema public from workforce_schedule_app;
-grant usage on schema public to portal_app, workforce_schedule_app;
+grant usage on schema public to workforce_schedule_app;
 
 create table public.organizations (
-  org_id varchar(64) primary key
+  org_id varchar(64) primary key,
+  owner_worker_id varchar(128),
+  organization_kind varchar(32) not null,
+  status varchar(16) not null,
+  onboarding_status varchar(32) not null,
+  deleted_at timestamptz
 );
 
 create table public.organization_member (
   org_id varchar(64) not null references public.organizations(org_id),
   uid varchar(128) not null,
+  role varchar(32) not null,
+  worker_id varchar(128) not null,
   status varchar(16) not null,
   primary key (org_id, uid)
+);
+
+create table public.organization_subscription (
+  org_id varchar(64) primary key references public.organizations(org_id),
+  plan_code varchar(32) not null,
+  status varchar(16) not null,
+  trial_ends_at timestamptz,
+  current_period_ends_at timestamptz
 );
 
 create table public.worker (
@@ -76,22 +101,32 @@ create table public.worker (
   primary key (org_id, worker_id_normalized)
 );
 
-create table public.service_object (
+create table public.client (
   org_id varchar(64) not null references public.organizations(org_id),
-  object_id varchar(64) not null,
+  client_id varchar(64) not null,
   name varchar(180),
-  status varchar(16) not null,
-  archived_at timestamptz,
-  primary key (org_id, object_id)
+  status varchar(32),
+  primary key (org_id, client_id)
 );
 
-insert into public.organizations (org_id)
-values ('harness-alpha'), ('harness-beta');
-
-insert into public.organization_member (org_id, uid, status)
+insert into public.organizations (
+  org_id, owner_worker_id, organization_kind, status, onboarding_status
+)
 values
-  ('harness-alpha', 'uid-alpha-admin', 'ACTIVE'),
-  ('harness-beta', 'uid-beta-admin', 'ACTIVE');
+  ('harness-alpha', 'W001', 'CLEANING_PROVIDER', 'ACTIVE', 'COMPLETED'),
+  ('harness-beta', 'W002', 'CLEANING_PROVIDER', 'ACTIVE', 'COMPLETED');
+
+insert into public.organization_member (org_id, uid, role, worker_id, status)
+values
+  ('harness-alpha', 'uid-alpha-admin', 'ADMIN', 'W001', 'ACTIVE'),
+  ('harness-beta', 'uid-beta-admin', 'ADMIN', 'W002', 'ACTIVE');
+
+insert into public.organization_subscription (
+  org_id, plan_code, status, trial_ends_at, current_period_ends_at
+)
+values
+  ('harness-alpha', 'PRO', 'ACTIVE', null, '2031-01-01T00:00:00Z'),
+  ('harness-beta', 'PRO', 'ACTIVE', null, '2031-01-01T00:00:00Z');
 
 insert into public.worker (
   org_id, login, login_normalized, worker_id, worker_id_normalized,
@@ -103,36 +138,24 @@ values
   ('harness-beta', 'beta.worker', 'beta.worker', 'W002', 'w002',
    'Beta Worker', 'uid-beta-worker', 'WORKER', true, 'ACTIVE');
 
-insert into public.service_object (org_id, object_id, name, status, archived_at)
+insert into public.client (org_id, client_id, name, status)
 values
-  ('harness-alpha', 'OBJ-ALPHA', 'Alpha Object', 'ACTIVE', null),
-  ('harness-beta', 'OBJ-BETA', 'Beta Object', 'ACTIVE', null);
-
-grant select on table
-  public.organization_member,
-  public.worker,
-  public.service_object
-to workforce_schedule_app;
-
--- This deliberately models the existing shared portal backend boundary.
--- The broad portal_app role may continue to manage canonical catalogs; only
--- the dedicated workforce_schedule_app boundary must be read-only there.
-grant select, insert, update, delete on table
-  public.organizations,
-  public.organization_member,
-  public.worker,
-  public.service_object
-to portal_app;
+  ('harness-alpha', 'CLIENT-ALPHA', 'Alpha Object', 'Aktywny'),
+  ('harness-alpha', 'CLIENT-INACTIVE', 'Inactive Object', 'Nieaktywny'),
+  ('harness-alpha', 'CLIENT-UNKNOWN', 'Unknown Object', 'FUTURE_STATUS'),
+  ('harness-alpha', 'CLIENT-NULL', 'Null-status Object', null),
+  ('harness-beta', 'CLIENT-BETA', 'Beta Object', 'ACTIVE');
 
 grant usage on schema public to workforce_schedule_owner;
 grant create on schema public to workforce_schedule_owner;
 grant select on table
   public.organizations,
   public.organization_member,
+  public.organization_subscription,
   public.worker,
-  public.service_object
+  public.client
 to workforce_schedule_owner;
-grant update on table public.worker, public.service_object
+grant update on table public.worker, public.client
 to workforce_schedule_owner;
 grant references on table public.organizations
 to workforce_schedule_owner;
@@ -180,7 +203,7 @@ function parseLaunchConfiguration({ args = [], env = {} } = {}) {
   if (!parsed.username) throw new Error('TEST_DATABASE_USER_REQUIRED')
 
   const runtimeUrl = new URL(rawUrl)
-  runtimeUrl.username = 'portal_app'
+  runtimeUrl.username = SCHEDULE_SESSION_ROLE
   runtimeUrl.password = ''
   const migrationUrl = new URL(rawUrl)
   migrationUrl.username = MIGRATION_RUNNER_ROLE
@@ -216,7 +239,7 @@ async function inspectUnmodifiedTarget(client) {
             exists (
               select 1 from pg_roles
                where rolname in (
-                 'portal_app',
+                 'workforce_schedule_session',
                  'workforce_schedule_app',
                  'workforce_schedule_owner',
                  'migration_runner'
@@ -268,8 +291,8 @@ async function withRuntimeTransaction(client, { orgId, actorUid }, operation) {
       `select session_user as session_user, current_user as current_user`,
     )
     assert.deepEqual(identity.rows[0], {
-      session_user: 'portal_app',
-      current_user: 'portal_app',
+      session_user: SCHEDULE_SESSION_ROLE,
+      current_user: SCHEDULE_SESSION_ROLE,
     })
     await client.query(`set local role ${SCHEDULE_RUNTIME_ROLE}`)
     const assumed = await client.query(`select current_user as current_user`)
@@ -290,20 +313,20 @@ async function withTemporaryOwnerMutation(client, mutationSql, operation) {
   await client.query('begin')
   try {
     await client.query(mutationSql)
-    await client.query('set local session authorization portal_app')
-    const portalIdentity = await client.query(
+    await client.query(`set local session authorization ${SCHEDULE_SESSION_ROLE}`)
+    const sessionIdentity = await client.query(
       `select session_user as session_user, current_user as current_user`,
     )
-    assert.deepEqual(portalIdentity.rows[0], {
-      session_user: 'portal_app',
-      current_user: 'portal_app',
+    assert.deepEqual(sessionIdentity.rows[0], {
+      session_user: SCHEDULE_SESSION_ROLE,
+      current_user: SCHEDULE_SESSION_ROLE,
     })
     await client.query(`set local role ${SCHEDULE_RUNTIME_ROLE}`)
     const runtimeIdentity = await client.query(
       `select session_user as session_user, current_user as current_user`,
     )
     assert.deepEqual(runtimeIdentity.rows[0], {
-      session_user: 'portal_app',
+      session_user: SCHEDULE_SESSION_ROLE,
       current_user: SCHEDULE_RUNTIME_ROLE,
     })
     const result = await operation(createWorkforceScheduleRepository(client))
@@ -331,30 +354,40 @@ async function assertScheduleRuntimeStatementDenied(client, sql) {
   assert.equal(denied?.code, '42501', `Statement was not denied by PostgreSQL: ${sql}`)
 }
 
-async function assertPortalSessionBoundary(client) {
+async function assertScheduleSessionBoundary(client) {
   const identity = await client.query(
     `select session_user as session_user, current_user as current_user`,
   )
   assert.deepEqual(identity.rows[0], {
-    session_user: 'portal_app',
-    current_user: 'portal_app',
+    session_user: SCHEDULE_SESSION_ROLE,
+    current_user: SCHEDULE_SESSION_ROLE,
   })
 
   const membership = await client.query(
     `select membership.admin_option,
             membership.inherit_option,
             membership.set_option,
-            has_table_privilege('portal_app', 'public.workforce_schedule_settings', 'SELECT') as inherited_select,
-            has_table_privilege('portal_app', 'public.workforce_schedule_settings', 'INSERT') as inherited_insert,
-            has_table_privilege('portal_app', 'public.worker', 'UPDATE') as portal_worker_update,
-            has_table_privilege('workforce_schedule_app', 'public.worker', 'UPDATE') as schedule_worker_update,
-            has_table_privilege('workforce_schedule_app', 'public.worker', 'SELECT') as schedule_worker_select,
-            not granted_role.rolinherit as schedule_role_noinherit
+            has_table_privilege('workforce_schedule_session', 'public.workforce_schedule_settings', 'SELECT') as inherited_select,
+            has_table_privilege('workforce_schedule_session', 'public.workforce_schedule_settings', 'INSERT') as inherited_insert,
+             has_table_privilege('workforce_schedule_session', 'public.worker', 'UPDATE') as session_worker_update,
+             has_table_privilege('workforce_schedule_app', 'public.worker', 'UPDATE') as schedule_worker_update,
+             has_table_privilege('workforce_schedule_app', 'public.worker', 'SELECT') as schedule_worker_select,
+             has_function_privilege(
+               'workforce_schedule_session',
+               'public.workforce_schedule_authorize_session(text,text)',
+               'EXECUTE'
+             ) as session_authorize_execute,
+             has_function_privilege(
+               'workforce_schedule_session',
+               'public.workforce_schedule_read_active_workers(text)',
+               'EXECUTE'
+             ) as session_runtime_function_execute,
+             not granted_role.rolinherit as schedule_role_noinherit
        from pg_auth_members membership
        join pg_roles granted_role on granted_role.oid = membership.roleid
        join pg_roles member_role on member_role.oid = membership.member
       where granted_role.rolname = 'workforce_schedule_app'
-        and member_role.rolname = 'portal_app'`,
+        and member_role.rolname = 'workforce_schedule_session'`,
   )
   assert.deepEqual(membership.rows[0], {
     admin_option: false,
@@ -362,14 +395,75 @@ async function assertPortalSessionBoundary(client) {
     set_option: true,
     inherited_select: false,
     inherited_insert: false,
-    portal_worker_update: true,
+    session_worker_update: false,
     schedule_worker_update: false,
-    schedule_worker_select: true,
+    schedule_worker_select: false,
+    session_authorize_execute: true,
+    session_runtime_function_execute: false,
     schedule_role_noinherit: true,
   })
 
+  const roleGraph = await client.query(
+    `with recursive set_reachable(role_oid) as (
+       select membership.roleid
+         from pg_auth_members membership
+        where membership.member = (select oid from pg_roles where rolname = $1)
+          and membership.set_option
+       union
+       select membership.roleid
+         from pg_auth_members membership
+         join set_reachable parent on parent.role_oid = membership.member
+        where membership.set_option
+     )
+     select (
+              select count(*)::integer
+                from pg_auth_members membership
+               where membership.member = (select oid from pg_roles where rolname = $1)
+            ) as session_direct_edges,
+            (
+              select array_agg(role.rolname::text order by role.rolname)::text[]
+                from set_reachable
+                join pg_roles role on role.oid = set_reachable.role_oid
+            ) as session_set_roles,
+            not exists (
+              select 1
+                from pg_auth_members membership
+               where membership.member = (select oid from pg_roles where rolname = $2)
+            ) as app_graph_empty`,
+    [SCHEDULE_SESSION_ROLE, SCHEDULE_RUNTIME_ROLE],
+  )
+  assert.deepEqual(roleGraph.rows[0], {
+    session_direct_edges: 1,
+    session_set_roles: [SCHEDULE_RUNTIME_ROLE],
+    app_graph_empty: true,
+  })
+
+  const authorized = await client.query(
+    `select role, worker_id, organization_kind, organization_status,
+            onboarding_status, plan_code, subscription_status, active_worker_id
+       from public.workforce_schedule_authorize_session('harness-alpha', 'uid-alpha-admin')`,
+  )
+  assert.deepEqual(authorized.rows, [{
+    role: 'OWNER',
+    worker_id: 'W001',
+    organization_kind: 'CLEANING_PROVIDER',
+    organization_status: 'ACTIVE',
+    onboarding_status: 'COMPLETED',
+    plan_code: 'PRO',
+    subscription_status: 'ACTIVE',
+    active_worker_id: 'W001',
+  }])
+  const mismatchedAuthorization = await client.query(
+    `select *
+       from public.workforce_schedule_authorize_session('harness-alpha', 'uid-beta-admin')`,
+  )
+  assert.equal(mismatchedAuthorization.rows.length, 0)
+
   for (const sql of [
     `select * from public.workforce_schedule_settings limit 1`,
+    `select * from public.organization_member limit 1`,
+    `select * from public.worker limit 1`,
+    `select * from public.client limit 1`,
     `insert into public.workforce_schedule_settings
        (org_id, time_zone, weekly_limit_minutes, created_by_uid, updated_by_uid)
      values ('harness-alpha', 'Europe/Warsaw', 2400, 'uid-alpha-admin', 'uid-alpha-admin')`,
@@ -380,30 +474,40 @@ async function assertPortalSessionBoundary(client) {
     } catch (error) {
       denied = error
     }
-    assert.equal(denied?.code, '42501', `portal_app unexpectedly used schedule SQL: ${sql}`)
+    assert.equal(denied?.code, '42501', `workforce_schedule_session unexpectedly used schedule SQL without SET ROLE: ${sql}`)
   }
 
-  await client.query('begin')
-  try {
-    await client.query(
-      `update public.worker set full_name = full_name where org_id = 'harness-alpha'`,
-    )
-  } finally {
-    await client.query('rollback').catch(() => {})
-  }
 }
 
 async function readCanonicalSources(client) {
+  const organizations = await client.query(
+    `select org_id, owner_worker_id, organization_kind, status, onboarding_status, deleted_at
+       from public.organizations order by org_id`,
+  )
+  const memberships = await client.query(
+    `select org_id, uid, role, worker_id, status
+       from public.organization_member order by org_id, uid`,
+  )
+  const subscriptions = await client.query(
+    `select org_id, plan_code, status, trial_ends_at, current_period_ends_at
+       from public.organization_subscription order by org_id`,
+  )
   const workers = await client.query(
     `select org_id, login, login_normalized, worker_id, worker_id_normalized,
             full_name, auth_uid, role, active, status
        from public.worker order by org_id, worker_id_normalized`,
   )
   const objects = await client.query(
-    `select org_id, object_id, name, status, archived_at
-       from public.service_object order by org_id, object_id`,
+    `select org_id, client_id, name, status
+       from public.client order by org_id, client_id`,
   )
-  return { workers: workers.rows, objects: objects.rows }
+  return {
+    organizations: organizations.rows,
+    memberships: memberships.rows,
+    subscriptions: subscriptions.rows,
+    workers: workers.rows,
+    objects: objects.rows,
+  }
 }
 
 async function assertRestrictedMigrationOwner(client) {
@@ -463,8 +567,12 @@ async function assertRestrictedMigrationOwner(client) {
          select count(*)::integer as function_count,
                 bool_and(procedure.proowner = owner.oid) as all_owned_by_expected
            from pg_proc procedure
-          where procedure.oid in (
-            to_regprocedure('public.workforce_schedule_lock_worker_sources(text,text[])'),
+           where procedure.oid in (
+             to_regprocedure('public.workforce_schedule_authorize_session(text,text)'),
+             to_regprocedure('public.workforce_schedule_actor_is_active(text)'),
+             to_regprocedure('public.workforce_schedule_read_active_workers(text)'),
+             to_regprocedure('public.workforce_schedule_read_active_objects(text)'),
+             to_regprocedure('public.workforce_schedule_lock_worker_sources(text,text[])'),
             to_regprocedure('public.workforce_schedule_lock_object_sources(text,text[])')
           )
        ) function_state
@@ -472,7 +580,7 @@ async function assertRestrictedMigrationOwner(client) {
     [MIGRATION_OWNER_ROLE, MIGRATION_RUNNER_ROLE],
   )
   assert.deepEqual(result.rows[0], {
-    function_count: 2,
+    function_count: 6,
     all_owned_by_expected: true,
     restricted_owner: true,
     owner_no_login: true,
@@ -488,7 +596,7 @@ async function assertRestrictedMigrationOwner(client) {
   })
 }
 
-async function createTenantCatalog(client, { orgId, actorUid, personId, locationId }) {
+async function createTenantCatalog(client, { orgId, actorUid, personId, locationId, sourceObjectId }) {
   return withRuntimeTransaction(client, { orgId, actorUid }, async (repository) => {
     const ready = await repository.schemaReady()
     assert.deepEqual(ready, { ready: true, missing: [] })
@@ -508,6 +616,7 @@ async function createTenantCatalog(client, { orgId, actorUid, personId, location
     assert.equal(settings.version, 1)
     assert.equal(catalogs.people.length, 1)
     assert.equal(catalogs.locations.length, 1)
+    assert.equal(catalogs.locations[0].sourceObjectId, sourceObjectId)
     return { settings, ...catalogs }
   })
 }
@@ -581,12 +690,14 @@ async function runCrudAndPublication(client) {
     actorUid: 'uid-alpha-admin',
     personId: 'person-alpha',
     locationId: 'location-alpha',
+    sourceObjectId: 'CLIENT-ALPHA',
   })
   await createTenantCatalog(client, {
     orgId: 'harness-beta',
     actorUid: 'uid-beta-admin',
     personId: 'person-beta',
     locationId: 'location-beta',
+    sourceObjectId: 'CLIENT-BETA',
   })
 
   const created = await withRuntimeTransaction(
@@ -707,6 +818,20 @@ async function assertTenantIsolation(client) {
         )
         assert.equal(result.rows[0].count, 0, `Cross-tenant rows visible in ${table}`)
       }
+
+      const sourceReaders = await client.query(
+        `select
+           (select count(*)::integer
+              from public.workforce_schedule_read_active_workers('harness-beta')) as worker_count,
+           (select count(*)::integer
+              from public.workforce_schedule_read_active_objects('harness-beta')) as object_count,
+           public.workforce_schedule_actor_is_active('harness-beta') as beta_actor_active`,
+      )
+      assert.deepEqual(sourceReaders.rows[0], {
+        worker_count: 0,
+        object_count: 0,
+        beta_actor_active: false,
+      })
     },
   )
 
@@ -725,6 +850,10 @@ async function assertTenantIsolation(client) {
 
 async function assertSourceTablesAreReadOnly(client) {
   for (const table of SOURCE_TABLES) {
+    await assertScheduleRuntimeStatementDenied(
+      client,
+      `select * from public.${table} limit 1`,
+    )
     await assertScheduleRuntimeStatementDenied(
       client,
       `update public.${table} set org_id = org_id where org_id = 'harness-alpha'`,
@@ -776,28 +905,16 @@ async function assertSchemaReadyFailsClosed(client, ownerUser) {
        to ${SCHEDULE_RUNTIME_ROLE}
        using (
          (
-           org_id = nullif(current_setting('cleanzi.org_id', true), '')
-           and exists (
-             select 1
-               from public.organization_member workforce_schedule_member
-              where workforce_schedule_member.org_id = workforce_schedule_settings.org_id
-                and workforce_schedule_member.uid = nullif(current_setting('cleanzi.actor_uid', true), '')
-                and workforce_schedule_member.status = 'ACTIVE'
-           )
-         ) or true
-       )
-       with check (
-         (
-           org_id = nullif(current_setting('cleanzi.org_id', true), '')
-           and exists (
-             select 1
-               from public.organization_member workforce_schedule_member
-              where workforce_schedule_member.org_id = workforce_schedule_settings.org_id
-                and workforce_schedule_member.uid = nullif(current_setting('cleanzi.actor_uid', true), '')
-                and workforce_schedule_member.status = 'ACTIVE'
-           )
-         ) or true
-       )`,
+            org_id = nullif(current_setting('cleanzi.org_id', true), '')
+            and public.workforce_schedule_actor_is_active(org_id)
+          ) or true
+        )
+        with check (
+          (
+            org_id = nullif(current_setting('cleanzi.org_id', true), '')
+            and public.workforce_schedule_actor_is_active(org_id)
+          ) or true
+        )`,
     async (repository) => {
       const readiness = await repository.schemaReady()
       await repository.setTenantContext('harness-alpha')
@@ -825,7 +942,32 @@ async function assertSchemaReadyFailsClosed(client, ownerUser) {
     (repository) => repository.schemaReady(),
   )
   assert.equal(inheritedGrantOption.ready, false)
-  assert.ok(inheritedGrantOption.missing.some((item) => item.endsWith(':EXECUTE_GRANT_OPTION')))
+  assert.ok(inheritedGrantOption.missing.some((item) => (
+    item.endsWith(':FUNCTION_ACL') || item.endsWith(':UNEXPECTED_EXECUTE')
+  )))
+
+  const sessionRoleGraphDrift = await withTemporaryOwnerMutation(
+    client,
+    `create role workforce_schedule_readiness_session_extra
+       nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
+     grant workforce_schedule_readiness_session_extra to ${SCHEDULE_SESSION_ROLE}
+       with admin false, inherit false, set true`,
+    (repository) => repository.schemaReady(),
+  )
+  assert.equal(sessionRoleGraphDrift.ready, false)
+  assert.ok(sessionRoleGraphDrift.missing.includes('runtime:SESSION_ROLE_GRAPH'))
+  assert.ok(sessionRoleGraphDrift.missing.includes('runtime:SESSION_SET_GRAPH'))
+
+  const appRoleGraphDrift = await withTemporaryOwnerMutation(
+    client,
+    `create role workforce_schedule_readiness_app_extra
+       nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
+     grant workforce_schedule_readiness_app_extra to ${SCHEDULE_RUNTIME_ROLE}
+       with admin false, inherit false, set true`,
+    (repository) => repository.schemaReady(),
+  )
+  assert.equal(appRoleGraphDrift.ready, false)
+  assert.ok(appRoleGraphDrift.missing.includes('runtime:APP_ROLE_GRAPH'))
 
   const ownerMembership = await withTemporaryOwnerMutation(
     client,
@@ -837,12 +979,12 @@ async function assertSchemaReadyFailsClosed(client, ownerUser) {
 
   const sourceWrites = await withTemporaryOwnerMutation(
     client,
-    `grant update, delete on table public.worker, public.service_object to ${SCHEDULE_RUNTIME_ROLE}`,
+    `grant update, delete on table public.worker, public.client to ${SCHEDULE_RUNTIME_ROLE}`,
     (repository) => repository.schemaReady(),
   )
   assert.equal(sourceWrites.ready, false)
   assert.ok(sourceWrites.missing.some((item) => item.includes('public.worker:UPDATE:EXCESS')))
-  assert.ok(sourceWrites.missing.some((item) => item.includes('public.service_object:DELETE:EXCESS')))
+  assert.ok(sourceWrites.missing.some((item) => item.includes('public.client:DELETE:EXCESS')))
 
   const sourceColumnWrite = await withTemporaryOwnerMutation(
     client,
@@ -893,6 +1035,223 @@ async function assertSecondMigrationIsRejected(client, migrationSql) {
   })
 }
 
+async function assertNoScheduleObjects(client, label) {
+  const result = await client.query(
+    `select (
+              select count(*)::integer
+                from pg_class relation
+                join pg_namespace namespace on namespace.oid = relation.relnamespace
+               where namespace.nspname = 'public'
+                 and relation.relname like 'workforce\\_schedule\\_%' escape '\\'
+                 and relation.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+            ) as relation_count,
+            (
+              select count(*)::integer
+                from pg_proc function_row
+                join pg_namespace namespace on namespace.oid = function_row.pronamespace
+               where namespace.nspname = 'public'
+                 and function_row.proname like 'workforce\\_schedule\\_%' escape '\\'
+            ) as function_count`,
+  )
+  assert.deepEqual(result.rows[0], { relation_count: 0, function_count: 0 }, label)
+}
+
+async function assertMigrationRejected(client, migrationSql, expectedMessage) {
+  let failure = null
+  try {
+    await client.query(migrationSql)
+  } catch (error) {
+    failure = error
+  } finally {
+    await client.query('rollback').catch(() => {})
+  }
+  assert.ok(failure, `Migration unexpectedly accepted ${expectedMessage}.`)
+  assert.equal(failure.code, 'P0001')
+  assert.match(text(failure.message), expectedMessage)
+}
+
+async function assertUnsafeDefaultAclRejected(adminClient, migrationClient, migrationSql) {
+  await adminClient.query(
+    `create role ${ACL_SENTINEL_ROLE}
+       nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls`,
+  )
+  const cases = [
+    {
+      name: 'global-table',
+      grant: `alter default privileges for role ${MIGRATION_OWNER_ROLE}
+                grant select on tables to ${ACL_SENTINEL_ROLE}`,
+      revoke: `alter default privileges for role ${MIGRATION_OWNER_ROLE}
+                 revoke select on tables from ${ACL_SENTINEL_ROLE}`,
+    },
+    {
+      name: 'sequence',
+      grant: `alter default privileges for role ${MIGRATION_OWNER_ROLE} in schema public
+                grant usage on sequences to ${ACL_SENTINEL_ROLE}`,
+      revoke: `alter default privileges for role ${MIGRATION_OWNER_ROLE} in schema public
+                 revoke usage on sequences from ${ACL_SENTINEL_ROLE}`,
+    },
+    {
+      name: 'function',
+      grant: `alter default privileges for role ${MIGRATION_OWNER_ROLE} in schema public
+                grant execute on functions to ${ACL_SENTINEL_ROLE}`,
+      revoke: `alter default privileges for role ${MIGRATION_OWNER_ROLE} in schema public
+                 revoke execute on functions from ${ACL_SENTINEL_ROLE}`,
+    },
+  ]
+
+  for (const defaultAclCase of cases) {
+    await adminClient.query(defaultAclCase.grant)
+    try {
+      await assertMigrationRejected(
+        migrationClient,
+        migrationSql,
+        /WORKFORCE_SCHEDULE_UNSAFE_DEFAULT_ACL/,
+      )
+      await assertNoScheduleObjects(
+        adminClient,
+        `Unsafe ${defaultAclCase.name} default ACL was not rolled back atomically.`,
+      )
+    } finally {
+      await adminClient.query(defaultAclCase.revoke)
+    }
+  }
+
+  const remaining = await adminClient.query(
+    `select count(*)::integer as unsafe_count
+       from pg_default_acl default_acl
+       cross join lateral aclexplode(
+         case when cardinality(default_acl.defaclacl) > 0
+              then default_acl.defaclacl else null::aclitem[] end
+       ) privilege
+      where default_acl.defaclrole = (select oid from pg_roles where rolname = $1)
+        and default_acl.defaclnamespace in (0, (select oid from pg_namespace where nspname = 'public'))
+        and default_acl.defaclobjtype in ('r', 'S', 'f')
+        and privilege.grantee <> default_acl.defaclrole`,
+    [MIGRATION_OWNER_ROLE],
+  )
+  assert.equal(remaining.rows[0].unsafe_count, 0)
+}
+
+async function assertRoleGraphPreflightRejected(adminClient, migrationClient, migrationSql) {
+  await adminClient.query(
+    `create role ${ROLE_GRAPH_SENTINEL_ROLE}
+       nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls`,
+  )
+  const cases = [
+    {
+      targetRole: SCHEDULE_SESSION_ROLE,
+      expected: /WORKFORCE_SCHEDULE_SESSION_ROLE_GRAPH_MISMATCH/,
+    },
+    {
+      targetRole: SCHEDULE_RUNTIME_ROLE,
+      expected: /WORKFORCE_SCHEDULE_APP_ROLE_GRAPH_MISMATCH/,
+    },
+  ]
+  try {
+    for (const roleCase of cases) {
+      await adminClient.query(
+        `grant ${ROLE_GRAPH_SENTINEL_ROLE} to ${roleCase.targetRole}
+           with admin false, inherit false, set true`,
+      )
+      try {
+        await assertMigrationRejected(migrationClient, migrationSql, roleCase.expected)
+        await assertNoScheduleObjects(
+          adminClient,
+          `Role graph drift for ${roleCase.targetRole} was not rejected atomically.`,
+        )
+      } finally {
+        await adminClient.query(`revoke ${ROLE_GRAPH_SENTINEL_ROLE} from ${roleCase.targetRole}`)
+      }
+    }
+  } finally {
+    // The role is intentionally left detached inside the disposable database.
+    // The harness never drops objects; the ephemeral cluster is removed as a unit.
+  }
+}
+
+async function assertPreexistingScheduleFunctionRejected(adminClient, migrationClient, migrationSql) {
+  const probeSignature = 'public.workforce_schedule_legacy_probe(integer)'
+  await adminClient.query(
+    `create function ${probeSignature} returns integer language sql as 'select $1'`,
+  )
+  try {
+    await assertMigrationRejected(
+      migrationClient,
+      migrationSql,
+      /Refusing to reuse pre-existing function public\.workforce_schedule_legacy_probe\(integer\)/,
+    )
+    const state = await adminClient.query(
+      `select (
+                select count(*)::integer
+                  from pg_class relation
+                  join pg_namespace namespace on namespace.oid = relation.relnamespace
+                 where namespace.nspname = 'public'
+                   and relation.relname like 'workforce\\_schedule\\_%' escape '\\'
+              ) as relation_count,
+              (
+                select count(*)::integer
+                  from pg_proc function_row
+                  join pg_namespace namespace on namespace.oid = function_row.pronamespace
+                 where namespace.nspname = 'public'
+                   and function_row.proname like 'workforce\\_schedule\\_%' escape '\\'
+              ) as function_count`,
+    )
+    assert.deepEqual(state.rows[0], { relation_count: 0, function_count: 1 })
+  } finally {
+    await adminClient.query(
+      `alter function ${probeSignature} rename to workforce_harness_legacy_probe_retired`,
+    )
+  }
+}
+
+function injectBeforePostflight(migrationSql, injectedSql) {
+  assert.equal(migrationSql.split(POSTFLIGHT_ACL_BARRIER).length, 2)
+  return migrationSql.replace(
+    POSTFLIGHT_ACL_BARRIER,
+    `${injectedSql}\n${POSTFLIGHT_ACL_BARRIER}`,
+  )
+}
+
+async function assertAclPostflightRejectsDrift(adminClient, migrationClient, migrationSql) {
+  const cases = [
+    {
+      expected: /WORKFORCE_SCHEDULE_TABLE_ACL_POSTFLIGHT_FAILED/,
+      sql: `grant select on table public.workforce_schedule_settings to ${ACL_SENTINEL_ROLE};`,
+    },
+    {
+      expected: /WORKFORCE_SCHEDULE_COLUMN_ACL_POSTFLIGHT_FAILED/,
+      sql: `grant select (org_id) on table public.workforce_schedule_settings to ${ACL_SENTINEL_ROLE};`,
+    },
+    {
+      expected: /WORKFORCE_SCHEDULE_SEQUENCE_ACL_POSTFLIGHT_FAILED/,
+      sql: `create sequence public.workforce_schedule_acl_probe;
+            grant usage on sequence public.workforce_schedule_acl_probe to ${ACL_SENTINEL_ROLE};`,
+    },
+    {
+      expected: /WORKFORCE_SCHEDULE_FUNCTION_POSTFLIGHT_FAILED/,
+      sql: `grant execute on function public.workforce_schedule_lock_worker_sources(text, text[])
+             to ${ACL_SENTINEL_ROLE};`,
+    },
+    {
+      expected: /WORKFORCE_SCHEDULE_FUNCTION_ALLOWLIST_POSTFLIGHT_FAILED/,
+      sql: `create function public.workforce_schedule_unexpected_overload(integer)
+              returns integer language sql as 'select $1';`,
+    },
+  ]
+
+  for (const aclCase of cases) {
+    await assertMigrationRejected(
+      migrationClient,
+      injectBeforePostflight(migrationSql, aclCase.sql),
+      aclCase.expected,
+    )
+    await assertNoScheduleObjects(
+      adminClient,
+      `ACL postflight ${aclCase.expected} did not roll back all schedule objects.`,
+    )
+  }
+}
+
 async function runHarness({ args = process.argv.slice(2), env = process.env } = {}) {
   const configuration = parseLaunchConfiguration({ args, env })
   const adminClient = new Client({
@@ -931,6 +1290,10 @@ async function runHarness({ args = process.argv.slice(2), env = process.env } = 
       session_user: MIGRATION_RUNNER_ROLE,
       current_user: MIGRATION_RUNNER_ROLE,
     })
+    await assertPreexistingScheduleFunctionRejected(adminClient, migrationClient, migrationSql)
+    await assertRoleGraphPreflightRejected(adminClient, migrationClient, migrationSql)
+    await assertUnsafeDefaultAclRejected(adminClient, migrationClient, migrationSql)
+    await assertAclPostflightRejectsDrift(adminClient, migrationClient, migrationSql)
     await migrationClient.query(migrationSql)
     const postMigrationIdentity = await migrationClient.query(
       `select session_user as session_user, current_user as current_user`,
@@ -948,7 +1311,7 @@ async function runHarness({ args = process.argv.slice(2), env = process.env } = 
       query_timeout: 90000,
     })
     await runtimeClient.connect()
-    await assertPortalSessionBoundary(runtimeClient)
+    await assertScheduleSessionBoundary(runtimeClient)
 
     await runCrudAndPublication(runtimeClient)
     await assertTenantIsolation(runtimeClient)
@@ -978,6 +1341,10 @@ async function runHarness({ args = process.argv.slice(2), env = process.env } = 
       effects: EFFECTS,
       checks: [
         'canonical-fixture',
+        'unsafe-default-acl-rejected-and-rolled-back',
+        'preexisting-function-overload-rejected',
+        'exact-set-role-graph',
+        'table-column-sequence-function-acl-postflight',
         'migration',
         'schema-ready',
         'crud-and-internal-publication',
@@ -1028,12 +1395,15 @@ module.exports = {
   EPHEMERAL_DATABASE_PATTERN,
   EXACT_CONFIRMATION,
   FIXTURE_SQL,
+  ACL_SENTINEL_ROLE,
   MIGRATION_PATH,
   MIGRATION_OWNER_ROLE,
   MIGRATION_RUNNER_ROLE,
   RUN_ARGUMENT,
+  POSTFLIGHT_ACL_BARRIER,
+  SCHEDULE_SESSION_ROLE,
   SCHEDULE_RUNTIME_ROLE,
-  assertPortalSessionBoundary,
+  assertScheduleSessionBoundary,
   assertSchemaReadyFailsClosed,
   assertScheduleRuntimeStatementDenied,
   assertSafeUnmodifiedTarget,
