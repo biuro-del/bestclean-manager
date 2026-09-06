@@ -57,7 +57,7 @@ test('portal ładuje Grafik jako samodzielny feature zabezpieczony dwoma flagami
   assert.match(portal, /normalizedRoute === 'workforceSchedule' && !workforceScheduleClientEnabled\(\)/)
   assert.match(portal, /clientEnabled = route !== 'workforceSchedule' \|\| workforceScheduleClientEnabled\(\)/)
   assert.match(portal, /import\('\.\.\/features\/workforce-schedule\/index\.js'\)/)
-  assert.match(portal, /module\.createWorkforceScheduleFeature\(portalFeatureContext\)/)
+  assert.match(portal, /module\.createWorkforceScheduleFeature\(createWorkforceScheduleFeatureContext\(\)\)/)
   assert.match(portal, /bindWorkforceScheduleViewFunctions\(\)/)
   assert.match(portal, /workforceScheduleFeature\?\.resetSession\?\.\(\)/)
   assert.match(portal, /workforceScheduleFeature\.deactivate\?\.\(\)/)
@@ -81,4 +81,19 @@ test('portal ładuje Grafik jako samodzielny feature zabezpieczony dwoma flagami
   const routerGo = portal.indexOf('router.go(route)', navigationStart)
   const routeGuard = portal.indexOf("if (nextRoute === 'workforceSchedule' && !portalRouteExists(nextRoute))", navigationStart)
   assert.ok(routeGuard > navigationStart && routeGuard < routerGo)
+})
+
+test('Grafik otrzymuje minimalny kontekst bez funkcji Zleceń i Kalendarza', () => {
+  const portal = read('web-app', 'apps', 'portal-web', 'src', 'ui', 'portalApp.js')
+  const start = portal.indexOf('function createWorkforceScheduleFeatureContext')
+  const end = portal.indexOf('\nfunction bindWorkforceScheduleViewFunctions', start)
+  const factory = portal.slice(start, end)
+
+  assert.ok(start >= 0 && end > start)
+  assert.match(factory, /appState:/)
+  assert.match(factory, /confirm:/)
+  assert.match(factory, /showTransientNotice:/)
+  assert.match(factory, /workforceScheduleService/)
+  assert.doesNotMatch(factory, /calendar|orders|scheduleTaskDataConnect/i)
+  assert.doesNotMatch(portal, /module\.createWorkforceScheduleFeature\(portalFeatureContext\)/)
 })

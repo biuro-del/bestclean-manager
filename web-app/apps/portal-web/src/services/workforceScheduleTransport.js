@@ -200,23 +200,39 @@ export function createWorkforceScheduleIdempotencyKey(action, createId = secureC
 export function createWorkforceScheduleOperationRegistry(createKey = createWorkforceScheduleIdempotencyKey) {
   if (typeof createKey !== 'function') throw new TypeError('Operation registry requires createKey.')
   const keys = new Map()
+  let tokenSequence = 0
   const signatureFor = (action, payload) => `${requiredText(action, 'action', 32)}:${JSON.stringify(payload ?? null)}`
+
+  function currentEntry(operation) {
+    const signature = text(operation?.signature)
+    const entry = keys.get(signature)
+    return entry?.token === operation?.token ? { entry, signature } : null
+  }
 
   return {
     begin(action, payload) {
       const signature = signatureFor(action, payload)
-      if (!keys.has(signature)) keys.set(signature, createKey(action))
-      return { signature, key: keys.get(signature) }
+      if (!keys.has(signature)) {
+        keys.set(signature, {
+          key: createKey(action),
+          token: ++tokenSequence,
+        })
+      }
+      const entry = keys.get(signature)
+      return { signature, key: entry.key, token: entry.token }
     },
-    complete(signature) {
-      keys.delete(text(signature))
+    complete(operation) {
+      const current = currentEntry(operation)
+      if (current) keys.delete(current.signature)
     },
-    fail(signature, requestError) {
+    fail(operation, requestError) {
+      const current = currentEntry(operation)
+      if (!current) return
       const status = Number(requestError?.status) || 0
       const retryMayRepeatAnAcceptedWrite = requestError?.code === 'WORKFORCE_SCHEDULE_NETWORK_ERROR'
         || [408, 425, 429].includes(status)
         || status >= 500
-      if (!retryMayRepeatAnAcceptedWrite) keys.delete(text(signature))
+      if (!retryMayRepeatAnAcceptedWrite) keys.delete(current.signature)
     },
     clear() {
       keys.clear()

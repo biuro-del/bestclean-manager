@@ -3204,6 +3204,22 @@ function getWorkforceScheduleFeature() {
   return workforceScheduleFeature
 }
 
+function createWorkforceScheduleFeatureContext(source = portalFeatureContext || {}) {
+  const context = {
+    appState: source.appState || appState,
+    confirm: typeof source.confirm === 'function'
+      ? source.confirm
+      : (message) => window.confirm(message),
+    showTransientNotice: typeof source.showTransientNotice === 'function'
+      ? source.showTransientNotice
+      : showTransientNotice,
+  }
+  if (source.workforceScheduleService) {
+    context.workforceScheduleService = source.workforceScheduleService
+  }
+  return Object.freeze(context)
+}
+
 function bindWorkforceScheduleViewFunctions(...args) {
   return getWorkforceScheduleFeature().bind(...args)
 }
@@ -3378,7 +3394,8 @@ function assignPortalFeature(featureKey, module) {
 
   switch (featureKey) {
     case 'workforceSchedule':
-      workforceScheduleFeature = workforceScheduleFeature || module.createWorkforceScheduleFeature(portalFeatureContext)
+      workforceScheduleFeature = workforceScheduleFeature
+        || module.createWorkforceScheduleFeature(createWorkforceScheduleFeatureContext())
       return workforceScheduleFeature
     case 'calendar':
       calendarFeature = calendarFeature || module.createCalendarFeature(portalFeatureContext)

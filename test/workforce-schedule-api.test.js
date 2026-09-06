@@ -310,7 +310,17 @@ test('SYNC_CATALOGS pobiera ludzi i obiekty atomowo jako jedną komendę', async
   assert.equal(f.calls.filter(([name]) => name === 'syncCatalogs').length, 1)
   assert.equal(f.calls.some(([name]) => name === 'complete'), true)
   assert.deepEqual(f.calls.find(([name]) => name === 'claim')[1].effects, noEffects())
-  assert.deepEqual(f.responses[0].payload.effects, noEffects())
+  assert.deepEqual(f.responses[0], {
+    status: 200,
+    payload: {
+      ok: true,
+      idempotent: false,
+      effects: noEffects(),
+      people: [{ personId: 'person-1' }],
+      locations: [{ locationId: 'location-1' }],
+      orgId: 'bestclean',
+    },
+  })
 })
 
 test('timeout blokady lub zapytania kończy transakcję rollbackiem i bezpiecznym błędem do ponowienia', async () => {
@@ -345,13 +355,27 @@ test('stare komendy katalogowe nie są dostępne', async () => {
 })
 
 test('idempotentny replay zwraca zapisany wynik bez ponownej mutacji', async () => {
+  const storedResponse = {
+    ok: true,
+    idempotent: false,
+    effects: noEffects(),
+    people: [{ personId: 'existing' }],
+    locations: [{ locationId: 'existing-location' }],
+  }
   const f = fixture({
     body: { type: 'SYNC_CATALOGS', orgId: 'bestclean', idempotencyKey: 'sync-1', effects: noEffects(), payload: {} },
-    claim: { replay: true, response: { ok: true, people: [{ personId: 'existing' }], effects: noEffects() } },
+    claim: { replay: true, response: storedResponse },
   })
   await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
   assert.equal(f.errors.length, 0)
-  assert.equal(f.responses[0].payload.idempotent, true)
+  assert.deepEqual(f.responses[0], {
+    status: 200,
+    payload: {
+      ...storedResponse,
+      orgId: 'bestclean',
+      idempotent: true,
+    },
+  })
   assert.equal(f.calls.some(([name]) => name === 'syncCatalogs'), false)
   assert.equal(f.calls.some(([name]) => name === 'audit'), false)
 })

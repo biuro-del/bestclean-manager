@@ -17,6 +17,8 @@ import {
   normalizeWorkforceScheduleShift,
   workforceSchedulePublicationCandidates,
 } from './workforceScheduleClientModel.js'
+import { createWorkforceScheduleAsyncGuard } from './workforceScheduleAsyncGuard.js'
+import { createWorkforceScheduleCatalogSyncGate } from './workforceScheduleCatalogSync.js'
 import * as defaultWorkforceScheduleService from '../../services/workforceScheduleService.js'
 import { createWorkforceScheduleOperationRegistry } from '../../services/workforceScheduleTransport.js'
 
@@ -108,7 +110,11 @@ function statusPanel({ error, loading, onRetry }) {
 
 export function createWorkforceScheduleFeature(ctx = {}) {
   const service = ctx.workforceScheduleService || defaultWorkforceScheduleService
+  const confirmAction = typeof ctx.confirm === 'function'
+    ? ctx.confirm
+    : (message) => window.confirm(message)
   const operationRegistry = createWorkforceScheduleOperationRegistry()
+  const catalogSyncGate = createWorkforceScheduleCatalogSyncGate()
   const state = {
     range: currentWeekRange(),
     snapshot: null,
@@ -118,15 +124,14 @@ export function createWorkforceScheduleFeature(ctx = {}) {
     setupRequired: false,
     setupTimeZone: 'Europe/Warsaw',
     settings: null,
-    catalogSyncAttempted: false,
     busy: false,
   }
   let reactRoot = null
   let activeController = null
   let requestSequence = 0
-  let sessionSequence = 0
 
   const currentOrgId = () => text(ctx.appState?.session?.activeOrgId || ctx.appState?.session?.orgId)
+  const asyncGuard = createWorkforceScheduleAsyncGuard(currentOrgId)
   const canConfigure = () => ['ADMIN', 'OWNER'].includes(text(ctx.appState?.session?.roleCode || ctx.appState?.session?.role).toUpperCase())
   const canEdit = () => ['ADMIN', 'OWNER', 'MANAGER'].includes(text(ctx.appState?.session?.roleCode || ctx.appState?.session?.role).toUpperCase())
   const hasCapability = () => ctx.appState?.session?.capabilities?.workforceScheduling === true
@@ -136,10 +141,10 @@ export function createWorkforceScheduleFeature(ctx = {}) {
     const operation = operationRegistry.begin(action, payload)
     try {
       const result = await request(operation.key)
-      operationRegistry.complete(operation.signature)
+      operationRegistry.complete(operation)
       return result
     } catch (error) {
-      operationRegistry.fail(operation.signature, error)
+      operationRegistry.fail(operation, error)
       throw error
     }
   }
@@ -198,8 +203,8 @@ export function createWorkforceScheduleFeature(ctx = {}) {
     }))
   }
 
-  async function fetchSchedule(range, signal) {
-    return service.fetchWorkforceScheduleBootstrap(currentOrgId(), range, { signal })
+  async function fetchSchedule(range, signal, orgId = currentOrgId()) {
+    return service.fetchWorkforceScheduleBootstrap(orgId, range, { signal })
   }
 
   async function refresh(options = {}) {
@@ -209,7 +214,7 @@ export function createWorkforceScheduleFeature(ctx = {}) {
     if (!orgId || !validRange(range)) return false
     state.range = { ...state.range, ...range }
     const sequence = ++requestSequence
-    const sessionAtStart = sessionSequence
+    const sessionAtStart = asyncGuard.capture()
     activeController?.abort()
     activeController = typeof AbortController === 'function' ? new AbortController() : null
     const controller = activeController
@@ -218,8 +223,8 @@ export function createWorkforceScheduleFeature(ctx = {}) {
     render()
 
     try {
-      let schedule = await fetchSchedule(range, controller?.signal)
-      if (sequence !== requestSequence || sessionAtStart !== sessionSequence || orgId !== currentOrgId()) return false
+      let schedule = await fetchSchedule(range, controller?.signal, orgId)
+      if (sequence !== requestSequence || !asyncGuard.isCurrent(sessionAtStart)) return false
 
       state.setupRequired = schedule.setupRequired === true
       state.settings = schedule.settings || null
@@ -231,20 +236,23 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       }
 
       const shouldSyncCatalogs = options.syncCatalogs !== false
-        && !state.catalogSyncAttempted
+        && !catalogSyncGate.isComplete(orgId)
         && canConfigure()
       if (shouldSyncCatalogs) {
-        state.catalogSyncAttempted = true
         try {
-          await runIdempotent('sync-catalogs', { orgId }, (idempotencyKey) => (
-            service.syncWorkforceScheduleCatalogs(orgId, {}, { idempotencyKey })
+          await catalogSyncGate.run(orgId, () => (
+            runIdempotent('sync-catalogs', { orgId }, (idempotencyKey) => (
+              service.syncWorkforceScheduleCatalogs(orgId, {}, { idempotencyKey })
+            ))
           ))
-          schedule = await fetchSchedule(range, controller?.signal)
+          if (sequence !== requestSequence || !asyncGuard.isCurrent(sessionAtStart)) return false
+          schedule = await fetchSchedule(range, controller?.signal, orgId)
         } catch (error) {
+          if (sequence !== requestSequence || !asyncGuard.isCurrent(sessionAtStart)) return false
           notify(error?.message || 'Nie udało się odświeżyć katalogu pracowników i obiektów.', 'error')
         }
       }
-      if (sequence !== requestSequence || sessionAtStart !== sessionSequence || orgId !== currentOrgId()) return false
+      if (sequence !== requestSequence || !asyncGuard.isCurrent(sessionAtStart)) return false
 
       const normalized = normalizeWorkforceScheduleBootstrap(schedule)
       state.settings = normalized.settings
@@ -260,7 +268,7 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       return true
     } catch (error) {
       if (error?.code === 'WORKFORCE_SCHEDULE_REQUEST_ABORTED') return false
-      if (sequence !== requestSequence || sessionAtStart !== sessionSequence) return false
+      if (sequence !== requestSequence || !asyncGuard.isCurrent(sessionAtStart)) return false
       state.status = 'error'
       state.error = text(error?.message) || 'Nie udało się pobrać danych Grafiku.'
       render()
@@ -272,33 +280,38 @@ export function createWorkforceScheduleFeature(ctx = {}) {
 
   async function configure() {
     if (state.busy) return false
+    const operationContext = asyncGuard.beginBusy()
+    if (!operationContext) return false
     state.busy = true
     state.error = ''
     render()
     try {
-      const orgId = currentOrgId()
+      const orgId = operationContext.orgId
       const configuration = {
         expectedVersion: Number(state.settings?.version || 0),
         timeZone: state.setupTimeZone,
         weeklyLimitMinutes: 40 * 60,
       }
-      await runIdempotent('set-configuration', { orgId, configuration }, (idempotencyKey) => (
+      const response = await runIdempotent('set-configuration', { orgId, configuration }, (idempotencyKey) => (
         service.setWorkforceScheduleConfiguration(orgId, configuration, { idempotencyKey })
       ))
-      await runIdempotent('sync-catalogs', { orgId }, (idempotencyKey) => (
-        service.syncWorkforceScheduleCatalogs(orgId, {}, { idempotencyKey })
-      ))
-      state.catalogSyncAttempted = true
+      if (!asyncGuard.isCurrent(operationContext)) return false
       state.setupRequired = false
-      notify('Grafik został uruchomiony. Pobrano aktywnych pracowników i obiekty.')
-      return refresh({ forceRefresh: true, syncCatalogs: false })
+      state.settings = response?.settings || state.settings
+      notify('Grafik został uruchomiony.')
+      const refreshed = await refresh({ forceRefresh: true })
+      if (!asyncGuard.isCurrent(operationContext)) return false
+      return refreshed
     } catch (error) {
+      if (!asyncGuard.isCurrent(operationContext)) return false
       state.error = text(error?.message) || 'Nie udało się skonfigurować Grafiku.'
       render()
       return false
     } finally {
-      state.busy = false
-      render()
+      if (asyncGuard.releaseBusy(operationContext)) {
+        state.busy = false
+        render()
+      }
     }
   }
 
@@ -308,25 +321,36 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       error.code = 'WORKFORCE_SCHEDULE_WRITE_IN_PROGRESS'
       throw error
     }
+    const operationContext = asyncGuard.beginBusy()
+    if (!operationContext) {
+      const error = new Error('Poprzedni zapis Grafiku jeszcze trwa.')
+      error.code = 'WORKFORCE_SCHEDULE_WRITE_IN_PROGRESS'
+      throw error
+    }
     state.busy = true
+    let shouldRefresh = false
     try {
       const result = await task()
+      if (!asyncGuard.isCurrent(operationContext)) return false
+      shouldRefresh = true
       if (result === null || result === undefined || result === false) {
         const error = new Error('Serwer nie potwierdził zapisu Grafiku. Odśwież widok przed kolejną operacją.')
         error.code = 'WORKFORCE_SCHEDULE_WRITE_NOT_CONFIRMED'
         throw error
       }
-      window.setTimeout(() => {
-        void refresh({ forceRefresh: true, syncCatalogs: false })
-      }, 0)
       return result
     } catch (error) {
-      window.setTimeout(() => {
-        void refresh({ forceRefresh: true, syncCatalogs: false })
-      }, 0)
+      if (!asyncGuard.isCurrent(operationContext)) return false
+      shouldRefresh = true
       throw error
     } finally {
-      state.busy = false
+      if (shouldRefresh && asyncGuard.isCurrent(operationContext)) {
+        window.setTimeout(() => {
+          if (!asyncGuard.isCurrent(operationContext)) return
+          void refresh({ forceRefresh: true, syncCatalogs: false })
+        }, 0)
+      }
+      if (asyncGuard.releaseBusy(operationContext)) state.busy = false
     }
   }
 
@@ -405,7 +429,7 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       }
       const warnings = Array.isArray(error?.details?.warnings) ? error.details.warnings : []
       const warningText = warnings.map(formatWorkforceScheduleWarning).filter(Boolean).join('\n• ')
-      const confirmed = window.confirm([
+      const confirmed = confirmAction([
         'Grafik zawiera ostrzeżenia:',
         warningText ? `• ${warningText}` : '• Wymagane jest świadome potwierdzenie ostrzeżeń.',
         '',
@@ -438,11 +462,12 @@ export function createWorkforceScheduleFeature(ctx = {}) {
   }
 
   function resetSession() {
-    sessionSequence += 1
+    asyncGuard.resetSession()
     requestSequence += 1
     activeController?.abort()
     activeController = null
     operationRegistry.clear()
+    catalogSyncGate.reset()
     Object.assign(state, {
       range: currentWeekRange(),
       snapshot: null,
@@ -452,7 +477,6 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       setupRequired: false,
       setupTimeZone: 'Europe/Warsaw',
       settings: null,
-      catalogSyncAttempted: false,
       busy: false,
     })
     render()
@@ -465,9 +489,10 @@ export function createWorkforceScheduleFeature(ctx = {}) {
   }
 
   function cleanup() {
-    sessionSequence += 1
+    asyncGuard.resetSession()
     deactivate()
     operationRegistry.clear()
+    catalogSyncGate.reset()
     reactRoot?.unmount()
     reactRoot = null
   }

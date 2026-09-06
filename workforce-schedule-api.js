@@ -299,7 +299,12 @@ function createWorkforceScheduleApi(dependencies = {}) {
         createPersonId: () => `wsp_${createId()}`,
         createLocationId: () => `wsl_${createId()}`,
       })
-      return { entityType: 'CATALOGS', entityId: command.orgId, action: 'SYNCED', response: catalogs }
+      return {
+        entityType: 'CATALOGS',
+        entityId: command.orgId,
+        action: 'SYNCED',
+        response: { ...catalogs, orgId: command.orgId },
+      }
     }
     if (command.type === 'UPSERT_SHIFT') {
       const settings = await repository.readSettings(command.orgId)
@@ -347,7 +352,10 @@ function createWorkforceScheduleApi(dependencies = {}) {
       })
       if (claim.replay) {
         await finishScheduleTransaction(client, transaction, 'commit')
-        sendJson(res, 200, { ...claim.response, idempotent: true })
+        const response = command.type === 'SYNC_CATALOGS'
+          ? { ...claim.response, orgId: command.orgId, idempotent: true }
+          : { ...claim.response, idempotent: true }
+        sendJson(res, 200, response)
         return
       }
       const result = await dispatchCommand(repository, command, identity)

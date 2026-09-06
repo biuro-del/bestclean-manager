@@ -80,7 +80,7 @@ test("host oczekuje na zapis, używa idempotencji i wymaga jawnego potwierdzenia
 
   assert.match(hostSource, /createWorkforceScheduleOperationRegistry/);
   assert.match(hostSource, /async function runIdempotent/);
-  assert.match(hostSource, /operationRegistry\.fail\(operation\.signature, error\)/);
+  assert.match(hostSource, /operationRegistry\.fail\(operation, error\)/);
   assert.match(hostSource, /WORKFORCE_SCHEDULE_WARNINGS_CONFIRMATION_REQUIRED/);
   assert.match(hostSource, /window\.confirm/);
   assert.match(hostSource, /response\?\.shift/);
@@ -96,6 +96,28 @@ test("host oczekuje na zapis, używa idempotencji i wymaga jawnego potwierdzenia
   assert.match(componentSource, /if \(!editingEnabled\)/);
   assert.doesNotMatch(clientModelSource, /String\(warning\?\.message \|\| warning\?\.label \|\| warning\)/);
   assert.doesNotMatch(componentSource, /publishNow:\s*true/);
+});
+
+test("konfiguracja i zapis ignorują wyniki starej sesji", async () => {
+  const hostSource = await readFile(path.join(moduleRoot, "index.js"), "utf8");
+  const configureStart = hostSource.indexOf("  async function configure()")
+  const runWriteStart = hostSource.indexOf("  async function runWrite(task)", configureStart)
+  const saveShiftStart = hostSource.indexOf("  async function saveShift", runWriteStart)
+  const configureSource = hostSource.slice(configureStart, runWriteStart)
+  const runWriteSource = hostSource.slice(runWriteStart, saveShiftStart)
+
+  assert.ok(configureStart >= 0 && runWriteStart > configureStart && saveShiftStart > runWriteStart)
+  assert.match(configureSource, /const operationContext = asyncGuard\.beginBusy\(\)/)
+  assert.match(configureSource, /const response = await runIdempotent[\s\S]+if \(!asyncGuard\.isCurrent\(operationContext\)\) return false/)
+  assert.match(configureSource, /state\.setupRequired = false[\s\S]+const refreshed = await refresh\(\{ forceRefresh: true \}\)[\s\S]+if \(!asyncGuard\.isCurrent\(operationContext\)\) return false/)
+  assert.match(configureSource, /asyncGuard\.releaseBusy\(operationContext\)/)
+  assert.doesNotMatch(configureSource, /syncWorkforceScheduleCatalogs|catalogSyncGate\.run/)
+
+  assert.match(runWriteSource, /const operationContext = asyncGuard\.beginBusy\(\)/)
+  assert.match(runWriteSource, /const result = await task\(\)[\s\S]+if \(!asyncGuard\.isCurrent\(operationContext\)\) return false/)
+  assert.match(runWriteSource, /if \(shouldRefresh && asyncGuard\.isCurrent\(operationContext\)\)/)
+  assert.match(runWriteSource, /setTimeout\([\s\S]+if \(!asyncGuard\.isCurrent\(operationContext\)\) return/)
+  assert.match(runWriteSource, /asyncGuard\.releaseBusy\(operationContext\)/)
 });
 
 test("klient Grafiku odrzuca sesję platformową zamiast wysyłać jej token", async () => {

@@ -166,15 +166,34 @@ test('rejestr operacji zachowuje klucz po niejednoznacznym błędzie sieci i zwa
   const payload = { orgId: 'bestclean', shiftId: 'shift-1', version: 2 }
 
   const first = registry.begin('upsert-shift', payload)
-  registry.fail(first.signature, { code: 'WORKFORCE_SCHEDULE_NETWORK_ERROR' })
+  registry.fail(first, { code: 'WORKFORCE_SCHEDULE_NETWORK_ERROR' })
   const retry = registry.begin('upsert-shift', payload)
   assert.equal(retry.key, first.key)
+  assert.equal(retry.token, first.token)
 
-  registry.complete(retry.signature)
+  registry.complete(retry)
   const afterSuccess = registry.begin('upsert-shift', payload)
   assert.notEqual(afterSuccess.key, first.key)
 
-  registry.fail(afterSuccess.signature, { code: 'WORKFORCE_SCHEDULE_CLIENT_VALIDATION', status: 400 })
+  registry.fail(afterSuccess, { code: 'WORKFORCE_SCHEDULE_CLIENT_VALIDATION', status: 400 })
   const afterDeterministicFailure = registry.begin('upsert-shift', payload)
   assert.notEqual(afterDeterministicFailure.key, afterSuccess.key)
+})
+
+test('stare zakończenie po clear nie usuwa nowszego klucza tej samej operacji', async () => {
+  const { createWorkforceScheduleOperationRegistry } = await transportModule
+  let sequence = 0
+  const registry = createWorkforceScheduleOperationRegistry((action) => `${action}-${++sequence}`)
+  const payload = { orgId: 'bestclean', shiftId: 'shift-1', version: 2 }
+
+  const oldOperation = registry.begin('upsert-shift', payload)
+  registry.clear()
+  const newOperation = registry.begin('upsert-shift', payload)
+  assert.notEqual(newOperation.token, oldOperation.token)
+
+  registry.complete(oldOperation)
+  assert.equal(registry.begin('upsert-shift', payload).key, newOperation.key)
+
+  registry.fail(oldOperation, { code: 'WORKFORCE_SCHEDULE_CLIENT_VALIDATION', status: 400 })
+  assert.equal(registry.begin('upsert-shift', payload).key, newOperation.key)
 })
