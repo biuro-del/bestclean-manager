@@ -22,6 +22,7 @@ const GO_PLUS_CAPABILITIES = Object.freeze({
   availability: false,
   absences: false,
   scheduling: false,
+  workforceScheduling: false,
   staffingConflicts: false,
   planVsActual: false,
   zoneTasks: false,
@@ -36,6 +37,7 @@ const PLUS_CAPABILITIES = Object.freeze({
   availability: true,
   absences: true,
   scheduling: true,
+  workforceScheduling: true,
   staffingConflicts: true,
   planVsActual: true,
 })

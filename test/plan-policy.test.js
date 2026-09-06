@@ -38,6 +38,7 @@ test('TRIAL ma dokładnie możliwości i limity GO_PLUS', () => {
   assert.deepEqual(trial.capabilities, goPlus.capabilities)
   assert.deepEqual(trial.limits, goPlus.limits)
   assert.equal(trial.capabilities.scheduling, false)
+  assert.equal(trial.capabilities.workforceScheduling, false)
   assert.equal(trial.capabilities.profitabilityModule, false)
 })
 
@@ -45,6 +46,7 @@ test('PLUS i PRO rozszerzają macierz bez twardych limitów użycia', () => {
   const plus = resolvePlanEntitlements('PLUS')
   const pro = resolvePlanEntitlements('PRO')
   assert.equal(plus.capabilities.scheduling, true)
+  assert.equal(plus.capabilities.workforceScheduling, true)
   assert.equal(plus.capabilities.zoneTasks, false)
   assert.equal(pro.capabilities.zoneTasks, true)
   assert.equal(pro.capabilities.profitabilityModule, true)

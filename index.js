@@ -74,6 +74,7 @@ const { createProfitabilityApi } = require('./profitability-api')
 const { createWorkdayReconciliationApi } = require('./workday-reconciliation-api')
 const { createWorkdayStopProposalApi } = require('./workday-stop-proposal-api')
 const { createWorkTimeDaysApi } = require('./work-time-days-api')
+const { createWorkforceScheduleApi } = require('./workforce-schedule-api')
 const { mapProposal } = require('./workday-stop-proposal-repository')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
@@ -126,6 +127,13 @@ function isTrue(value) {
       .trim()
       .toLowerCase(),
   )
+}
+
+function isWorkforceScheduleEnabled() {
+  return isTrue(process.env.WORKFORCE_SCHEDULE_ENABLED)
+    && !isTrue(process.env.WORKFORCE_SCHEDULE_DELIVERY_ENABLED)
+    && !isTrue(process.env.WORKFORCE_SCHEDULE_NOTIFICATIONS_ENABLED)
+    && !isTrue(process.env.WORKFORCE_SCHEDULE_DOWNSTREAM_ENABLED)
 }
 
 function normalizeApiProxyTarget(value) {
@@ -4499,6 +4507,78 @@ async function authorizeWorkdayReconciliation(client, { orgId, uid, write = fals
   throw error
 }
 
+function workforceScheduleAccessError(statusCode, code, message) {
+  const error = new Error(code)
+  error.statusCode = statusCode
+  error.publicCode = code
+  error.publicMessage = message
+  return error
+}
+
+async function authorizeWorkforceSchedule(client, { orgId, uid, action }) {
+  if (!isWorkforceScheduleEnabled()) {
+    throw workforceScheduleAccessError(
+      404,
+      'WORKFORCE_SCHEDULE_DISABLED',
+      'Grafik nie jest aktywny w tym środowisku.',
+    )
+  }
+
+  const membership = await getRequesterMembership(client, orgId, uid)
+  if (normalizeText(membership?.role).toUpperCase() === PLATFORM_ROLE) {
+    throw workforceScheduleAccessError(
+      403,
+      'WORKFORCE_SCHEDULE_PLATFORM_CONTEXT_FORBIDDEN',
+      'Grafik wymaga bezpośredniej sesji organizacji.',
+    )
+  }
+  assertMembershipPlanCapability(membership, 'workforceScheduling')
+
+  const workerId = normalizeText(membership?.worker_id)
+  if (!workerId) {
+    throw workforceScheduleAccessError(
+      403,
+      'WORKFORCE_SCHEDULE_ACTIVE_WORKER_REQUIRED',
+      'Grafik wymaga aktywnego profilu pracownika w organizacji.',
+    )
+  }
+  const workerResult = await client.query(
+    `select worker_id
+       from public.worker
+      where org_id = $1::text
+        and worker_id = $2::text
+        and active is true
+        and upper(btrim(status)) = 'ACTIVE'
+      limit 1`,
+    [orgId, workerId],
+  )
+  if (!workerResult.rows[0]) {
+    throw workforceScheduleAccessError(
+      403,
+      'WORKFORCE_SCHEDULE_ACTIVE_WORKER_REQUIRED',
+      'Grafik wymaga aktywnego profilu pracownika w organizacji.',
+    )
+  }
+
+  const normalizedAction = normalizeText(action).toUpperCase()
+  const role = normalizeRequesterRole(membership.role)
+  const allowed = normalizedAction === 'READ'
+    ? ['ADMIN', 'MANAGER', 'COORDINATOR'].includes(role)
+    : normalizedAction === 'CONFIGURE'
+      ? role === 'ADMIN'
+      : ['EDIT', 'PUBLISH'].includes(normalizedAction)
+        ? ['ADMIN', 'MANAGER'].includes(role)
+        : false
+  if (!allowed) {
+    throw workforceScheduleAccessError(
+      403,
+      'WORKFORCE_SCHEDULE_FORBIDDEN',
+      'Brak uprawnień do tej operacji w Grafiku.',
+    )
+  }
+  return { role, scope: 'ALL', personId: workerId, uid }
+}
+
 function assertMembershipPlanCapability(membership, capability) {
   if (!membership) {
     const error = new Error('ORG_ACCESS_MISSING')
@@ -4624,6 +4704,11 @@ async function buildOrganizationSessionContext(client, uid, row) {
     }
   }
   const context = buildSessionContext(uid, enriched)
+  context.capabilities = {
+    ...context.capabilities,
+    workforceScheduling: context.capabilities?.workforceScheduling === true
+      && isWorkforceScheduleEnabled(),
+  }
   context.usage = await buildPlanUsage(client, row?.org_id, context.planCode, context.limits)
   return context
 }
@@ -8307,6 +8392,7 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
             capabilities: {
               ...entitlements.capabilities,
               ...capabilities,
+              workforceScheduling: false,
             },
           },
         })
@@ -10924,6 +11010,16 @@ const workdayStopProposalApi = createWorkdayStopProposalApi({
   verifyFirebaseIdToken,
 })
 
+const workforceScheduleApi = createWorkforceScheduleApi({
+  authorize: authorizeWorkforceSchedule,
+  connectDbClient,
+  parseBearerToken,
+  readJsonBody,
+  sendApiError,
+  sendJson,
+  verifyFirebaseIdToken,
+})
+
 const portalZoneApi = createPortalZoneApi({
   authorize: requirePortalZoneAccess,
   connectDbClient,
@@ -10986,6 +11082,12 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   if (requestUrl.pathname === PORTAL_PROFITABILITY_PATH) {
     profitabilityApi.handle(req, res, requestUrl).catch((error) => {
       sendApiError(res, 500, 'PROFITABILITY_API_ERROR', error?.message || 'Unexpected profitability API error.')
+    })
+    return
+  }
+  if (workforceScheduleApi.matches(requestUrl.pathname)) {
+    workforceScheduleApi.handle(req, res, requestUrl).catch((error) => {
+      sendApiError(res, 500, 'WORKFORCE_SCHEDULE_ERROR', error?.message || 'Unexpected workforce schedule error.')
     })
     return
   }

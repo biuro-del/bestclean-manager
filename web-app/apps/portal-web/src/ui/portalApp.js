@@ -150,6 +150,7 @@ const CURRENT_ROUTE_STORAGE_KEY = 'portal.currentRoute'
 const SIDEBAR_COLLAPSE_STORAGE_KEY = 'portal.sidebarCollapsed'
 const SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS = [
   { id: 'section-dashboard', kind: 'section', label: 'Pulpit', meta: 'Sekcja', route: 'dashboard' },
+  { id: 'section-workforce-schedule', kind: 'section', label: 'Grafik', meta: 'Sekcja', route: 'workforceSchedule' },
   { id: 'section-events', kind: 'section', label: 'Zdarzenia', meta: 'Sekcja', route: 'events' },
   { id: 'section-orders', kind: 'section', label: 'Zlecenia', meta: 'Sekcja', route: 'orders' },
   { id: 'sub-orders-list', kind: 'subsection', label: 'Lista zleceń', meta: 'Podsekcja dział "Zlecenia"', route: 'orders' },
@@ -240,6 +241,7 @@ const PORTAL_SETTINGS_ROUTES = new Set([
 ])
 const PORTAL_ROUTE_VIEW_IDS = {
   dashboard: 'view-dashboard',
+  workforceSchedule: 'view-workforceSchedule',
   calendar: 'view-calendar',
   kanban: 'view-kanban',
   contractProfitability: 'view-contractProfitability',
@@ -270,6 +272,7 @@ const PORTAL_ROUTE_VIEW_IDS = {
 }
 const PORTAL_ROUTE_FEATURE_KEYS = {
   dashboard: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'workerProfile', 'orders', 'kanban', 'calendar'],
+  workforceSchedule: ['workforceSchedule'],
   calendar: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar'],
   kanban: ['dashboard', 'reports', 'events', 'zones', 'clientProfile', 'workerTime', 'orders', 'calendar', 'kanban'],
   contractProfitability: ['contractProfitability'],
@@ -298,6 +301,7 @@ const PORTAL_ROUTE_FEATURE_KEYS = {
   settingsDataSecurity: ['settings'],
 }
 const PORTAL_ROUTE_CAPABILITIES = Object.freeze({
+  workforceSchedule: 'workforceScheduling',
   calendar: 'scheduling',
   orders: 'scheduling',
   ordersMap: 'scheduling',
@@ -306,6 +310,7 @@ const PORTAL_ROUTE_CAPABILITIES = Object.freeze({
 })
 const PORTAL_ROUTE_BIND_KEYS = {
   dashboard: 'dashboard',
+  workforceSchedule: 'workforceSchedule',
   calendar: 'calendar',
   kanban: 'kanban',
   contractProfitability: 'contractProfitability',
@@ -355,9 +360,16 @@ function normalizePortalRoute(route) {
   return normalizedRoute === 'coordinator' ? 'dashboard' : normalizedRoute
 }
 
+function workforceScheduleClientEnabled() {
+  return String(import.meta.env.VITE_WORKFORCE_SCHEDULE_MODE ?? '').trim().toLowerCase() === 'live'
+}
+
 function portalRouteExists(route) {
   const normalizedRoute = normalizePortalRoute(route)
   if (!normalizedRoute) {
+    return false
+  }
+  if (normalizedRoute === 'workforceSchedule' && !workforceScheduleClientEnabled()) {
     return false
   }
   const requiredCapability = PORTAL_ROUTE_CAPABILITIES[normalizedRoute]
@@ -561,6 +573,7 @@ function flushPortalDeferredNotifications() {
 function resetPortalState(overrides = {}) {
   calendarFeature?.clearRemoteTimelineOrderTimers?.()
   facilityManagerObjectsFeature?.resetSession?.()
+  workforceScheduleFeature?.resetSession?.()
   portalDeferredNotifications.clear()
   if (portalDeferredNotificationTimer) {
     window.clearTimeout(portalDeferredNotificationTimer)
@@ -2745,7 +2758,8 @@ function syncProfitabilityEntryPermissions() {
 
 function syncPlanFeaturePermissions() {
   for (const [route, capability] of Object.entries(PORTAL_ROUTE_CAPABILITIES)) {
-    const allowed = appState.session?.capabilities?.[capability] === true
+    const clientEnabled = route !== 'workforceSchedule' || workforceScheduleClientEnabled()
+    const allowed = clientEnabled && appState.session?.capabilities?.[capability] === true
     document.querySelectorAll(`[data-route="${route}"]`).forEach((node) => {
       if (node instanceof HTMLElement) node.hidden = !allowed
     })
@@ -3181,6 +3195,23 @@ function bindContractProfitabilityViewFunctions(...args) {
   return getContractProfitabilityFeature().bind(...args)
 }
 
+let workforceScheduleFeature = null
+
+function getWorkforceScheduleFeature() {
+  if (!workforceScheduleFeature) {
+    throw new Error('Workforce schedule feature is not initialized.')
+  }
+  return workforceScheduleFeature
+}
+
+function bindWorkforceScheduleViewFunctions(...args) {
+  return getWorkforceScheduleFeature().bind(...args)
+}
+
+function refreshWorkforceSchedule(...args) {
+  return getWorkforceScheduleFeature().refresh(...args)
+}
+
 let settingsFeature = null
 
 function getSettingsFeature() {
@@ -3217,6 +3248,8 @@ function loadPortalTemplateModule(route) {
   switch (templateKey) {
     case 'audits':
       return import('../features/objects/audits/index.js')
+    case 'workforceSchedule':
+      return import('../features/workforce-schedule/index.js')
     case 'calendar':
       return import('../features/calendar/index.js')
     case 'clientProfile':
@@ -3258,6 +3291,8 @@ function loadPortalTemplateModule(route) {
 
 function loadPortalFeatureModule(featureKey) {
   switch (featureKey) {
+    case 'workforceSchedule':
+      return import('../features/workforce-schedule/index.js')
     case 'calendar':
       return import('../features/calendar/index.js')
     case 'clientProfile':
@@ -3297,6 +3332,8 @@ function loadPortalFeatureModule(featureKey) {
 
 function portalFeatureIsReady(featureKey) {
   switch (featureKey) {
+    case 'workforceSchedule':
+      return Boolean(workforceScheduleFeature)
     case 'calendar':
       return Boolean(calendarFeature)
     case 'clientProfile':
@@ -3340,6 +3377,9 @@ function assignPortalFeature(featureKey, module) {
   }
 
   switch (featureKey) {
+    case 'workforceSchedule':
+      workforceScheduleFeature = workforceScheduleFeature || module.createWorkforceScheduleFeature(portalFeatureContext)
+      return workforceScheduleFeature
     case 'calendar':
       calendarFeature = calendarFeature || module.createCalendarFeature(portalFeatureContext)
       return calendarFeature
@@ -3519,6 +3559,9 @@ function bindPortalRouteOnce(route, navigation = portalNavigation) {
   switch (PORTAL_SETTINGS_ROUTES.has(normalizedRoute) ? 'settings' : normalizedRoute) {
     case 'dashboard':
       cleanup = bindDashboardViewFunctions()
+      break
+    case 'workforceSchedule':
+      cleanup = bindWorkforceScheduleViewFunctions()
       break
     case 'calendar':
       cleanup = bindCalendarViewFunctions()
@@ -5394,6 +5437,7 @@ function sidebarGlobalSearchTextFromParts(...parts) {
 function sidebarGlobalSearchStaticItems() {
   return SIDEBAR_GLOBAL_SEARCH_STATIC_RESULTS
     .filter((item) => item.route !== 'contractProfitability' || canOpenContractProfitability())
+    .filter((item) => item.route !== 'workforceSchedule' || portalRouteExists(item.route))
     .map((item) => ({
       ...item,
       searchText: sidebarGlobalSearchTextFromParts(item.label, item.meta),
@@ -8527,6 +8571,11 @@ async function syncRouteDataNow(normalizedRoute, options = {}) {
     return
   }
 
+  if (normalizedRoute === 'workforceSchedule') {
+    await refreshWorkforceSchedule({ forceRefresh: force })
+    return
+  }
+
   if (normalizedRoute === 'calendar') {
     await Promise.allSettled([
       calendarEnsureTimelineWorkerState({ force, render: false }),
@@ -8712,6 +8761,9 @@ export function mountPortalApp() {
     if (calendarFeature && appState.currentRoute !== 'calendar') {
       calendarTimelineHideStatusAlert()
     }
+    if (workforceScheduleFeature && normalizeNavigationRoute(appState.currentRoute) !== 'workforceSchedule') {
+      workforceScheduleFeature.deactivate?.()
+    }
     if (eventsFeature && normalizeNavigationRoute(appState.currentRoute) !== 'events') {
       stopEventsPolling()
     }
@@ -8728,6 +8780,11 @@ export function mountPortalApp() {
       renderDashboardKanbanTasks()
       await syncRouteData(routeName)
       startDashboardAutoRefresh()
+      return
+    }
+
+    if (routeName === 'workforceSchedule') {
+      await syncRouteData(routeName)
       return
     }
 
@@ -8830,6 +8887,9 @@ export function mountPortalApp() {
 
   const navigatePortalRoute = async (route, options = {}) => {
     const nextRoute = normalizeNavigationRoute(route)
+    if (nextRoute === 'workforceSchedule' && !portalRouteExists(nextRoute)) {
+      return false
+    }
     const currentRoute = normalizeNavigationRoute(router.getCurrentRoute?.() || appState.currentRoute)
     const showTransition = options.showTransition !== false && (nextRoute !== currentRoute || !portalRouteIsReady(nextRoute))
     const endTransition = showTransition
@@ -9066,6 +9126,7 @@ export function mountPortalApp() {
       ordersFeature?.cleanup?.()
       kanbanFeature?.cleanup?.()
       calendarFeature?.cleanup?.()
+      workforceScheduleFeature?.cleanup?.()
     } catch {
       // No-op cleanup safety for dev remounts.
     }
@@ -9075,6 +9136,7 @@ export function mountPortalApp() {
     ordersFeature = null
     kanbanFeature = null
     calendarFeature = null
+    workforceScheduleFeature = null
     zonesFeature = null
     eventsFeature = null
     reportsFeature = null

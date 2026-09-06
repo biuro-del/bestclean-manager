@@ -430,18 +430,10 @@ export const portalLayoutTemplate = `
             <span class="mi-ico" aria-hidden="true"><i class="ph ph-squares-four"></i></span>
             <span class="mi-label">Pulpit</span>
           </button>
-          <a
-            class="menu-item"
-            href="https://cleanzi-portal-klienta-test--grafik-demo-20260905-ffwbnzuu.web.app/"
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Grafik (demo) — otwórz w nowej karcie"
-            aria-label="Grafik (demo) — otwórz w nowej karcie"
-          >
+          <button class="menu-item" data-route="workforceSchedule" type="button">
             <span class="mi-ico" aria-hidden="true"><i class="ph ph-calendar-dots"></i></span>
-            <span class="mi-label">Grafik (demo)</span>
-            <span class="chev" aria-hidden="true"><i class="ph ph-arrow-square-out"></i></span>
-          </a>
+            <span class="mi-label">Grafik</span>
+          </button>
           <button class="menu-item" data-route="events" type="button">
             <span class="mi-ico" aria-hidden="true"><i class="ph ph-bell-ringing"></i></span>
             <span class="mi-label">Zdarzenia</span>
@@ -1105,6 +1097,7 @@ export const portalLayoutTemplate = `
           </div>
         </section>
 
+        <section id="view-workforceSchedule" style="display:none;"></section>
         <section id="view-calendar" style="display:none;"></section>
         <section id="view-kanban" style="display:none;"></section>
         <section id="view-contractProfitability" style="display:none;"></section>

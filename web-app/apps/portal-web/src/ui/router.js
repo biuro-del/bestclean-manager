@@ -1,5 +1,6 @@
 ﻿const routeToViewId = {
   dashboard: 'view-dashboard',
+  workforceSchedule: 'view-workforceSchedule',
   calendar: 'view-calendar',
   kanban: 'view-kanban',
   contractProfitability: 'view-contractProfitability',
