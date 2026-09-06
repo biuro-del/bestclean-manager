@@ -18,7 +18,8 @@
     "migrate:job-card-photo": "node scripts/migrate-job-card-photo.js",
     "migrate:cleaning-company-onboarding": "node scripts/migrate-cleaning-company-onboarding.js",
     "migrate:facility-manager-object": "node scripts/migrate-facility-manager-object.js",
-    "platform-admin": "node scripts/platform-admin.js"
+    "platform-admin": "node scripts/platform-admin.js",
+    "smoke:workforce-schedule:bootstrap": "node scripts/smoke-workforce-schedule-bootstrap.js"
   },
   "keywords": [],
   "author": "",

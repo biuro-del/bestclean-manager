@@ -1,7 +1,23 @@
 -- ADDITIVE CANDIDATE ONLY. Do not run without separate database approval.
+-- OPERATOR ENTRYPOINT: ../admin/20260906_workforce_schedule_core_apply.psql
+-- Direct execution of this raw SQL is forbidden. It remains separate only as
+-- deterministic PG17 harness input and is included by the guarded psql wrapper.
 -- Grafik is an independent domain. It reads only canonical workers and clients
 -- into snapshots and has no foreign keys to worker, client, task, order,
 -- calendar, QR, workday or event data.
+
+do $workforce_schedule_entrypoint_guard$
+begin
+  if current_setting('cleanzi.workforce_schedule_core_entrypoint', true)
+       is distinct from 'GUARDED_WORKFORCE_SCHEDULE_CORE_20260906' then
+    raise exception 'WORKFORCE_SCHEDULE_GUARDED_ENTRYPOINT_REQUIRED';
+  end if;
+
+  -- Consume the one-shot marker before BEGIN. Any retry must repeat every
+  -- production-target check in the approved wrapper.
+  perform set_config('cleanzi.workforce_schedule_core_entrypoint', '', false);
+end
+$workforce_schedule_entrypoint_guard$;
 
 begin;
 

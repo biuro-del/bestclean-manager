@@ -72,6 +72,7 @@ function safeLogRequestId(value) {
 
 function ensureDependencies(dependencies) {
   const required = [
+    'assertOrganizationEnabled',
     'authorize',
     'connectDbClient',
     'getRequestId',
@@ -108,6 +109,7 @@ function compareExpectedVersions(expected, actual) {
 function createWorkforceScheduleApi(dependencies = {}) {
   ensureDependencies(dependencies)
   const {
+    assertOrganizationEnabled,
     authorize,
     connectDbClient,
     getRequestId,
@@ -252,6 +254,7 @@ function createWorkforceScheduleApi(dependencies = {}) {
   async function handleBootstrap(req, res, requestUrl, identity) {
     const orgId = identifier(requestUrl.searchParams.get('orgId'), 'orgId', 64)
     const range = parseDateRange(requestUrl.searchParams.get('from'), requestUrl.searchParams.get('to'))
+    await assertOrganizationEnabled(orgId)
     let client
     const transaction = { open: false, destroy: false }
     try {
@@ -331,6 +334,7 @@ function createWorkforceScheduleApi(dependencies = {}) {
 
   async function handleCommand(req, res, identity) {
     const command = normalizeCommand(await readBody(req))
+    await assertOrganizationEnabled(command.orgId)
     let client
     const transaction = { open: false, destroy: false }
     try {
@@ -384,6 +388,7 @@ function createWorkforceScheduleApi(dependencies = {}) {
 
   async function handlePublication(req, res, identity) {
     const publication = normalizePublication(await readBody(req))
+    await assertOrganizationEnabled(publication.orgId)
     let client
     const transaction = { open: false, destroy: false }
     try {

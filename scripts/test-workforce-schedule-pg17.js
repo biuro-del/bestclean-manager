@@ -29,6 +29,8 @@ const MIGRATION_RUNNER_ROLE = 'migration_runner'
 const ACL_SENTINEL_ROLE = 'portal_app'
 const ROLE_GRAPH_SENTINEL_ROLE = 'workforce_schedule_source_reader'
 const POSTFLIGHT_ACL_BARRIER = '-- WORKFORCE_SCHEDULE_POSTFLIGHT_ACL_BARRIER'
+const MIGRATION_ENTRYPOINT_GUC = 'cleanzi.workforce_schedule_core_entrypoint'
+const MIGRATION_ENTRYPOINT_MARKER = 'GUARDED_WORKFORCE_SCHEDULE_CORE_20260906'
 const SOURCE_TABLES = Object.freeze([
   'organizations',
   'organization_member',
@@ -1015,10 +1017,33 @@ async function assertSchemaReadyFailsClosed(client, ownerUser) {
   )))
 }
 
-async function assertSecondMigrationIsRejected(client, migrationSql) {
+async function runGuardedHarnessMigration(client, migrationSql) {
+  await client.query(
+    'select set_config($1::text, $2::text, false)',
+    [MIGRATION_ENTRYPOINT_GUC, MIGRATION_ENTRYPOINT_MARKER],
+  )
+  return client.query(migrationSql)
+}
+
+async function assertRawMigrationRequiresGuard(client, migrationSql) {
   let failure = null
   try {
     await client.query(migrationSql)
+  } catch (error) {
+    failure = error
+  } finally {
+    await client.query('rollback').catch(() => {})
+  }
+  assert.ok(failure, 'Raw migration unexpectedly ran without the guarded entrypoint marker.')
+  assert.equal(failure.code, 'P0001')
+  assert.match(text(failure.message), /WORKFORCE_SCHEDULE_GUARDED_ENTRYPOINT_REQUIRED/)
+  await assertNoScheduleObjects(client, 'Raw migration without the guard changed the schema.')
+}
+
+async function assertSecondMigrationIsRejected(client, migrationSql) {
+  let failure = null
+  try {
+    await runGuardedHarnessMigration(client, migrationSql)
   } catch (error) {
     failure = error
   } finally {
@@ -1059,7 +1084,7 @@ async function assertNoScheduleObjects(client, label) {
 async function assertMigrationRejected(client, migrationSql, expectedMessage) {
   let failure = null
   try {
-    await client.query(migrationSql)
+    await runGuardedHarnessMigration(client, migrationSql)
   } catch (error) {
     failure = error
   } finally {
@@ -1290,11 +1315,12 @@ async function runHarness({ args = process.argv.slice(2), env = process.env } = 
       session_user: MIGRATION_RUNNER_ROLE,
       current_user: MIGRATION_RUNNER_ROLE,
     })
+    await assertRawMigrationRequiresGuard(migrationClient, migrationSql)
     await assertPreexistingScheduleFunctionRejected(adminClient, migrationClient, migrationSql)
     await assertRoleGraphPreflightRejected(adminClient, migrationClient, migrationSql)
     await assertUnsafeDefaultAclRejected(adminClient, migrationClient, migrationSql)
     await assertAclPostflightRejectsDrift(adminClient, migrationClient, migrationSql)
-    await migrationClient.query(migrationSql)
+    await runGuardedHarnessMigration(migrationClient, migrationSql)
     const postMigrationIdentity = await migrationClient.query(
       `select session_user as session_user, current_user as current_user`,
     )
@@ -1341,6 +1367,7 @@ async function runHarness({ args = process.argv.slice(2), env = process.env } = 
       effects: EFFECTS,
       checks: [
         'canonical-fixture',
+        'raw-migration-entrypoint-guard',
         'unsafe-default-acl-rejected-and-rolled-back',
         'preexisting-function-overload-rejected',
         'exact-set-role-graph',

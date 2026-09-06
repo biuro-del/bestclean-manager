@@ -71,6 +71,10 @@ function fixture(options = {}) {
     release(destroy = false) { calls.push(['release', destroy]) },
   }
   const api = createWorkforceScheduleApi({
+    async assertOrganizationEnabled(orgId) {
+      calls.push(['rollout', orgId])
+      if (options.rolloutError) throw options.rolloutError
+    },
     async authorize(_client, input) {
       calls.push(['authorize', input])
       if (options.authorizeError) throw options.authorizeError
@@ -439,4 +443,56 @@ test('publikacja jest wewnętrzna i nie przekazuje efektów zewnętrznych', asyn
   assert.equal(f.responses[0].payload.publication.visibility, 'INTERNAL_ONLY')
   assert.deepEqual(f.calls.find(([name]) => name === 'publish')[1].effects, noEffects())
   assert.equal(f.calls.some(([name]) => name === 'resolveRequest'), false)
+})
+
+test('rollout organizacji odrzuca wszystkie endpointy przed otwarciem bazy', async () => {
+  const rolloutError = Object.assign(new Error('WORKFORCE_SCHEDULE_DISABLED'), {
+    statusCode: 404,
+    publicCode: 'WORKFORCE_SCHEDULE_DISABLED',
+    publicMessage: 'Grafik nie jest aktywny w tym środowisku.',
+  })
+  const cases = [
+    {
+      path: '/api/portal/workforce-schedule/bootstrap?orgId=other-org&from=2026-08-24&to=2026-08-30',
+      method: 'GET',
+    },
+    {
+      path: '/api/portal/workforce-schedule/commands',
+      method: 'POST',
+      body: {
+        type: 'SYNC_CATALOGS',
+        orgId: 'other-org',
+        idempotencyKey: 'sync-other-org',
+        effects: noEffects(),
+        payload: {},
+      },
+    },
+    {
+      path: '/api/portal/workforce-schedule/publications',
+      method: 'POST',
+      body: {
+        orgId: 'other-org',
+        idempotencyKey: 'publish-other-org',
+        effects: noEffects(),
+        from: '2026-08-24',
+        to: '2026-08-30',
+        expectedVersions: [{ shiftId: 'shift-1', version: 2 }],
+      },
+    },
+  ]
+
+  for (const entry of cases) {
+    const f = fixture({ body: entry.body, rolloutError })
+    await f.api.handle(
+      { method: entry.method },
+      {},
+      new URL(`http://localhost${entry.path}`),
+    )
+
+    assert.equal(f.errors[0].status, 404)
+    assert.equal(f.errors[0].code, 'WORKFORCE_SCHEDULE_DISABLED')
+    assert.deepEqual(f.calls.find(([name]) => name === 'rollout'), ['rollout', 'other-org'])
+    assert.equal(f.calls.some(([name]) => name === 'connect'), false)
+    assert.equal(f.calls.some(([name]) => name === 'authorize'), false)
+  }
 })

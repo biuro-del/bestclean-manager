@@ -10,6 +10,10 @@ const { Pool } = require('pg')
 const { AuthTypes, Connector, IpAddressTypes } = require('@google-cloud/cloud-sql-connector')
 const { resolvePgPassword } = require('./cloud-sql-pg-auth')
 const { resolveWorkforceScheduleDbAuthType } = require('./workforce-schedule-db-auth')
+const {
+  isWorkforceScheduleOrganizationAllowed,
+  resolveWorkforceScheduleRollout,
+} = require('./workforce-schedule-rollout-policy')
 const { Compute, GoogleAuth, OAuth2Client } = require('google-auth-library')
 const {
   buildOrganizationSummary,
@@ -134,10 +138,14 @@ function isTrue(value) {
 }
 
 function isWorkforceScheduleEnabled() {
-  return isTrue(process.env.WORKFORCE_SCHEDULE_ENABLED)
-    && !isTrue(process.env.WORKFORCE_SCHEDULE_DELIVERY_ENABLED)
-    && !isTrue(process.env.WORKFORCE_SCHEDULE_NOTIFICATIONS_ENABLED)
-    && !isTrue(process.env.WORKFORCE_SCHEDULE_DOWNSTREAM_ENABLED)
+  return resolveWorkforceScheduleRollout(process.env).enabled
+}
+
+function isWorkforceScheduleOrganizationEnabled(orgId) {
+  return isWorkforceScheduleOrganizationAllowed(
+    resolveWorkforceScheduleRollout(process.env),
+    orgId,
+  )
 }
 
 function normalizeApiProxyTarget(value) {
@@ -4857,7 +4865,7 @@ async function getWorkforceScheduleRequesterMembership(client, orgId, uid) {
 }
 
 async function authorizeWorkforceSchedule(client, { orgId, uid, action }) {
-  if (!isWorkforceScheduleEnabled()) {
+  if (!isWorkforceScheduleOrganizationEnabled(orgId)) {
     throw workforceScheduleAccessError(
       404,
       'WORKFORCE_SCHEDULE_DISABLED',
@@ -5037,7 +5045,7 @@ async function buildOrganizationSessionContext(client, uid, row) {
   context.capabilities = {
     ...context.capabilities,
     workforceScheduling: context.capabilities?.workforceScheduling === true
-      && isWorkforceScheduleEnabled(),
+      && isWorkforceScheduleOrganizationEnabled(row?.org_id),
   }
   context.usage = await buildPlanUsage(client, row?.org_id, context.planCode, context.limits)
   return context
@@ -11341,6 +11349,15 @@ const workdayStopProposalApi = createWorkdayStopProposalApi({
 })
 
 const workforceScheduleApi = createWorkforceScheduleApi({
+  assertOrganizationEnabled(orgId) {
+    if (!isWorkforceScheduleOrganizationEnabled(orgId)) {
+      throw workforceScheduleAccessError(
+        404,
+        'WORKFORCE_SCHEDULE_DISABLED',
+        'Grafik nie jest aktywny w tym środowisku.',
+      )
+    }
+  },
   authorize: authorizeWorkforceSchedule,
   connectDbClient: connectWorkforceScheduleDbClient,
   getRequestId: () => getPlatformRequestContext()?.requestId,

@@ -14,12 +14,13 @@ function functionBlock(name, nextName) {
   return serverSource.slice(start, end)
 }
 
-test('serwer aktywuje Grafik wyłącznie przy bezpiecznym zestawie czterech flag', () => {
-  const block = functionBlock('isWorkforceScheduleEnabled', 'normalizeApiProxyTarget')
-  assert.match(block, /WORKFORCE_SCHEDULE_ENABLED/)
-  assert.match(block, /!isTrue\(process\.env\.WORKFORCE_SCHEDULE_DELIVERY_ENABLED\)/)
-  assert.match(block, /!isTrue\(process\.env\.WORKFORCE_SCHEDULE_NOTIFICATIONS_ENABLED\)/)
-  assert.match(block, /!isTrue\(process\.env\.WORKFORCE_SCHEDULE_DOWNSTREAM_ENABLED\)/)
+test('serwer aktywuje Grafik przez wspólną fail-closed politykę rollout', () => {
+  const runtimeBlock = functionBlock('isWorkforceScheduleEnabled', 'isWorkforceScheduleOrganizationEnabled')
+  const organizationBlock = functionBlock('isWorkforceScheduleOrganizationEnabled', 'normalizeApiProxyTarget')
+  assert.match(serverSource, /require\('\.\/workforce-schedule-rollout-policy'\)/)
+  assert.match(runtimeBlock, /resolveWorkforceScheduleRollout\(process\.env\)\.enabled/)
+  assert.match(organizationBlock, /isWorkforceScheduleOrganizationAllowed/)
+  assert.match(organizationBlock, /resolveWorkforceScheduleRollout\(process\.env\)/)
   assert.match(serverSource, /workforceScheduling:\s*false/)
 })
 
@@ -28,6 +29,8 @@ test('endpoint Grafiku jest lokalnym API z osobną autoryzacją i nie wpada do o
   const apiEnd = serverSource.indexOf('const portalZoneApi', apiStart)
   assert.ok(apiStart >= 0 && apiEnd > apiStart)
   const apiWiring = serverSource.slice(apiStart, apiEnd)
+  assert.match(apiWiring, /assertOrganizationEnabled\(orgId\)/)
+  assert.match(apiWiring, /isWorkforceScheduleOrganizationEnabled\(orgId\)/)
   assert.match(apiWiring, /authorize:\s*authorizeWorkforceSchedule/)
   assert.match(apiWiring, /\bverifyFirebaseIdToken\s*,/)
   assert.doesNotMatch(apiWiring, /verifySessionContextFirebaseIdToken|verifyPlatformFirebaseIdToken/)
@@ -44,6 +47,7 @@ test('endpoint Grafiku jest lokalnym API z osobną autoryzacją i nie wpada do o
     serverSource.indexOf('async function authorizeWorkforceSchedule'),
   )
   assert.match(authorization, /WORKFORCE_SCHEDULE_PLATFORM_CONTEXT_FORBIDDEN/)
+  assert.match(authorization, /isWorkforceScheduleOrganizationEnabled\(orgId\)/)
   assert.match(authorization, /assertMembershipPlanCapability\(membership, 'workforceScheduling'\)/)
   assert.match(authorization, /getWorkforceScheduleRequesterMembership\(client, orgId, uid\)/)
   assert.doesNotMatch(authorization, /getRequesterMembership\(client/)
@@ -60,6 +64,15 @@ test('endpoint Grafiku jest lokalnym API z osobną autoryzacją i nie wpada do o
   assert.doesNotMatch(membership, /platformRepository|facility_manager/)
   assert.match(authorization, /normalizedAction === 'CONFIGURE'/)
   assert.match(authorization, /\['EDIT', 'PUBLISH'\]/)
+
+  const sessionContext = serverSource.slice(
+    serverSource.indexOf('async function buildOrganizationSessionContext'),
+    serverSource.indexOf('function numericCount'),
+  )
+  assert.match(
+    sessionContext,
+    /workforceScheduling:[\s\S]*isWorkforceScheduleOrganizationEnabled\(row\?\.org_id\)/,
+  )
 })
 
 test('Grafik dopuszcza tylko kanoniczny typ CLEANING_PROVIDER i odmawia brak lub stary typ organizacji', () => {

@@ -57,7 +57,13 @@ projektem i wymaga nowego kontraktu oraz jawnego włączenia efektu.
 
 ## Bezpieczeństwo wydania
 
-- Backend jest domyślnie wyłączony przez `WORKFORCE_SCHEDULE_ENABLED`.
+- Backend jest domyślnie wyłączony przez `WORKFORCE_SCHEDULE_ENABLED=false`
+  oraz niezależną politykę `WORKFORCE_SCHEDULE_ROLLOUT_MODE=OFF`.
+- Rollout ma tylko trzy tryby: `OFF`, `CANARY` i `ALL`. Nieznany albo pusty tryb
+  zachowuje się jak `OFF`. `CANARY` wymaga dokładnego `org_id` na rozdzielonej
+  przecinkami liście `WORKFORCE_SCHEDULE_ALLOWED_ORG_IDS`; pusta lub
+  nieprawidłowa lista nie dopuszcza żadnej organizacji. `ALL` jest osobną,
+  jawną decyzją i nadal respektuje wszystkie pozostałe bramki dostępu.
 - Frontend live jest domyślnie wyłączony przez `VITE_WORKFORCE_SCHEDULE_MODE`.
 - Dostęp wymaga organizacyjnego Firebase ID tokenu, aktywnego członkostwa oraz
   aktywnego profilu pracownika. Sesja administratora platformy jest odrzucana.
@@ -104,9 +110,12 @@ członkostwa, ustawić dwa dedykowane sekrety, wykonać migrację na PostgreSQL 
 sprawdzić kontrakt uprawnień,
 izolację dwóch organizacji oraz uwierzytelniony przepływ przeglądarkowy. Dopiero
 po tych bramkach można osobno ustawić backendowe
-`WORKFORCE_SCHEDULE_ENABLED=true` i frontendowe
+`WORKFORCE_SCHEDULE_ENABLED=true`, bezpieczny rollout
+`WORKFORCE_SCHEDULE_ROLLOUT_MODE=CANARY`, dokładną listę
+`WORKFORCE_SCHEDULE_ALLOWED_ORG_IDS` i frontendowe
 `VITE_WORKFORCE_SCHEDULE_MODE=live`. Flagi `DELIVERY`, `NOTIFICATIONS` i
-`DOWNSTREAM` pozostają `false`.
+`DOWNSTREAM` pozostają `false`. Tryb `ALL` wymaga późniejszej, osobnej decyzji
+po zakończeniu canary.
 
 Autoryzacja dopuszcza wyłącznie kanoniczny typ organizacji
 `CLEANING_PROVIDER`. Organizacja z pustym, historycznym albo innym typem jest
