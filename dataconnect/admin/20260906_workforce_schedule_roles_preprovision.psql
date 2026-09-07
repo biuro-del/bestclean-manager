@@ -35,6 +35,8 @@
 \endif
 
 select
+  :'workforce_schedule_expected_database' = 'iclean-room-database'
+    as workforce_schedule_approved_database_confirmed,
   current_database() = :'workforce_schedule_expected_database'
     as workforce_schedule_database_confirmed,
   session_user = :'workforce_schedule_expected_provisioning_admin'
@@ -43,8 +45,20 @@ select
     = 'PROVISION_WORKFORCE_SCHEDULE_ROLES_ONLY_20260906'
     as workforce_schedule_execution_confirmed,
   current_setting('server_version_num')::integer between 170000 and 179999
-    as workforce_schedule_pg17_confirmed
+    as workforce_schedule_pg17_confirmed,
+  not pg_is_in_recovery()
+    as workforce_schedule_primary_confirmed,
+  current_setting('transaction_read_only') = 'off'
+    and current_setting('default_transaction_read_only') = 'off'
+    as workforce_schedule_read_write_confirmed
 \gset
+
+\if :workforce_schedule_approved_database_confirmed
+\else
+  do $$ begin
+    raise exception 'WORKFORCE_SCHEDULE_APPROVED_DATABASE_MISMATCH';
+  end $$;
+\endif
 
 \if :workforce_schedule_database_confirmed
 \else
@@ -71,6 +85,20 @@ select
 \else
   do $$ begin
     raise exception 'WORKFORCE_SCHEDULE_POSTGRESQL_17_REQUIRED';
+  end $$;
+\endif
+
+\if :workforce_schedule_primary_confirmed
+\else
+  do $$ begin
+    raise exception 'WORKFORCE_SCHEDULE_PRIMARY_DATABASE_REQUIRED';
+  end $$;
+\endif
+
+\if :workforce_schedule_read_write_confirmed
+\else
+  do $$ begin
+    raise exception 'WORKFORCE_SCHEDULE_READ_WRITE_SESSION_REQUIRED';
   end $$;
 \endif
 

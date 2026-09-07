@@ -52,6 +52,8 @@ test('endpoint Grafiku jest lokalnym API z osobną autoryzacją i nie wpada do o
   assert.match(authorization, /getWorkforceScheduleRequesterMembership\(client, orgId, uid\)/)
   assert.doesNotMatch(authorization, /getRequesterMembership\(client/)
   assert.match(authorization, /WORKFORCE_SCHEDULE_ORGANIZATION_KIND_FORBIDDEN/)
+  assert.match(authorization, /WORKFORCE_SCHEDULE_ACTIVE_WORKER_REQUIRED/)
+  assert.match(authorization, /membership\?\.active_worker_id/)
   assert.match(
     authorization,
     /!isWorkforceScheduleOrganizationKindAllowed\(membership\?\.organization_kind\)/,
@@ -64,6 +66,13 @@ test('endpoint Grafiku jest lokalnym API z osobną autoryzacją i nie wpada do o
   assert.doesNotMatch(membership, /platformRepository|facility_manager/)
   assert.match(authorization, /normalizedAction === 'CONFIGURE'/)
   assert.match(authorization, /\['EDIT', 'PUBLISH'\]/)
+  assert.doesNotMatch(authorization, /\[[^\]]*'WORKER'[^\]]*\]/)
+
+  const canonicalMembership = serverSource.slice(
+    serverSource.indexOf('async function getRequesterMemberships'),
+    serverSource.indexOf('function mapSessionMembershipRow'),
+  )
+  assert.match(canonicalMembership, /w\.worker_id = m\.worker_id[\s\S]*?w\.auth_uid = m\.uid/)
 
   const sessionContext = serverSource.slice(
     serverSource.indexOf('async function buildOrganizationSessionContext'),

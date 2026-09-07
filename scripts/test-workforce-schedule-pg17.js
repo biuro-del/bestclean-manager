@@ -76,7 +76,7 @@ create table public.organization_member (
   org_id varchar(64) not null references public.organizations(org_id),
   uid varchar(128) not null,
   role varchar(32) not null,
-  worker_id varchar(128) not null,
+  worker_id varchar(128),
   status varchar(16) not null,
   primary key (org_id, uid)
 );
@@ -116,19 +116,38 @@ insert into public.organizations (
 )
 values
   ('harness-alpha', 'W001', 'CLEANING_PROVIDER', 'ACTIVE', 'COMPLETED'),
-  ('harness-beta', 'W002', 'CLEANING_PROVIDER', 'ACTIVE', 'COMPLETED');
+  ('harness-beta', 'W002', 'CLEANING_PROVIDER', 'ACTIVE', 'COMPLETED'),
+  ('harness-uid-mismatch', 'W003', 'CLEANING_PROVIDER', 'ACTIVE', 'COMPLETED'),
+  ('harness-no-worker', null, 'CLEANING_PROVIDER', 'ACTIVE', 'COMPLETED'),
+  ('harness-null-auth', 'W004', 'CLEANING_PROVIDER', 'ACTIVE', 'COMPLETED'),
+  ('harness-inactive-worker', 'W005', 'CLEANING_PROVIDER', 'ACTIVE', 'COMPLETED'),
+  ('harness-worker-status', 'W006', 'CLEANING_PROVIDER', 'ACTIVE', 'COMPLETED'),
+  ('harness-cross-worker', 'W007', 'CLEANING_PROVIDER', 'ACTIVE', 'COMPLETED'),
+  ('harness-cross-worker-source', null, 'CLEANING_PROVIDER', 'ACTIVE', 'COMPLETED');
 
 insert into public.organization_member (org_id, uid, role, worker_id, status)
 values
   ('harness-alpha', 'uid-alpha-admin', 'ADMIN', 'W001', 'ACTIVE'),
-  ('harness-beta', 'uid-beta-admin', 'ADMIN', 'W002', 'ACTIVE');
+  ('harness-beta', 'uid-beta-admin', 'ADMIN', 'W002', 'ACTIVE'),
+  ('harness-uid-mismatch', 'uid-mismatch-member', 'ADMIN', 'W003', 'ACTIVE'),
+  ('harness-no-worker', 'uid-no-worker', 'ADMIN', null, 'ACTIVE'),
+  ('harness-null-auth', 'uid-null-auth', 'ADMIN', 'W004', 'ACTIVE'),
+  ('harness-inactive-worker', 'uid-inactive-worker', 'ADMIN', 'W005', 'ACTIVE'),
+  ('harness-worker-status', 'uid-worker-status', 'ADMIN', 'W006', 'ACTIVE'),
+  ('harness-cross-worker', 'uid-cross-worker', 'ADMIN', 'W007', 'ACTIVE');
 
 insert into public.organization_subscription (
   org_id, plan_code, status, trial_ends_at, current_period_ends_at
 )
 values
   ('harness-alpha', 'PRO', 'ACTIVE', null, '2031-01-01T00:00:00Z'),
-  ('harness-beta', 'PRO', 'ACTIVE', null, '2031-01-01T00:00:00Z');
+  ('harness-beta', 'PRO', 'ACTIVE', null, '2031-01-01T00:00:00Z'),
+  ('harness-uid-mismatch', 'PRO', 'ACTIVE', null, '2031-01-01T00:00:00Z'),
+  ('harness-no-worker', 'PRO', 'ACTIVE', null, '2031-01-01T00:00:00Z'),
+  ('harness-null-auth', 'PRO', 'ACTIVE', null, '2031-01-01T00:00:00Z'),
+  ('harness-inactive-worker', 'PRO', 'ACTIVE', null, '2031-01-01T00:00:00Z'),
+  ('harness-worker-status', 'PRO', 'ACTIVE', null, '2031-01-01T00:00:00Z'),
+  ('harness-cross-worker', 'PRO', 'ACTIVE', null, '2031-01-01T00:00:00Z');
 
 insert into public.worker (
   org_id, login, login_normalized, worker_id, worker_id_normalized,
@@ -136,9 +155,19 @@ insert into public.worker (
 )
 values
   ('harness-alpha', 'alpha.worker', 'alpha.worker', 'W001', 'w001',
-   'Alpha Worker', 'uid-alpha-worker', 'WORKER', true, 'ACTIVE'),
+   'Alpha Worker', 'uid-alpha-admin', 'WORKER', true, 'ACTIVE'),
   ('harness-beta', 'beta.worker', 'beta.worker', 'W002', 'w002',
-   'Beta Worker', 'uid-beta-worker', 'WORKER', true, 'ACTIVE');
+   'Beta Worker', 'uid-beta-admin', 'WORKER', true, 'ACTIVE'),
+  ('harness-uid-mismatch', 'mismatch.worker', 'mismatch.worker', 'W003', 'w003',
+   'Mismatch Worker', 'uid-different-worker', 'WORKER', true, 'ACTIVE'),
+  ('harness-null-auth', 'null.auth', 'null.auth', 'W004', 'w004',
+   'Null Auth Worker', null, 'WORKER', true, 'ACTIVE'),
+  ('harness-inactive-worker', 'inactive.worker', 'inactive.worker', 'W005', 'w005',
+   'Inactive Worker', 'uid-inactive-worker', 'WORKER', false, 'ACTIVE'),
+  ('harness-worker-status', 'status.worker', 'status.worker', 'W006', 'w006',
+   'Bad Status Worker', 'uid-worker-status', 'WORKER', true, 'SUSPENDED'),
+  ('harness-cross-worker-source', 'cross.worker', 'cross.worker', 'W007', 'w007',
+   'Cross-tenant Worker', 'uid-cross-worker', 'WORKER', true, 'ACTIVE');
 
 insert into public.client (org_id, client_id, name, status)
 values
@@ -479,6 +508,85 @@ async function assertScheduleSessionBoundary(client) {
     assert.equal(denied?.code, '42501', `workforce_schedule_session unexpectedly used schedule SQL without SET ROLE: ${sql}`)
   }
 
+}
+
+async function assertWorkerUidBindingBoundary(client) {
+  for (const boundaryCase of [
+    { orgId: 'harness-uid-mismatch', uid: 'uid-mismatch-member' },
+    { orgId: 'harness-no-worker', uid: 'uid-no-worker' },
+    { orgId: 'harness-null-auth', uid: 'uid-null-auth' },
+    { orgId: 'harness-inactive-worker', uid: 'uid-inactive-worker' },
+    { orgId: 'harness-worker-status', uid: 'uid-worker-status' },
+    { orgId: 'harness-cross-worker', uid: 'uid-cross-worker' },
+  ]) {
+    const authorization = await client.query(
+      `select role, worker_id, active_worker_id
+         from public.workforce_schedule_authorize_session($1::text, $2::text)`,
+      [boundaryCase.orgId, boundaryCase.uid],
+    )
+    assert.equal(authorization.rows.length, 1)
+    assert.equal(
+      authorization.rows[0].active_worker_id,
+      null,
+      'Membership without an identically UID-bound active worker passed the worker guard.',
+    )
+    assert.notEqual(
+      authorization.rows[0].role,
+      'OWNER',
+      'Unbound membership was elevated through organization.owner_worker_id.',
+    )
+
+    await client.query('begin')
+    try {
+      await client.query(`set local role ${SCHEDULE_RUNTIME_ROLE}`)
+      await client.query(
+        `select set_config('cleanzi.org_id', $1::text, true)`,
+        [boundaryCase.orgId],
+      )
+      await client.query(
+        `select set_config('cleanzi.actor_uid', $1::text, true)`,
+        [boundaryCase.uid],
+      )
+      const actorState = await client.query(
+        `select public.workforce_schedule_actor_is_active($1::text) as actor_active,
+                (select count(*)::integer
+                   from public.workforce_schedule_read_active_workers($1::text)) as worker_count,
+                (select count(*)::integer
+                   from public.workforce_schedule_read_active_objects($1::text)) as object_count,
+                (select count(*)::integer
+                   from public.workforce_schedule_settings
+                  where org_id = $1::text) as schedule_count`,
+        [boundaryCase.orgId],
+      )
+      assert.deepEqual(actorState.rows[0], {
+        actor_active: false,
+        worker_count: 0,
+        object_count: 0,
+        schedule_count: 0,
+      })
+    } finally {
+      await client.query('rollback').catch(() => {})
+    }
+
+    await client.query('begin')
+    let rlsDenied = null
+    try {
+      await client.query(`set local role ${SCHEDULE_RUNTIME_ROLE}`)
+      await client.query(`select set_config('cleanzi.org_id', $1::text, true)`, [boundaryCase.orgId])
+      await client.query(`select set_config('cleanzi.actor_uid', $1::text, true)`, [boundaryCase.uid])
+      await client.query(
+        `insert into public.workforce_schedule_settings
+           (org_id, time_zone, weekly_limit_minutes, created_by_uid, updated_by_uid)
+         values ($1::text, 'Europe/Warsaw', 2400, $2::text, $2::text)`,
+        [boundaryCase.orgId, boundaryCase.uid],
+      )
+    } catch (error) {
+      rlsDenied = error
+    } finally {
+      await client.query('rollback').catch(() => {})
+    }
+    assert.equal(rlsDenied?.code, '42501', 'RLS accepted an actor without a bound active worker.')
+  }
 }
 
 async function readCanonicalSources(client) {
@@ -867,6 +975,152 @@ async function assertSourceTablesAreReadOnly(client) {
   }
 }
 
+async function assertForeignTableAclDriftRejected(client) {
+  const relationName = 'public.workforce_schedule_settings'
+  const readiness = await withTemporaryOwnerMutation(
+    client,
+    `grant select on table ${relationName} to ${ACL_SENTINEL_ROLE}`,
+    async (repository) => {
+      const catalogEntry = await client.query(
+        `select relation.relacl is not null
+                  and cardinality(relation.relacl) > 0 as table_acl_present,
+                exists (
+                  select 1
+                    from aclexplode(relation.relacl) privilege
+                    join pg_roles grantee on grantee.oid = privilege.grantee
+                   where grantee.rolname = $2::text
+                     and privilege.privilege_type = 'SELECT'
+                     and not privilege.is_grantable
+                ) as expected_acl_present
+           from pg_class relation
+          where relation.oid = to_regclass($1::text)`,
+        [relationName, ACL_SENTINEL_ROLE],
+      )
+      assert.deepEqual(catalogEntry.rows[0], {
+        table_acl_present: true,
+        expected_acl_present: true,
+      })
+      return repository.schemaReady()
+    },
+  )
+
+  assert.equal(readiness.ready, false, 'Foreign table ACL was accepted.')
+  assert.ok(readiness.missing.includes('runtime:TABLE_ACL'))
+
+  const rolledBack = await client.query(
+    `select not exists (
+              select 1
+                from pg_class relation
+                cross join lateral aclexplode(relation.relacl) privilege
+                join pg_roles grantee on grantee.oid = privilege.grantee
+               where relation.oid = to_regclass($1::text)
+                 and grantee.rolname = $2::text
+                 and privilege.privilege_type = 'SELECT'
+                 and not privilege.is_grantable
+            ) as foreign_table_acl_cleared`,
+    [relationName, ACL_SENTINEL_ROLE],
+  )
+  assert.deepEqual(rolledBack.rows[0], { foreign_table_acl_cleared: true })
+}
+
+async function assertColumnAclDriftRejected(client) {
+  const relationName = 'public.workforce_schedule_settings'
+  const cases = [
+    {
+      columnName: 'version',
+      privilegeName: 'INSERT',
+      grantOption: false,
+      expectedMissing: ['runtime:COLUMN_ACL'],
+    },
+    {
+      columnName: 'version',
+      privilegeName: 'UPDATE',
+      grantOption: false,
+      expectedMissing: ['runtime:COLUMN_ACL'],
+    },
+    {
+      columnName: 'org_id',
+      privilegeName: 'REFERENCES',
+      grantOption: false,
+      expectedMissing: [
+        'runtime:COLUMN_ACL',
+        `${relationName}:REFERENCES:EXCESS`,
+      ],
+    },
+    {
+      columnName: 'version',
+      privilegeName: 'SELECT',
+      grantOption: true,
+      expectedMissing: ['runtime:COLUMN_ACL', 'runtime:GRANT_OPTION'],
+    },
+  ]
+
+  for (const columnAclCase of cases) {
+    const grantOptionSql = columnAclCase.grantOption ? ' with grant option' : ''
+    const readiness = await withTemporaryOwnerMutation(
+      client,
+      `grant ${columnAclCase.privilegeName} (${columnAclCase.columnName})
+         on table ${relationName}
+         to ${SCHEDULE_RUNTIME_ROLE}${grantOptionSql}`,
+      async (repository) => {
+        const catalogEntry = await client.query(
+          `select attribute.attacl is not null
+                    and cardinality(attribute.attacl) > 0 as column_acl_present,
+                  exists (
+                    select 1
+                      from aclexplode(attribute.attacl) privilege
+                      join pg_roles grantee on grantee.oid = privilege.grantee
+                     where grantee.rolname = $3::text
+                       and privilege.privilege_type = $4::text
+                       and privilege.is_grantable = $5::boolean
+                  ) as expected_acl_present
+             from pg_attribute attribute
+            where attribute.attrelid = to_regclass($1::text)
+              and attribute.attname = $2::text
+              and attribute.attnum > 0
+              and not attribute.attisdropped`,
+          [
+            relationName,
+            columnAclCase.columnName,
+            SCHEDULE_RUNTIME_ROLE,
+            columnAclCase.privilegeName,
+            columnAclCase.grantOption,
+          ],
+        )
+        assert.deepEqual(catalogEntry.rows[0], {
+          column_acl_present: true,
+          expected_acl_present: true,
+        })
+        return repository.schemaReady()
+      },
+    )
+
+    assert.equal(
+      readiness.ready,
+      false,
+      `${columnAclCase.privilegeName}(${columnAclCase.columnName}) column ACL was accepted.`,
+    )
+    for (const missingItem of columnAclCase.expectedMissing) {
+      assert.ok(
+        readiness.missing.includes(missingItem),
+        `${columnAclCase.privilegeName}(${columnAclCase.columnName}) did not report ${missingItem}.`,
+      )
+    }
+
+    const rolledBack = await client.query(
+      `select attribute.attacl is null
+                or cardinality(attribute.attacl) = 0 as column_acl_cleared
+         from pg_attribute attribute
+        where attribute.attrelid = to_regclass($1::text)
+          and attribute.attname = $2::text
+          and attribute.attnum > 0
+          and not attribute.attisdropped`,
+      [relationName, columnAclCase.columnName],
+    )
+    assert.deepEqual(rolledBack.rows[0], { column_acl_cleared: true })
+  }
+}
+
 async function assertSchemaReadyFailsClosed(client, ownerUser) {
   const noUsage = await withTemporaryOwnerMutation(
     client,
@@ -996,14 +1250,8 @@ async function assertSchemaReadyFailsClosed(client, ownerUser) {
   assert.equal(sourceColumnWrite.ready, false)
   assert.ok(sourceColumnWrite.missing.some((item) => item.includes('public.worker:UPDATE:EXCESS')))
 
-  const scheduleColumnGrantOption = await withTemporaryOwnerMutation(
-    client,
-    `grant select (version) on table public.workforce_schedule_settings
-       to ${SCHEDULE_RUNTIME_ROLE} with grant option`,
-    (repository) => repository.schemaReady(),
-  )
-  assert.equal(scheduleColumnGrantOption.ready, false)
-  assert.ok(scheduleColumnGrantOption.missing.includes('runtime:GRANT_OPTION'))
+  await assertForeignTableAclDriftRejected(client)
+  await assertColumnAclDriftRejected(client)
 
   const appendOnlyColumnWrite = await withTemporaryOwnerMutation(
     client,
@@ -1244,8 +1492,28 @@ async function assertAclPostflightRejectsDrift(adminClient, migrationClient, mig
       sql: `grant select on table public.workforce_schedule_settings to ${ACL_SENTINEL_ROLE};`,
     },
     {
+      name: 'column-insert-version',
       expected: /WORKFORCE_SCHEDULE_COLUMN_ACL_POSTFLIGHT_FAILED/,
-      sql: `grant select (org_id) on table public.workforce_schedule_settings to ${ACL_SENTINEL_ROLE};`,
+      sql: `grant insert (version) on table public.workforce_schedule_settings
+              to ${ACL_SENTINEL_ROLE};`,
+    },
+    {
+      name: 'column-update-version',
+      expected: /WORKFORCE_SCHEDULE_COLUMN_ACL_POSTFLIGHT_FAILED/,
+      sql: `grant update (version) on table public.workforce_schedule_settings
+              to ${ACL_SENTINEL_ROLE};`,
+    },
+    {
+      name: 'column-references-org-id',
+      expected: /WORKFORCE_SCHEDULE_COLUMN_ACL_POSTFLIGHT_FAILED/,
+      sql: `grant references (org_id) on table public.workforce_schedule_settings
+              to ${ACL_SENTINEL_ROLE};`,
+    },
+    {
+      name: 'column-select-version-grant-option',
+      expected: /WORKFORCE_SCHEDULE_COLUMN_ACL_POSTFLIGHT_FAILED/,
+      sql: `grant select (version) on table public.workforce_schedule_settings
+              to ${ACL_SENTINEL_ROLE} with grant option;`,
     },
     {
       expected: /WORKFORCE_SCHEDULE_SEQUENCE_ACL_POSTFLIGHT_FAILED/,
@@ -1272,7 +1540,7 @@ async function assertAclPostflightRejectsDrift(adminClient, migrationClient, mig
     )
     await assertNoScheduleObjects(
       adminClient,
-      `ACL postflight ${aclCase.expected} did not roll back all schedule objects.`,
+      `ACL postflight ${aclCase.name || aclCase.expected} did not roll back all schedule objects.`,
     )
   }
 }
@@ -1338,6 +1606,7 @@ async function runHarness({ args = process.argv.slice(2), env = process.env } = 
     })
     await runtimeClient.connect()
     await assertScheduleSessionBoundary(runtimeClient)
+    await assertWorkerUidBindingBoundary(runtimeClient)
 
     await runCrudAndPublication(runtimeClient)
     await assertTenantIsolation(runtimeClient)
@@ -1371,6 +1640,7 @@ async function runHarness({ args = process.argv.slice(2), env = process.env } = 
         'unsafe-default-acl-rejected-and-rolled-back',
         'preexisting-function-overload-rejected',
         'exact-set-role-graph',
+        'firebase-uid-worker-binding',
         'table-column-sequence-function-acl-postflight',
         'migration',
         'schema-ready',
@@ -1379,7 +1649,9 @@ async function runHarness({ args = process.argv.slice(2), env = process.env } = 
         'source-read-only',
         'privilege-regressions-fail-closed',
         'additional-permissive-policy-rejected',
+        'foreign-table-acl-relacl-and-rollback',
         'column-level-privilege-drift-rejected',
+        'column-acl-matrix-attacl-and-rollback',
         'second-migration-rejected',
         'canonical-sources-unchanged',
       ],
@@ -1431,6 +1703,7 @@ module.exports = {
   SCHEDULE_SESSION_ROLE,
   SCHEDULE_RUNTIME_ROLE,
   assertScheduleSessionBoundary,
+  assertWorkerUidBindingBoundary,
   assertSchemaReadyFailsClosed,
   assertScheduleRuntimeStatementDenied,
   assertSafeUnmodifiedTarget,

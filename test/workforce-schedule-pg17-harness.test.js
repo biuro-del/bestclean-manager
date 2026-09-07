@@ -111,7 +111,7 @@ test('preflight odrzuca wszystko poza pustym, lokalnym PostgreSQL 17', () => {
   assert.throws(() => assertSafeUnmodifiedTarget({ ...target, owns_database: false }, safeTarget), /TEST_DATABASE_OWNER_REQUIRED/)
 })
 
-test('fixture jest minimalny, dwutenantowy i rozdziela sesję od runtime Grafiku', () => {
+test('fixture ma dwa poprawne tenanty, przypadki UID fail-closed i rozdziela sesję od runtime', () => {
   for (const table of ['organizations', 'organization_member', 'organization_subscription', 'worker', 'client']) {
     assert.match(FIXTURE_SQL, new RegExp(`create table public\\.${table}\\b`, 'i'))
   }
@@ -125,6 +125,20 @@ test('fixture jest minimalny, dwutenantowy i rozdziela sesję od runtime Grafiku
   }
   assert.match(FIXTURE_SQL, /harness-alpha/)
   assert.match(FIXTURE_SQL, /harness-beta/)
+  assert.match(FIXTURE_SQL, /harness-uid-mismatch/)
+  assert.match(FIXTURE_SQL, /harness-no-worker/)
+  assert.match(FIXTURE_SQL, /harness-null-auth/)
+  assert.match(FIXTURE_SQL, /harness-inactive-worker/)
+  assert.match(FIXTURE_SQL, /harness-worker-status/)
+  assert.match(FIXTURE_SQL, /harness-cross-worker-source/)
+  const membershipFixture = FIXTURE_SQL.match(
+    /create table public\.organization_member \([\s\S]*?\n\);/i,
+  )?.[0] || ''
+  assert.match(membershipFixture, /worker_id varchar\(128\),/i)
+  assert.doesNotMatch(membershipFixture, /worker_id varchar\(128\) not null/i)
+  assert.match(FIXTURE_SQL, /'Alpha Worker', 'uid-alpha-admin', 'WORKER', true, 'ACTIVE'/i)
+  assert.match(FIXTURE_SQL, /'Beta Worker', 'uid-beta-admin', 'WORKER', true, 'ACTIVE'/i)
+  assert.match(FIXTURE_SQL, /'uid-mismatch-member'[\s\S]*?'uid-different-worker'/i)
   assert.match(FIXTURE_SQL, /'CLEANING_PROVIDER'/)
   assert.doesNotMatch(FIXTURE_SQL, /'CLEANING_COMPANY'/)
   assert.match(FIXTURE_SQL, /create role workforce_schedule_session[\s\S]*login[\s\S]*noinherit[\s\S]*nosuperuser[\s\S]*nobypassrls/i)
@@ -181,6 +195,11 @@ test('runner nie sprząta zewnętrznej bazy i pokrywa pełny kontrakt integracyj
   assert.match(harnessSource, /raw-migration-entrypoint-guard/)
   assert.deepEqual(EFFECTS, { delivery: false, notifications: false, downstream: false })
   assert.match(harnessSource, /session_user: SCHEDULE_SESSION_ROLE[\s\S]*current_user: SCHEDULE_SESSION_ROLE/)
+  assert.match(harnessSource, /async function assertWorkerUidBindingBoundary\(client\)/)
+  assert.match(harnessSource, /Membership without an identically UID-bound active worker passed the worker guard/)
+  assert.match(harnessSource, /RLS accepted an actor without a bound active worker/)
+  assert.match(harnessSource, /worker_count: 0[\s\S]*?object_count: 0[\s\S]*?schedule_count: 0/)
+  assert.match(harnessSource, /firebase-uid-worker-binding/)
   assert.match(harnessSource, /has_table_privilege\('workforce_schedule_session', 'public\.workforce_schedule_settings', 'SELECT'\)/)
   assert.match(harnessSource, /inherited_select: false/)
   assert.match(harnessSource, /set local role \$\{SCHEDULE_RUNTIME_ROLE\}/)
@@ -241,4 +260,64 @@ test('schemaReady jest testowane na celowo osłabionych uprawnieniach i każda p
   assert.match(harnessSource, /:OWNER_MEMBERSHIP/)
   assert.match(harnessSource, /:UPDATE:EXCESS/)
   assert.ok((harnessSource.match(/client\.query\('rollback'\)/g) || []).length >= 2)
+})
+
+test('harness sprawdza pełną macierz kolumnowych ACL w osobnych transakcjach i w postflight', () => {
+  assert.match(
+    harnessSource,
+    /async function assertColumnAclDriftRejected\(client\)[\s\S]*for \(const columnAclCase of cases\)[\s\S]*withTemporaryOwnerMutation/,
+  )
+  for (const [privilegeName, columnName] of [
+    ['INSERT', 'version'],
+    ['UPDATE', 'version'],
+    ['REFERENCES', 'org_id'],
+    ['SELECT', 'version'],
+  ]) {
+    assert.match(
+      harnessSource,
+      new RegExp(`columnName: '${columnName}',\\s*privilegeName: '${privilegeName}'`),
+    )
+  }
+  assert.match(harnessSource, /privilegeName: 'SELECT'[\s\S]*?grantOption: true/)
+  assert.match(harnessSource, /attribute\.attacl is not null[\s\S]*?column_acl_present/)
+  assert.match(harnessSource, /from aclexplode\(attribute\.attacl\) privilege/)
+  assert.match(harnessSource, /privilege\.privilege_type = \$4::text/)
+  assert.match(harnessSource, /privilege\.is_grantable = \$5::boolean/)
+  assert.match(harnessSource, /runtime:COLUMN_ACL/)
+  assert.match(harnessSource, /runtime:GRANT_OPTION/)
+  assert.match(harnessSource, /\$\{relationName\}:REFERENCES:EXCESS/)
+  assert.match(harnessSource, /attribute\.attacl is null[\s\S]*?column_acl_cleared/)
+  assert.match(harnessSource, /column-acl-matrix-attacl-and-rollback/)
+
+  for (const pattern of [
+    /grant insert \(version\) on table public\.workforce_schedule_settings[\s\S]*?ACL_SENTINEL_ROLE/,
+    /grant update \(version\) on table public\.workforce_schedule_settings[\s\S]*?ACL_SENTINEL_ROLE/,
+    /grant references \(org_id\) on table public\.workforce_schedule_settings[\s\S]*?ACL_SENTINEL_ROLE/,
+    /grant select \(version\) on table public\.workforce_schedule_settings[\s\S]*?ACL_SENTINEL_ROLE\} with grant option/,
+  ]) {
+    assert.match(harnessSource, pattern)
+  }
+  assert.ok(
+    (harnessSource.match(/expected: \/WORKFORCE_SCHEDULE_COLUMN_ACL_POSTFLIGHT_FAILED\//g) || []).length >= 4,
+  )
+})
+
+test('harness wykrywa tabelowy ACL obcej roli przez relacl i wycofuje go transakcyjnie', () => {
+  assert.match(
+    harnessSource,
+    /async function assertForeignTableAclDriftRejected\(client\)[\s\S]*withTemporaryOwnerMutation/,
+  )
+  assert.match(
+    harnessSource,
+    /grant select on table \$\{relationName\} to \$\{ACL_SENTINEL_ROLE\}/,
+  )
+  assert.match(harnessSource, /relation\.relacl is not null[\s\S]*?table_acl_present/)
+  assert.match(harnessSource, /from aclexplode\(relation\.relacl\) privilege/)
+  assert.match(harnessSource, /grantee\.rolname = \$2::text/)
+  assert.match(harnessSource, /privilege\.privilege_type = 'SELECT'/)
+  assert.match(harnessSource, /not privilege\.is_grantable/)
+  assert.match(harnessSource, /runtime:TABLE_ACL/)
+  assert.match(harnessSource, /foreign_table_acl_cleared/)
+  assert.match(harnessSource, /await assertForeignTableAclDriftRejected\(client\)/)
+  assert.match(harnessSource, /foreign-table-acl-relacl-and-rollback/)
 })

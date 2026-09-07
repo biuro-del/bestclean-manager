@@ -68,7 +68,8 @@ pozwala tworzyć niestandardowe role przez SQL. Kandydat jest wykonalny bez
    w tym `CREATEROLE`, `NOINHERIT` i `NOCREATEDB`;
 2. właściciel źródeł nadał mu wcześniej dokładne zdolności delegowania ACL
    opisane niżej;
-3. połączenie wskazuje PostgreSQL 17, właściwą bazę oraz dokładny `session_user`.
+3. połączenie wskazuje primary PostgreSQL 17, bazę `iclean-room-database`, sesję
+   read-write oraz dokładny `session_user`.
 
 Typowy użytkownik wbudowany tworzony przez Cloud SQL otrzymuje m.in. `CREATEDB`
 i nie spełnia tego kontraktu bez przygotowania osobnej, ograniczonej roli.
@@ -129,14 +130,16 @@ zdolności delegowania brakuje, preflight kończy się przed `CREATE ROLE`.
 
 ```powershell
 psql.exe '<ADMIN_CONNECTION>' `
-  -v workforce_schedule_expected_database='<EXACT_DATABASE_NAME>' `
+  -v workforce_schedule_expected_database='iclean-room-database' `
   -v workforce_schedule_expected_provisioning_admin='<EXACT_ADMIN_ROLE>' `
   -v workforce_schedule_role_provision_confirmation='PROVISION_WORKFORCE_SCHEDULE_ROLES_ONLY_20260906' `
   -f 'dataconnect/admin/20260906_workforce_schedule_roles_preprovision.psql'
 ```
 
-`<ADMIN_CONNECTION>`, `<EXACT_DATABASE_NAME>` i `<EXACT_ADMIN_ROLE>` są
-placeholderami, nie wartościami produkcyjnymi. Połączenia ani haseł nie wolno
+`<ADMIN_CONNECTION>` i `<EXACT_ADMIN_ROLE>` są placeholderami, nie wartościami
+produkcyjnymi. Parametr bazy ma celowo jedną dopuszczalną wartość:
+`iclean-room-database`. Skrypt dodatkowo odrzuca replikę oraz sesję z
+`transaction_read_only` lub `default_transaction_read_only`. Połączenia ani haseł nie wolno
 zapisywać w repozytorium, logach czy historii powłoki. Preferowane jest
 połączenie bez wpisywania sekretu do argumentu procesu, np. lokalny Cloud SQL
 Auth Proxy oraz interaktywny prompt `psql`.

@@ -53,11 +53,69 @@ Test statyczny, który nie otwiera połączenia z bazą:
 node --test test/workforce-schedule-pg17-harness.test.js
 ```
 
+## Smoke rzeczywistych entrypointów psql
+
+Osobny harness uruchamia dokładne pliki operatorskie
+`20260906_workforce_schedule_roles_preprovision.psql` oraz
+`20260906_workforce_schedule_core_apply.psql`, łącznie z meta-komendami
+`\if`, `\gset` i `\ir`. Sam tworzy nowy klaster PostgreSQL 17 w `%TEMP%`,
+nasłuchuje wyłącznie na `127.0.0.1`, wybiera losowy port różny od `5432` i nie
+przyjmuje URL, hosta ani portu od operatora. Nie korzysta z istniejącej usługi
+PostgreSQL ani z Cloud SQL.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File '.\scripts\test-workforce-schedule-psql-entrypoints.ps1' `
+  -RunLocalEphemeralSmoke `
+  -Confirmation 'I_CONFIRM_LOCAL_EPHEMERAL_POSTGRESQL_17_PSQL_ENTRYPOINT_SMOKE'
+```
+
+Po obu markerach sukcesu harness zatrzymuje własny proces i usuwa wyłącznie
+zweryfikowany katalog tymczasowy. Przy błędzie zatrzymuje proces, ale zachowuje
+katalog i podaje jego ścieżkę do diagnozy. Statyczne granice harnessu sprawdza:
+
+```powershell
+node --test test/workforce-schedule-psql-entrypoints.test.js
+```
+
 ## Zakres weryfikacji
 
+### Tabelowy ACL obcej roli
+
+Harness nadaje roli `portal_app` zwykły, niegrantowalny `SELECT` na
+`public.workforce_schedule_settings`. Przypadek działa w osobnej transakcji:
+test potwierdza dokładny wpis przez `pg_class.relacl` i `aclexplode()`, wymaga od
+`schemaReady()` stanu fail-closed z markerem `runtime:TABLE_ACL`, wykonuje
+`ROLLBACK`, a następnie potwierdza usunięcie wpisu `portal_app` z tabelowego ACL.
+
+### Pełna macierz kolumnowych ACL
+
+Harness wykonuje cztery rzeczywiste granty na
+`public.workforce_schedule_settings`, każdy w osobnej transakcji zakończonej
+`ROLLBACK`:
+
+- `INSERT (version)` dla `workforce_schedule_app`;
+- `UPDATE (version)` dla `workforce_schedule_app`;
+- `REFERENCES (org_id)` dla `workforce_schedule_app`;
+- `SELECT (version) WITH GRANT OPTION` dla `workforce_schedule_app`.
+
+W każdym przypadku test odczytuje `pg_attribute.attacl`, rozwija wpis przez
+`aclexplode()` i potwierdza dokładny typ prawa, odbiorcę oraz stan grant option.
+`schemaReady()` musi przejść w stan fail-closed z markerem
+`runtime:COLUMN_ACL`; `REFERENCES` musi dodatkowo zgłosić
+`public.workforce_schedule_settings:REFERENCES:EXCESS`, a przypadek z grant
+option także `runtime:GRANT_OPTION`. Po każdym rollbacku test ponownie odczytuje
+`pg_attribute.attacl` i potwierdza usunięcie kolumnowego ACL.
+
+Ta sama czteroelementowa macierz jest osobno wstrzykiwana przed postflightem
+migracji dla roli `portal_app`. Każdy przypadek musi zakończyć się błędem
+`WORKFORCE_SCHEDULE_COLUMN_ACL_POSTFLIGHT_FAILED` ze stanem SQL `P0001`, a
+rollback migracji musi pozostawić zero tabel i funkcji Grafiku.
+
 - minimalny fixture `organizations`, `organization_member`,
-  `organization_subscription`, `worker` i `client` dla dwóch organizacji,
-  obejmujący także nieaktywne, puste oraz nieznane statusy obiektów;
+  `organization_subscription`, `worker` i `client` dla dwóch prawidłowych
+  organizacji oraz osobnych przypadków fail-closed: rozjazd UID, brak Workera,
+  `auth_uid=NULL`, nieaktywny Worker i status Workera inny niż `ACTIVE`;
 - wykonanie migracji przez `migration_runner`, z przełączeniem roli wykonywanym
   fail-closed wewnątrz migracji;
 - odrzucenie i pełny rollback migracji przy globalnym lub schematowym
@@ -79,6 +137,8 @@ node --test test/workforce-schedule-pg17-harness.test.js
   loginu sesyjnego oraz roli Grafiku;
 - dokładna autoryzacja pary `orgId + uid` przed `SET LOCAL ROLE` oraz odmowa
   odczytu katalogu innej organizacji przez funkcje po ustawieniu kontekstu;
+- fail-closed, gdy aktywne członkostwo organizacji wskazuje pracownika, którego
+  `worker.auth_uid` nie jest identyczne z Firebase UID tego członkostwa;
 - niezmienność pełnych fixture'ów źródłowych;
 - fail-closed dla błędnego `USAGE`, grant option, członkostwa w roli właściciela
   i praw zapisu do źródeł;

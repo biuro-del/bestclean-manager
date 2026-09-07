@@ -421,7 +421,8 @@ set search_path = pg_catalog
 as $function$
   select (
            case
-             when nullif(organization_source.owner_worker_id, '') is not null
+             when worker_source.worker_id is not null
+              and nullif(organization_source.owner_worker_id, '') is not null
               and organization_source.owner_worker_id = member_source.worker_id then 'OWNER'
              else member_source.role
            end
@@ -445,6 +446,7 @@ as $function$
     left join public.worker worker_source
       on worker_source.org_id = member_source.org_id
      and worker_source.worker_id = member_source.worker_id
+     and worker_source.auth_uid = member_source.uid
      and worker_source.active is true
      and upper(btrim(worker_source.status)) = 'ACTIVE'
    where member_source.org_id = p_org_id
@@ -467,6 +469,12 @@ as $function$
      and exists (
        select 1
          from public.organization_member member_source
+         join public.worker worker_source
+           on worker_source.org_id = member_source.org_id
+          and worker_source.worker_id = member_source.worker_id
+          and worker_source.auth_uid = member_source.uid
+          and worker_source.active is true
+          and upper(btrim(worker_source.status)) = 'ACTIVE'
         where member_source.org_id = p_org_id
           and member_source.uid = nullif(current_setting('cleanzi.actor_uid', true), '')
           and member_source.status = 'ACTIVE'
@@ -1491,6 +1499,7 @@ begin
                 and has_table_privilege(function_row.proowner, 'public.worker', 'SELECT')
              when function_signature = 'public.workforce_schedule_actor_is_active(text)'
                then has_table_privilege(function_row.proowner, 'public.organization_member', 'SELECT')
+                and has_table_privilege(function_row.proowner, 'public.worker', 'SELECT')
              when function_signature = 'public.workforce_schedule_read_active_workers(text)'
                then has_table_privilege(function_row.proowner, 'public.worker', 'SELECT')
              when function_signature = 'public.workforce_schedule_read_active_objects(text)'

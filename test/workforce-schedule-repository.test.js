@@ -170,8 +170,10 @@ test('kanoniczne źródła są dostępne tylko przez wąskie funkcje SECURITY DE
   assert.match(repositorySource, /source_object_id/i)
   assert.doesNotMatch(repositorySource, /= p\.source_worker_login/i)
   assert.doesNotMatch(repositorySource, /= p\.source_auth_uid/i)
-  assert.match(migrationSource, /create function public\.workforce_schedule_authorize_session\([\s\S]*?security definer[\s\S]*?from public\.organization_member member_source[\s\S]*?join public\.organizations organization_source[\s\S]*?left join public\.organization_subscription subscription_source/i)
-  assert.match(migrationSource, /create function public\.workforce_schedule_actor_is_active\([\s\S]*?security definer[\s\S]*?from public\.organization_member member_source/i)
+  assert.match(migrationSource, /create function public\.workforce_schedule_authorize_session\([\s\S]*?security definer[\s\S]*?from public\.organization_member member_source[\s\S]*?join public\.organizations organization_source[\s\S]*?left join public\.organization_subscription subscription_source[\s\S]*?left join public\.worker worker_source[\s\S]*?worker_source\.org_id = member_source\.org_id[\s\S]*?worker_source\.worker_id = member_source\.worker_id[\s\S]*?worker_source\.auth_uid = member_source\.uid[\s\S]*?worker_source\.active is true/i)
+  assert.match(migrationSource, /case[\s\S]*?when worker_source\.worker_id is not null[\s\S]*?organization_source\.owner_worker_id = member_source\.worker_id then 'OWNER'/i)
+  assert.match(migrationSource, /create function public\.workforce_schedule_actor_is_active\([\s\S]*?security definer[\s\S]*?from public\.organization_member member_source[\s\S]*?join public\.worker worker_source[\s\S]*?worker_source\.worker_id = member_source\.worker_id[\s\S]*?worker_source\.auth_uid = member_source\.uid[\s\S]*?worker_source\.active is true/i)
+  assert.match(repositorySource, /function_signature = 'public\.workforce_schedule_actor_is_active\(text\)'[\s\S]*?organization_member'[\s\S]*?worker'/i)
   assert.match(migrationSource, /create function public\.workforce_schedule_read_active_workers\([\s\S]*?security definer[\s\S]*?from public\.worker worker_source[\s\S]*?worker_source\.active is true[\s\S]*?upper\(btrim\(worker_source\.status\)\) = 'ACTIVE'/i)
   assert.match(migrationSource, /create function public\.workforce_schedule_read_active_objects\([\s\S]*?security definer[\s\S]*?from public\.client object_source[\s\S]*?array\['ACTIVE', 'AKTYWNY'\]::text\[\]/i)
   assert.match(repositorySource, /row\.active === true[\s\S]*?\['ACTIVE', 'AKTYWNY'\]\.includes/i)
@@ -283,6 +285,8 @@ test('migracja i readiness wymuszaja dokladna allowliste funkcji Grafiku', () =>
 function createSchemaReadyClient({
   grantOption = false,
   directSessionAcl = false,
+  unexpectedTableAcl = false,
+  unexpectedColumnAcl = false,
   privilegedMembership = false,
   ownerSourceReady = true,
   functionAclReady = true,
@@ -362,7 +366,24 @@ function createSchemaReadyClient({
       }
       if (/relation_acl as/.test(sql) && /direct_session_acl/.test(sql)) {
         assert.ok(Array.isArray(params[0]))
-        return { rows: [{ excessive: grantOption, direct_session_acl: directSessionAcl }] }
+        assert.equal(typeof params[1], 'string')
+        assert.deepEqual(
+          JSON.parse(params[1]),
+          Object.entries(REQUIRED_PRIVILEGES).flatMap(([relationName, privileges]) => (
+            privileges.map((privilegeName) => ({
+              relation_name: relationName,
+              privilege_name: privilegeName,
+            }))
+          )),
+        )
+        return {
+          rows: [{
+            excessive: grantOption,
+            unexpected_table_acl: unexpectedTableAcl,
+            unexpected_column_acl: unexpectedColumnAcl,
+            direct_session_acl: directSessionAcl,
+          }],
+        }
       }
       if (/to_regclass\(required\.relation_name\) is not null as relation_ready/.test(sql)) {
         return {
@@ -582,6 +603,19 @@ test('schemaReady blokuje bezpośrednie ACL roli workforce_schedule_session', as
   const result = await repository.schemaReady()
   assert.equal(result.ready, false)
   assert.ok(result.missing.includes('runtime:DIRECT_SESSION_ACL'))
+})
+
+test('schemaReady blokuje nieoczekiwane tabelowe i kolumnowe ACL Grafiku', async () => {
+  const repository = createWorkforceScheduleRepository(createSchemaReadyClient({
+    unexpectedTableAcl: true,
+    unexpectedColumnAcl: true,
+  }))
+  const result = await repository.schemaReady()
+  assert.equal(result.ready, false)
+  assert.ok(result.missing.includes('runtime:TABLE_ACL'))
+  assert.ok(result.missing.includes('runtime:COLUMN_ACL'))
+  assert.match(repositorySource, /allowed_runtime_acl[\s\S]*?unexpected_table_acl/i)
+  assert.match(repositorySource, /true as is_column_acl[\s\S]*?unexpected_column_acl/i)
 })
 
 test('komendy i publikacje zapisują dokładny kontrakt zerowych efektów', () => {

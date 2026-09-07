@@ -24,6 +24,7 @@ const runbook = fs.readFileSync(runbookPath, 'utf8')
 test('preprovisioning wymaga PostgreSQL 17, dokładnej bazy, administratora i potwierdzenia', () => {
   assert.match(script, /\\set ON_ERROR_STOP on/)
   assert.match(script, /:\{\?workforce_schedule_expected_database\}/)
+  assert.match(script, /:'workforce_schedule_expected_database' = 'iclean-room-database'/)
   assert.match(script, /current_database\(\) = :'workforce_schedule_expected_database'/)
   assert.match(script, /:\{\?workforce_schedule_expected_provisioning_admin\}/)
   assert.match(script, /session_user = :'workforce_schedule_expected_provisioning_admin'/)
@@ -31,10 +32,25 @@ test('preprovisioning wymaga PostgreSQL 17, dokładnej bazy, administratora i po
   assert.match(script, /:\{\?workforce_schedule_role_provision_confirmation\}/)
   assert.match(script, /PROVISION_WORKFORCE_SCHEDULE_ROLES_ONLY_20260906/)
   assert.match(script, /server_version_num'[\s\S]*between 170000 and 179999/)
+  assert.match(script, /not pg_is_in_recovery\(\)/)
+  assert.match(script, /current_setting\('transaction_read_only'\) = 'off'/)
+  assert.match(script, /current_setting\('default_transaction_read_only'\) = 'off'/)
+  assert.match(script, /WORKFORCE_SCHEDULE_APPROVED_DATABASE_MISMATCH/)
+  assert.match(script, /WORKFORCE_SCHEDULE_PRIMARY_DATABASE_REQUIRED/)
+  assert.match(script, /WORKFORCE_SCHEDULE_READ_WRITE_SESSION_REQUIRED/)
   assert.doesNotMatch(script, /\\quit(?:\s|$)/)
   assert.match(script, /raise exception 'WORKFORCE_SCHEDULE_EXPECTED_DATABASE_REQUIRED'/)
   assert.match(script, /raise exception 'WORKFORCE_SCHEDULE_PROVISIONING_ADMIN_MISMATCH'/)
   assert.match(script, /begin;[\s\S]*pg_advisory_xact_lock[\s\S]*commit;/i)
+  const beginPosition = script.indexOf('begin;')
+  for (const gate of [
+    'WORKFORCE_SCHEDULE_APPROVED_DATABASE_MISMATCH',
+    'WORKFORCE_SCHEDULE_DATABASE_MISMATCH',
+    'WORKFORCE_SCHEDULE_PRIMARY_DATABASE_REQUIRED',
+    'WORKFORCE_SCHEDULE_READ_WRITE_SESSION_REQUIRED',
+  ]) {
+    assert.ok(script.indexOf(gate) < beginPosition, `${gate} must precede BEGIN`)
+  }
 })
 
 test('role są rozdzielone, restrykcyjne i nie zmieniają istniejących atrybutów', () => {

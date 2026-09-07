@@ -356,14 +356,24 @@ function createWorkforceScheduleRepository(client) {
          select membership.roleid
            from pg_auth_members membership
            join accessible_roles child on child.role_oid = membership.member
+       ), allowed_runtime_acl as (
+         select required.relation_name, required.privilege_name
+           from jsonb_to_recordset($2::jsonb)
+                as required(relation_name text, privilege_name text)
        ), relation_acl as (
-         select privilege.grantee, privilege.privilege_type, privilege.is_grantable
+         select namespace.nspname || '.' || relation.relname as relation_name,
+                relation.relowner as relation_owner,
+                privilege.grantee, privilege.privilege_type, privilege.is_grantable,
+                false as is_column_acl
            from pg_class relation
            join pg_namespace namespace on namespace.oid = relation.relnamespace
            cross join lateral aclexplode(coalesce(relation.relacl, acldefault('r', relation.relowner))) privilege
           where namespace.nspname = 'public' and relation.relname = any($1::text[])
          union all
-         select privilege.grantee, privilege.privilege_type, privilege.is_grantable
+         select namespace.nspname || '.' || relation.relname as relation_name,
+                relation.relowner as relation_owner,
+                privilege.grantee, privilege.privilege_type, privilege.is_grantable,
+                true as is_column_acl
            from pg_class relation
            join pg_namespace namespace on namespace.oid = relation.relnamespace
            join pg_attribute attribute on attribute.attrelid = relation.oid
@@ -378,12 +388,41 @@ function createWorkforceScheduleRepository(client) {
        ) as excessive,
        exists (
          select 1 from relation_acl privilege
+          where not privilege.is_column_acl
+            and (
+              privilege.grantee not in (
+                privilege.relation_owner,
+                (select oid from pg_roles where rolname = current_user)
+              )
+              or (
+                privilege.grantee = (select oid from pg_roles where rolname = current_user)
+                and (
+                  privilege.is_grantable
+                  or not exists (
+                    select 1 from allowed_runtime_acl allowed
+                     where allowed.relation_name = privilege.relation_name
+                       and allowed.privilege_name = privilege.privilege_type
+                  )
+                )
+              )
+            )
+       ) as unexpected_table_acl,
+       exists (
+         select 1 from relation_acl privilege where privilege.is_column_acl
+       ) as unexpected_column_acl,
+       exists (
+         select 1 from relation_acl privilege
           where privilege.grantee = 0
              or privilege.grantee = (select oid from pg_roles where rolname = session_user)
        ) as direct_session_acl`,
-      [REQUIRED_RELATIONS.map((relation) => relation.split('.')[1])],
+      [
+        REQUIRED_RELATIONS.map((relation) => relation.split('.')[1]),
+        JSON.stringify(privilegeRequirements),
+      ],
     )
     if (grantOptionResult.rows[0]?.excessive === true) missing.push('runtime:GRANT_OPTION')
+    if (grantOptionResult.rows[0]?.unexpected_table_acl === true) missing.push('runtime:TABLE_ACL')
+    if (grantOptionResult.rows[0]?.unexpected_column_acl === true) missing.push('runtime:COLUMN_ACL')
     if (grantOptionResult.rows[0]?.direct_session_acl === true) missing.push('runtime:DIRECT_SESSION_ACL')
 
     const sourceResult = await client.query(
@@ -480,6 +519,7 @@ function createWorkforceScheduleRepository(client) {
                    and has_table_privilege(target.proowner, 'public.worker', 'SELECT')
                 when required.function_signature = 'public.workforce_schedule_actor_is_active(text)'
                   then has_table_privilege(target.proowner, 'public.organization_member', 'SELECT')
+                   and has_table_privilege(target.proowner, 'public.worker', 'SELECT')
                 when required.function_signature = 'public.workforce_schedule_read_active_workers(text)'
                   then has_table_privilege(target.proowner, 'public.worker', 'SELECT')
                 when required.function_signature = 'public.workforce_schedule_read_active_objects(text)'
