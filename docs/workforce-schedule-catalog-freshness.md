@@ -25,17 +25,24 @@ można jej użyć w nowej zmianie, nowym przypisaniu, jako domyślnej lokalizacj
 jako celu przeciągania. Backend pozostaje ostateczną bramką i odrzuca zapis
 odwołujący się do nieaktywnego snapshotu.
 
-## Synchronizacja ręczna
+## Synchronizacja wyłącznie świadoma
 
 Ręczne polecenie `SYNC_CATALOGS` jest dostępne wyłącznie dla `OWNER` i `ADMIN` i
 pozostaje jedną atomową transakcją. Równoległe wywołania tej samej organizacji
 współdzielą operację w toku. Kolejne świadome kliknięcie po sukcesie otrzymuje
 nowy klucz idempotencji.
 
-Pusty odczyt źródłowy nie może automatycznie zdezaktywować istniejącego,
-niepustego aktywnego snapshotu. Taki przypadek kończy się kontrolowanym błędem i
-wymaga osobnego przyszłego kontraktu, jeżeli masowe wyzerowanie katalogu będzie
-rzeczywiście potrzebne.
+Zwykłe wejście do Grafiku, zmiana zakresu dat i odświeżenie widoku są operacjami
+tylko do odczytu. Nie uruchamiają `SYNC_CATALOGS`. Wyjątkiem jest świadome
+pierwsze uruchomienie przez administratora: przycisk `Uruchom Grafik` jawnie
+tworzy konfigurację i wykonuje pierwszy odczyt katalogów.
+
+Synchronizacja nie może automatycznie zdezaktywować żadnego istniejącego,
+aktywnego snapshotu. Dotyczy to zarówno pustego, jak i częściowego odczytu
+źródłowego. Już jedna brakująca osoba lub jeden brakujący obiekt zatrzymuje całą
+transakcję przed pierwszym zapisem. Bezpieczna dezaktywacja wymaga osobnego,
+przyszłego kontraktu `preview + confirm`; nie wolno jej wywnioskować z braku
+rekordu w pojedynczym odczycie.
 
 Sukces zwraca kompaktowe potwierdzenie:
 

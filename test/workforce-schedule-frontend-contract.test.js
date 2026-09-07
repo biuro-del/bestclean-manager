@@ -109,7 +109,7 @@ test("konfiguracja i zapis ignorują wyniki starej sesji", async () => {
   assert.ok(configureStart >= 0 && runWriteStart > configureStart && saveShiftStart > runWriteStart)
   assert.match(configureSource, /const operationContext = asyncGuard\.beginBusy\(\)/)
   assert.match(configureSource, /const response = await runIdempotent[\s\S]+if \(!asyncGuard\.isCurrent\(operationContext\)\) return false/)
-  assert.match(configureSource, /state\.setupRequired = false[\s\S]+const refreshed = await refresh\(\{ forceRefresh: true \}\)[\s\S]+if \(!asyncGuard\.isCurrent\(operationContext\)\) return false/)
+  assert.match(configureSource, /state\.setupRequired = false[\s\S]+const refreshed = await refresh\(\{ forceRefresh: true, syncCatalogs: true \}\)[\s\S]+if \(!asyncGuard\.isCurrent\(operationContext\)\) return false/)
   assert.match(configureSource, /asyncGuard\.releaseBusy\(operationContext\)/)
   assert.doesNotMatch(configureSource, /syncWorkforceScheduleCatalogs|catalogSyncGate\.run/)
 

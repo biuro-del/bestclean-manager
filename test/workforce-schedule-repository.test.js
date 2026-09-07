@@ -4,9 +4,12 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const crypto = require('node:crypto')
 const {
   FORBIDDEN_PRIVILEGES,
   REQUIRED_COLUMNS,
+  REQUIRED_FUNCTION_BODY_HASHES,
+  REQUIRED_FUNCTION_RESULTS,
   REQUIRED_FUNCTIONS,
   REQUIRED_PRIVILEGES,
   REQUIRED_RELATIONS,
@@ -82,9 +85,25 @@ test('repozytorium zna wyłącznie własny schemat rdzenia Grafiku', () => {
     'public.workforce_schedule_lock_object_sources(text,text[])',
   ])
   assert.deepEqual(REQUIRED_FUNCTIONS, [...SESSION_FUNCTIONS, ...RUNTIME_FUNCTIONS])
+  assert.deepEqual(Object.keys(REQUIRED_FUNCTION_BODY_HASHES), REQUIRED_FUNCTIONS)
+  assert.deepEqual(Object.keys(REQUIRED_FUNCTION_RESULTS), REQUIRED_FUNCTIONS)
   assert.equal(WORKFORCE_SCHEDULE_SESSION_ROLE, 'workforce_schedule_session')
   assert.equal(WORKFORCE_SCHEDULE_DB_ROLE, 'workforce_schedule_app')
   assert.equal(WORKFORCE_SCHEDULE_OWNER_ROLE, 'workforce_schedule_owner')
+})
+
+test('fingerprinty funkcji SECURITY DEFINER odpowiadają dokładnym treściom migracji', () => {
+  for (const signature of REQUIRED_FUNCTIONS) {
+    const functionName = signature.match(/\.([a-z0-9_]+)\(/i)?.[1]
+    assert.ok(functionName, `Brak nazwy funkcji w sygnaturze ${signature}`)
+    const definition = migrationSource.match(new RegExp(
+      `create function public\\.${functionName}\\([\\s\\S]*?\\)\\s*returns[\\s\\S]*?as \\$function\\$([\\s\\S]*?)\\$function\\$;`,
+      'i',
+    ))
+    assert.ok(definition, `Brak definicji ${signature} w migracji`)
+    const bodyHash = crypto.createHash('md5').update(definition[1], 'utf8').digest('hex')
+    assert.equal(bodyHash, REQUIRED_FUNCTION_BODY_HASHES[signature], signature)
+  }
 })
 
 test('mapowanie katalogów zachowuje stabilne ID i nie ujawnia loginu', () => {
@@ -301,6 +320,9 @@ function createSchemaReadyClient({
   policyReady = true,
   noUserTriggers = true,
   functionAllowlistReady = true,
+  functionDefinitionReady = true,
+  functionBodyStorageReady = true,
+  functionResultReady = true,
   functionTraitsReady = true,
   exactSessionRoleGraph = true,
   exactSessionSetGraph = true,
@@ -402,9 +424,11 @@ function createSchemaReadyClient({
           }],
         }
       }
-      if (/from unnest\(\$1::text\[\]\) as required\(function_signature\)/.test(sql)) {
+      if (/from unnest\(\$1::text\[\], \$4::text\[\], \$5::text\[\]\)/.test(sql)) {
         assert.equal(params[1], WORKFORCE_SCHEDULE_OWNER_ROLE)
         assert.deepEqual(params[2], SESSION_FUNCTIONS)
+        assert.deepEqual(params[3], REQUIRED_FUNCTIONS.map((signature) => REQUIRED_FUNCTION_BODY_HASHES[signature]))
+        assert.deepEqual(params[4], REQUIRED_FUNCTIONS.map((signature) => REQUIRED_FUNCTION_RESULTS[signature]))
         return {
           rows: params[0].map((functionSignature) => ({
             function_signature: functionSignature,
@@ -414,6 +438,9 @@ function createSchemaReadyClient({
             fixed_search_path: true,
             safe_function_kind: functionTraitsReady,
             expected_language: functionTraitsReady,
+            expected_body_storage: functionBodyStorageReady,
+            expected_body: functionDefinitionReady,
+            expected_result: functionResultReady,
             expected_volatility: functionTraitsReady,
             execute_ready: true,
             unexpected_execute: unexpectedFunctionExecute,
@@ -496,6 +523,33 @@ test('schemaReady blokuje drift cech funkcji SECURITY DEFINER', async () => {
   assert.ok(result.missing.some((item) => item.endsWith(':FUNCTION_KIND')))
   assert.ok(result.missing.some((item) => item.endsWith(':LANGUAGE')))
   assert.ok(result.missing.some((item) => item.endsWith(':VOLATILITY')))
+})
+
+test('schemaReady blokuje drift treści funkcji SECURITY DEFINER', async () => {
+  const repository = createWorkforceScheduleRepository(createSchemaReadyClient({
+    functionDefinitionReady: false,
+  }))
+  const result = await repository.schemaReady()
+  assert.equal(result.ready, false)
+  assert.ok(result.missing.every((item) => item.endsWith(':DEFINITION')))
+})
+
+test('schemaReady blokuje zmianę sposobu przechowywania ciała funkcji SECURITY DEFINER', async () => {
+  const repository = createWorkforceScheduleRepository(createSchemaReadyClient({
+    functionBodyStorageReady: false,
+  }))
+  const result = await repository.schemaReady()
+  assert.equal(result.ready, false)
+  assert.ok(result.missing.every((item) => item.endsWith(':SQL_BODY_STORAGE')))
+})
+
+test('schemaReady blokuje drift kontraktu zwracanego przez funkcję SECURITY DEFINER', async () => {
+  const repository = createWorkforceScheduleRepository(createSchemaReadyClient({
+    functionResultReady: false,
+  }))
+  const result = await repository.schemaReady()
+  assert.equal(result.ready, false)
+  assert.ok(result.missing.every((item) => item.endsWith(':RESULT')))
 })
 
 test('schemaReady blokuje dodatkowe krawedzie grafu SET ROLE', async () => {
@@ -728,10 +782,8 @@ test('synchronizacja zwraca wyłącznie licznikowy diff bez danych katalogowych'
       if (/select \* from public\.workforce_schedule_person/i.test(sql)) {
         return { rows: [
           { person_id: 'person-1', source_worker_id_normalized: 'w001', source_worker_login: 'old-login', source_auth_uid: 'old-uid', display_name: 'Stara nazwa', initials: 'SN', role_snapshot: 'WORKER', status: 'ACTIVE' },
-          { person_id: 'person-3', source_worker_id_normalized: 'w003', display_name: 'Do wyłączenia', status: 'ACTIVE' },
         ] }
       }
-      if (/select distinct p\.person_id, h\.shift_id/i.test(sql)) return { rows: [] }
       if (/from public\.workforce_schedule_read_active_objects/i.test(sql)) {
         return { rows: [
           { source_object_id: 'object-1', display_name: 'Nowa nazwa obiektu' },
@@ -741,10 +793,8 @@ test('synchronizacja zwraca wyłącznie licznikowy diff bez danych katalogowych'
       if (/select \* from public\.workforce_schedule_location/i.test(sql)) {
         return { rows: [
           { location_id: 'location-1', source_object_id: 'object-1', name: 'Stara nazwa obiektu', short_name: 'Stara nazwa obiektu', color: '#2563eb', soft_color: '#dbeafe', status: 'ACTIVE' },
-          { location_id: 'location-3', source_object_id: 'object-3', name: 'Do wyłączenia', short_name: 'Do wyłączenia', color: '#0f766e', soft_color: '#ccfbf1', status: 'ACTIVE' },
         ] }
       }
-      if (/select distinct l\.location_id, h\.shift_id/i.test(sql)) return { rows: [] }
       if (/select transaction_timestamp\(\) as synchronized_at/i.test(sql)) {
         return { rows: [{ synchronized_at: '2026-09-07T09:30:00.000Z' }] }
       }
@@ -762,20 +812,25 @@ test('synchronizacja zwraca wyłącznie licznikowy diff bez danych katalogowych'
 
   assert.deepEqual(result, {
     synchronizedAt: '2026-09-07T09:30:00.000Z',
-    people: { active: 2, created: 1, updated: 1, deactivated: 1 },
-    locations: { active: 2, created: 1, updated: 1, deactivated: 1 },
+    people: { active: 2, created: 1, updated: 1, deactivated: 0 },
+    locations: { active: 2, created: 1, updated: 1, deactivated: 0 },
   })
   assert.doesNotMatch(JSON.stringify(result), /login|uid|Nowa nazwa|object-|person-/i)
 })
 
-test('pusty odczyt źródłowy nie dezaktywuje niepustego aktywnego katalogu', async () => {
+test('niepełny odczyt źródłowy nie dezaktywuje aktywnego katalogu ani nie wykonuje zapisu', async () => {
   const calls = []
   const peopleRepository = createWorkforceScheduleRepository({
     async query(sql) {
       calls.push(sql)
-      if (/from public\.workforce_schedule_read_active_workers/i.test(sql)) return { rows: [] }
+      if (/from public\.workforce_schedule_read_active_workers/i.test(sql)) {
+        return { rows: [{ source_worker_id_normalized: 'w001', display_name: 'Osoba 1' }] }
+      }
       if (/select \* from public\.workforce_schedule_person/i.test(sql)) {
-        return { rows: [{ person_id: 'person-1', source_worker_id_normalized: 'w001', status: 'ACTIVE' }] }
+        return { rows: [
+          { person_id: 'person-1', source_worker_id_normalized: 'w001', status: 'ACTIVE' },
+          { person_id: 'person-2', source_worker_id_normalized: 'w002', status: 'ACTIVE' },
+        ] }
       }
       return { rows: [] }
     },
@@ -788,21 +843,30 @@ test('pusty odczyt źródłowy nie dezaktywuje niepustego aktywnego katalogu', a
       createPersonId: () => 'unused-person',
       createLocationId: () => 'unused-location',
     }),
-    (caught) => caught.code === 'WORKFORCE_SCHEDULE_ROSTER_SOURCE_EMPTY'
-      && caught.details?.activeCount === 1,
+    (caught) => caught.code === 'WORKFORCE_SCHEDULE_ROSTER_DEACTIVATION_BLOCKED'
+      && caught.details?.activeCount === 2
+      && caught.details?.deactivationCount === 1
+      && caught.details?.sourceCount === 1,
   )
-  assert.equal(calls.some((sql) => /set status = 'INACTIVE'/i.test(sql)), false)
+  assert.equal(calls.some((sql) => /insert into public\.workforce_schedule_person|update public\.workforce_schedule_person/i.test(sql)), false)
 
   const locationCalls = []
   const locationRepository = createWorkforceScheduleRepository({
     async query(sql) {
       locationCalls.push(sql)
-      if (/from public\.workforce_schedule_read_active_workers/i.test(sql)) return { rows: [] }
+      if (/from public\.workforce_schedule_read_active_workers/i.test(sql)) {
+        return { rows: [{ source_worker_id_normalized: 'w003', display_name: 'Nowa osoba' }] }
+      }
       if (/select \* from public\.workforce_schedule_person/i.test(sql)) return { rows: [] }
       if (/select distinct p\.person_id, h\.shift_id/i.test(sql)) return { rows: [] }
-      if (/from public\.workforce_schedule_read_active_objects/i.test(sql)) return { rows: [] }
+      if (/from public\.workforce_schedule_read_active_objects/i.test(sql)) {
+        return { rows: [{ source_object_id: 'object-1', display_name: 'Obiekt 1' }] }
+      }
       if (/select \* from public\.workforce_schedule_location/i.test(sql)) {
-        return { rows: [{ location_id: 'location-1', source_object_id: 'object-1', status: 'ACTIVE' }] }
+        return { rows: [
+          { location_id: 'location-1', source_object_id: 'object-1', status: 'ACTIVE' },
+          { location_id: 'location-2', source_object_id: 'object-2', status: 'ACTIVE' },
+        ] }
       }
       return { rows: [] }
     },
@@ -815,10 +879,15 @@ test('pusty odczyt źródłowy nie dezaktywuje niepustego aktywnego katalogu', a
       createPersonId: () => 'unused-person',
       createLocationId: () => 'unused-location',
     }),
-    (caught) => caught.code === 'WORKFORCE_SCHEDULE_OBJECT_SOURCE_EMPTY'
-      && caught.details?.activeCount === 1,
+    (caught) => caught.code === 'WORKFORCE_SCHEDULE_OBJECT_DEACTIVATION_BLOCKED'
+      && caught.details?.activeCount === 2
+      && caught.details?.deactivationCount === 1
+      && caught.details?.sourceCount === 1,
   )
-  assert.equal(locationCalls.some((sql) => /update public\.workforce_schedule_location[\s\S]*set status = 'INACTIVE'/i.test(sql)), false)
+  assert.equal(locationCalls.some((sql) => (
+    /insert into public\.workforce_schedule_person|update public\.workforce_schedule_person/i.test(sql)
+    || /insert into public\.workforce_schedule_location|update public\.workforce_schedule_location/i.test(sql)
+  )), false)
 })
 
 test('nieaktywne snapshoty pozostają niedostępne dla nowych przypisań', () => {

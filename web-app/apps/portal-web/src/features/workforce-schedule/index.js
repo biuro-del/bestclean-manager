@@ -286,7 +286,10 @@ export function createWorkforceScheduleFeature(ctx = {}) {
         return true
       }
 
-      const shouldSyncCatalogs = options.syncCatalogs !== false
+      // A regular view refresh must stay read-only. Catalog synchronization is
+      // an explicit administrator action because it can change the module's
+      // reference snapshots.
+      const shouldSyncCatalogs = options.syncCatalogs === true
         && !catalogSyncGate.isComplete(orgId)
         && canConfigure()
       if (shouldSyncCatalogs) {
@@ -444,7 +447,7 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       state.setupRequired = false
       state.settings = response?.settings || state.settings
       notify('Grafik został uruchomiony.')
-      const refreshed = await refresh({ forceRefresh: true })
+      const refreshed = await refresh({ forceRefresh: true, syncCatalogs: true })
       if (!asyncGuard.isCurrent(operationContext)) return false
       return refreshed
     } catch (error) {

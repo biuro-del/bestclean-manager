@@ -86,6 +86,11 @@ projektem i wymaga nowego kontraktu oraz jawnego włączenia efektu.
 - Token Firebase jest weryfikowany przez backend przed wywołaniem funkcji
   autoryzacyjnej. Funkcja bazy potwierdza wyłącznie dokładną parę `orgId + uid`;
   sama baza nie zastępuje kryptograficznej weryfikacji tokenu Firebase.
+- Readiness przypina sześć funkcji `SECURITY DEFINER` do dokładnie
+  zrecenzowanych ciał z migracji przez `md5(pg_proc.prosrc)`. Osobno sprawdza
+  język, typ funkcji, volatility, ownera, `search_path`, sposób przechowywania
+  ciała, kontrakt wyniku oraz ACL. Zmiana treści lub sygnatury wyniku zatrzymuje
+  Grafik przed wykonaniem operacji.
 - Grafik ma osobny pool i login `workforce_schedule_session`, zasilany wyłącznie
   przez `WORKFORCE_SCHEDULE_DB_USER` oraz `WORKFORCE_SCHEDULE_DB_PASS`. Nie
   korzysta z `DB_USER`, `DB_PASS` ani członkostwa `portal_app`.

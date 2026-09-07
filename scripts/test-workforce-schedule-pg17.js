@@ -1210,6 +1210,22 @@ async function assertSchemaReadyFailsClosed(client, ownerUser) {
     item.endsWith(':FUNCTION_ACL') || item.endsWith(':UNEXPECTED_EXECUTE')
   )))
 
+  const functionBodyDrift = await withTemporaryOwnerMutation(
+    client,
+    `create or replace function public.workforce_schedule_actor_is_active(p_org_id text)
+       returns boolean
+       language sql
+       stable
+       security definer
+       set search_path = pg_catalog
+       as $function$ select false $function$`,
+    (repository) => repository.schemaReady(),
+  )
+  assert.equal(functionBodyDrift.ready, false)
+  assert.ok(functionBodyDrift.missing.includes(
+    'public.workforce_schedule_actor_is_active(text):DEFINITION',
+  ))
+
   const sessionRoleGraphDrift = await withTemporaryOwnerMutation(
     client,
     `create role workforce_schedule_readiness_session_extra

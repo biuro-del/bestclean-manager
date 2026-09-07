@@ -146,4 +146,6 @@ rollback migracji musi pozostawić zero tabel i funkcji Grafiku.
   historii append-only;
 - odrzucenie polityki RLS o oczekiwanej nazwie i frazach, ale osłabionej przez
   warunek `OR true`;
+- odrzucenie funkcji `SECURITY DEFINER`, której ciało zostało podmienione przy
+  zachowaniu nazwy, argumentów, ownera, języka, volatility i `search_path`;
 - odrzucenie drugiego zastosowania migracji.

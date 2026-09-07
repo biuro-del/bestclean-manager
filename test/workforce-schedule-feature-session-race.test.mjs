@@ -260,6 +260,8 @@ test('reset sesji podczas configure ignoruje stary wynik i nie zwalnia blokady n
 
   assert.match(f.notices[0].message, /^Grafik .+ uruchomiony\.$/)
   assert.equal(f.lastRender().props.snapshot.users[0].id, 'person-org-a')
+  assert.equal(f.syncCalls.length, 1)
+  assert.equal(f.syncCalls[0].orgId, 'org-a')
 })
 
 test('zmiana organizacji podczas runWrite odrzuca stary wynik i nie zwalnia nowego zapisu', async (t) => {
@@ -320,10 +322,11 @@ test('zmiana organizacji podczas runWrite odrzuca stary wynik i nie zwalnia nowe
 
 test('OWNER może świadomie wymusić kolejne synchronizacje z nowym kluczem, a COORDINATOR pozostaje read-only', async (t) => {
   const f = await createFixture(t)
-  await f.feature.refresh({ syncCatalogs: false })
+  await f.feature.refresh()
 
   assert.equal(f.lastRender().props.catalogRefreshEnabled, true)
   assert.equal(f.lastRender().props.editingEnabled, true)
+  assert.equal(f.syncCalls.length, 0)
   await f.lastRender().props.onCatalogRefresh()
   await f.lastRender().props.onCatalogRefresh()
 

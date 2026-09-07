@@ -50,6 +50,27 @@ const RUNTIME_FUNCTIONS = Object.freeze([
 
 const REQUIRED_FUNCTIONS = Object.freeze([...SESSION_FUNCTIONS, ...RUNTIME_FUNCTIONS])
 
+// PostgreSQL stores SQL function bodies in pg_proc.prosrc. These fingerprints
+// pin the exact reviewed bodies from the additive migration. Metadata and ACL
+// checks below remain separate, so a matching body alone is never sufficient.
+const REQUIRED_FUNCTION_BODY_HASHES = Object.freeze({
+  'public.workforce_schedule_authorize_session(text,text)': '3bba22c35e0482a74db7247fe6e03600',
+  'public.workforce_schedule_actor_is_active(text)': '7f09b196e5d582cc5f16acf95f027ceb',
+  'public.workforce_schedule_read_active_workers(text)': '77cfb9e6db18ec091c45460373018376',
+  'public.workforce_schedule_read_active_objects(text)': 'f951f3d9209c0b51145c22ae67fbcc05',
+  'public.workforce_schedule_lock_worker_sources(text,text[])': '3c8cc5501edefbb451b8efc5993af6f7',
+  'public.workforce_schedule_lock_object_sources(text,text[])': '95cbccda4e8620a3c9f0161ebd39fca7',
+})
+
+const REQUIRED_FUNCTION_RESULTS = Object.freeze({
+  'public.workforce_schedule_authorize_session(text,text)': 'TABLE(role text, status text, worker_id text, organization_kind text, organization_status text, onboarding_status text, organization_deleted_at text, plan_code text, subscription_status text, trial_ends_at text, current_period_ends_at text, active_worker_id text)',
+  'public.workforce_schedule_actor_is_active(text)': 'boolean',
+  'public.workforce_schedule_read_active_workers(text)': 'TABLE(source_worker_id_normalized text, source_worker_login text, source_auth_uid text, display_name text, role_snapshot text)',
+  'public.workforce_schedule_read_active_objects(text)': 'TABLE(source_object_id text, display_name text)',
+  'public.workforce_schedule_lock_worker_sources(text,text[])': 'TABLE(source_worker_id_normalized text, active boolean, status text)',
+  'public.workforce_schedule_lock_object_sources(text,text[])': 'TABLE(source_object_id text, active boolean, status text)',
+})
+
 const WORKFORCE_SCHEDULE_DB_ROLE = 'workforce_schedule_app'
 const WORKFORCE_SCHEDULE_OWNER_ROLE = 'workforce_schedule_owner'
 const WORKFORCE_SCHEDULE_SESSION_ROLE = 'workforce_schedule_session'
@@ -498,6 +519,9 @@ function createWorkforceScheduleRepository(client) {
                coalesce(target.proconfig = array['search_path=pg_catalog']::text[], false) as fixed_search_path,
                coalesce(target.prokind = 'f' and not target.proleakproof, false) as safe_function_kind,
                coalesce(target.prolang = (select oid from pg_language where lanname = 'sql'), false) as expected_language,
+               coalesce(target.prosqlbody is null, false) as expected_body_storage,
+               coalesce(pg_catalog.md5(target.prosrc) = required.body_hash, false) as expected_body,
+               coalesce(pg_catalog.pg_get_function_result(target.oid) = required.result_signature, false) as expected_result,
                coalesce(case
                  when required.function_signature = any(array[
                    'public.workforce_schedule_authorize_session(text,text)',
@@ -569,9 +593,16 @@ function createWorkforceScheduleRepository(client) {
                       and (privilege.privilege_type <> 'EXECUTE' or privilege.is_grantable)
                     )
               ) end as exact_acl
-         from unnest($1::text[]) as required(function_signature)
+         from unnest($1::text[], $4::text[], $5::text[])
+              as required(function_signature, body_hash, result_signature)
          left join pg_proc target on target.oid = to_regprocedure(required.function_signature)`,
-      [REQUIRED_FUNCTIONS, WORKFORCE_SCHEDULE_OWNER_ROLE, SESSION_FUNCTIONS],
+      [
+        REQUIRED_FUNCTIONS,
+        WORKFORCE_SCHEDULE_OWNER_ROLE,
+        SESSION_FUNCTIONS,
+        REQUIRED_FUNCTIONS.map((signature) => REQUIRED_FUNCTION_BODY_HASHES[signature]),
+        REQUIRED_FUNCTIONS.map((signature) => REQUIRED_FUNCTION_RESULTS[signature]),
+      ],
     )
     for (const row of functionResult.rows) {
       const signature = text(row.function_signature)
@@ -582,6 +613,9 @@ function createWorkforceScheduleRepository(client) {
         if (row.fixed_search_path !== true) missing.push(`${signature}:SEARCH_PATH`)
         if (row.safe_function_kind !== true) missing.push(`${signature}:FUNCTION_KIND`)
         if (row.expected_language !== true) missing.push(`${signature}:LANGUAGE`)
+        if (row.expected_body_storage !== true) missing.push(`${signature}:SQL_BODY_STORAGE`)
+        if (row.expected_body !== true) missing.push(`${signature}:DEFINITION`)
+        if (row.expected_result !== true) missing.push(`${signature}:RESULT`)
         if (row.expected_volatility !== true) missing.push(`${signature}:VOLATILITY`)
         if (row.execute_ready !== true) missing.push(`${signature}:EXECUTE`)
         if (row.unexpected_execute !== false) missing.push(`${signature}:UNEXPECTED_EXECUTE`)
@@ -1081,77 +1115,7 @@ function createWorkforceScheduleRepository(client) {
     return result.rows
   }
 
-  async function assertNoInactivePeopleInFuture({ orgId, activePersonIds }) {
-    const affected = await client.query(
-      `select distinct p.person_id, h.shift_id, r.business_date
-         from public.workforce_schedule_person p
-         join public.workforce_schedule_shift_revision_assignee a
-           on a.org_id = p.org_id and a.person_id = p.person_id
-         join public.workforce_schedule_shift h
-           on h.org_id = a.org_id and h.shift_id = a.shift_id
-          and a.revision_no in (h.current_revision_no, h.published_revision_no)
-         join public.workforce_schedule_shift_revision r
-           on r.org_id = a.org_id and r.shift_id = a.shift_id and r.revision_no = a.revision_no
-         join public.workforce_schedule_settings settings on settings.org_id = p.org_id
-        where p.org_id = $1::text and p.status = 'ACTIVE'
-          and not (p.person_id = any($2::text[]))
-          and h.lifecycle_status <> 'ARCHIVED' and r.is_deleted is false
-          and r.business_date >= (now() at time zone settings.time_zone)::date
-        order by p.person_id asc, r.business_date asc, h.shift_id asc limit 51`,
-      [orgId, activePersonIds],
-    )
-    if (affected.rows.length) {
-      throw error(
-        409,
-        'WORKFORCE_SCHEDULE_ROSTER_IN_USE',
-        'Nie można wyłączyć osoby używanej w bieżącym lub przyszłym Grafiku.',
-        {
-          affected: affected.rows.slice(0, 50).map((row) => ({
-            personId: text(row.person_id),
-            shiftId: text(row.shift_id),
-            date: ymd(row.business_date),
-          })),
-          hasMore: affected.rows.length > 50,
-        },
-      )
-    }
-  }
-
-  async function assertNoInactiveLocationsInFuture({ orgId, activeLocationIds }) {
-    const affected = await client.query(
-      `select distinct l.location_id, h.shift_id, r.business_date
-         from public.workforce_schedule_location l
-         join public.workforce_schedule_shift_revision r
-           on r.org_id = l.org_id and r.location_id = l.location_id
-         join public.workforce_schedule_shift h
-           on h.org_id = r.org_id and h.shift_id = r.shift_id
-          and r.revision_no in (h.current_revision_no, h.published_revision_no)
-         join public.workforce_schedule_settings settings on settings.org_id = l.org_id
-        where l.org_id = $1::text and l.status = 'ACTIVE'
-          and not (l.location_id = any($2::text[]))
-          and h.lifecycle_status <> 'ARCHIVED' and r.is_deleted is false
-          and r.business_date >= (now() at time zone settings.time_zone)::date
-        order by l.location_id asc, r.business_date asc, h.shift_id asc limit 51`,
-      [orgId, activeLocationIds],
-    )
-    if (affected.rows.length) {
-      throw error(
-        409,
-        'WORKFORCE_SCHEDULE_OBJECT_IN_USE',
-        'Nie można wyłączyć obiektu używanego w bieżącym lub przyszłym Grafiku.',
-        {
-          affected: affected.rows.slice(0, 50).map((row) => ({
-            locationId: text(row.location_id),
-            shiftId: text(row.shift_id),
-            date: ymd(row.business_date),
-          })),
-          hasMore: affected.rows.length > 50,
-        },
-      )
-    }
-  }
-
-  async function syncRoster({ orgId, createPersonId }) {
+  async function prepareRosterSync({ orgId }) {
     await client.query(`select pg_advisory_xact_lock(hashtextextended('workforce-schedule-roster:' || $1::text, 0))`, [orgId])
     const [sourceRows, existingResult] = await Promise.all([
       readActiveRoster(orgId),
@@ -1161,9 +1125,6 @@ function createWorkforceScheduleRepository(client) {
       existingResult.rows.map((row) => [text(row.source_worker_id_normalized), row]),
     )
     const sourceWorkerIds = new Set()
-    const activePersonIds = []
-    let created = 0
-    let updated = 0
 
     for (const source of sourceRows) {
       const sourceWorkerId = text(source.source_worker_id_normalized)
@@ -1178,14 +1139,26 @@ function createWorkforceScheduleRepository(client) {
       sourceWorkerIds.add(sourceWorkerId)
     }
     const activeExisting = existingResult.rows.filter((row) => text(row.status).toUpperCase() === 'ACTIVE')
-    if (!sourceRows.length && activeExisting.length) {
+    const deactivated = activeExisting.filter((row) => (
+      !sourceWorkerIds.has(text(row.source_worker_id_normalized))
+    )).length
+    if (deactivated > 0) {
       throw error(
         409,
-        'WORKFORCE_SCHEDULE_ROSTER_SOURCE_EMPTY',
-        'Pusty odczyt źródła nie może wyłączyć aktywnego katalogu pracowników.',
-        { activeCount: activeExisting.length },
+        'WORKFORCE_SCHEDULE_ROSTER_DEACTIVATION_BLOCKED',
+        'Synchronizacja nie może automatycznie wyłączyć pracowników. Sprawdź kompletność katalogu źródłowego.',
+        { activeCount: activeExisting.length, deactivationCount: deactivated, sourceCount: sourceRows.length },
       )
     }
+
+    return { sourceRows, existingByWorkerId, deactivated }
+  }
+
+  async function applyRosterSync({ orgId, createPersonId, plan }) {
+    const { sourceRows, existingByWorkerId, deactivated } = plan
+    const activePersonIds = []
+    let created = 0
+    let updated = 0
 
     for (const source of sourceRows) {
       const sourceWorkerId = text(source.source_worker_id_normalized)
@@ -1248,17 +1221,6 @@ function createWorkforceScheduleRepository(client) {
       existingByWorkerId.set(sourceWorkerId, { person_id: personId, source_worker_id_normalized: sourceWorkerId })
     }
 
-    await assertNoInactivePeopleInFuture({ orgId, activePersonIds })
-    await client.query(
-      `update public.workforce_schedule_person
-          set status = 'INACTIVE', version = version + 1, synced_at = now(), updated_at = now()
-        where org_id = $1::text and status = 'ACTIVE'
-          and not (person_id = any($2::text[]))`,
-      [orgId, activePersonIds],
-    )
-    const deactivated = activeExisting.filter((row) => (
-      !sourceWorkerIds.has(text(row.source_worker_id_normalized))
-    )).length
     return {
       active: activePersonIds.length,
       created,
@@ -1267,17 +1229,14 @@ function createWorkforceScheduleRepository(client) {
     }
   }
 
-  async function syncLocations({ orgId, actorUid, createLocationId }) {
+  async function prepareLocationSync({ orgId }) {
     await client.query(`select pg_advisory_xact_lock(hashtextextended('workforce-schedule-objects:' || $1::text, 0))`, [orgId])
     const [sourceRows, existingResult] = await Promise.all([
       readActiveObjects(orgId),
       client.query(`select * from public.workforce_schedule_location where org_id = $1::text for update`, [orgId]),
     ])
     const existingBySource = new Map(existingResult.rows.map((row) => [text(row.source_object_id), row]))
-    const activeLocationIds = []
     const seenSourceIds = new Set()
-    let created = 0
-    let updated = 0
 
     for (const source of sourceRows) {
       const sourceObjectId = text(source.source_object_id)
@@ -1287,14 +1246,26 @@ function createWorkforceScheduleRepository(client) {
       seenSourceIds.add(sourceObjectId)
     }
     const activeExisting = existingResult.rows.filter((row) => text(row.status).toUpperCase() === 'ACTIVE')
-    if (!sourceRows.length && activeExisting.length) {
+    const deactivated = activeExisting.filter((row) => (
+      !seenSourceIds.has(text(row.source_object_id))
+    )).length
+    if (deactivated > 0) {
       throw error(
         409,
-        'WORKFORCE_SCHEDULE_OBJECT_SOURCE_EMPTY',
-        'Pusty odczyt źródła nie może wyłączyć aktywnego katalogu obiektów.',
-        { activeCount: activeExisting.length },
+        'WORKFORCE_SCHEDULE_OBJECT_DEACTIVATION_BLOCKED',
+        'Synchronizacja nie może automatycznie wyłączyć obiektów. Sprawdź kompletność katalogu źródłowego.',
+        { activeCount: activeExisting.length, deactivationCount: deactivated, sourceCount: sourceRows.length },
       )
     }
+
+    return { sourceRows, existingBySource, deactivated }
+  }
+
+  async function applyLocationSync({ orgId, actorUid, createLocationId, plan }) {
+    const { sourceRows, existingBySource, deactivated } = plan
+    const activeLocationIds = []
+    let created = 0
+    let updated = 0
 
     for (const source of sourceRows) {
       const sourceObjectId = text(source.source_object_id)
@@ -1334,17 +1305,6 @@ function createWorkforceScheduleRepository(client) {
       }
     }
 
-    await assertNoInactiveLocationsInFuture({ orgId, activeLocationIds })
-    await client.query(
-      `update public.workforce_schedule_location
-          set status = 'INACTIVE', version = version + 1, synced_at = now(), updated_at = now(), updated_by_uid = $3::text
-        where org_id = $1::text and status = 'ACTIVE'
-          and not (location_id = any($2::text[]))`,
-      [orgId, activeLocationIds, actorUid],
-    )
-    const deactivated = activeExisting.filter((row) => (
-      !seenSourceIds.has(text(row.source_object_id))
-    )).length
     return {
       active: activeLocationIds.length,
       created,
@@ -1354,8 +1314,13 @@ function createWorkforceScheduleRepository(client) {
   }
 
   async function syncCatalogs({ orgId, actorUid, createPersonId, createLocationId }) {
-    const people = await syncRoster({ orgId, createPersonId })
-    const locations = await syncLocations({ orgId, actorUid, createLocationId })
+    // Validate both source snapshots before any catalog write. A partial object
+    // read must not allow roster writes (or vice versa), even if a caller fails
+    // to provide the API transaction wrapper.
+    const rosterPlan = await prepareRosterSync({ orgId })
+    const locationPlan = await prepareLocationSync({ orgId })
+    const people = await applyRosterSync({ orgId, createPersonId, plan: rosterPlan })
+    const locations = await applyLocationSync({ orgId, actorUid, createLocationId, plan: locationPlan })
     const timestamp = await client.query('select transaction_timestamp() as synchronized_at')
     return {
       synchronizedAt: iso(timestamp.rows[0]?.synchronized_at),
@@ -1787,6 +1752,8 @@ function createWorkforceScheduleRepository(client) {
 module.exports = {
   FORBIDDEN_PRIVILEGES,
   REQUIRED_COLUMNS,
+  REQUIRED_FUNCTION_BODY_HASHES,
+  REQUIRED_FUNCTION_RESULTS,
   REQUIRED_FUNCTIONS,
   REQUIRED_PRIVILEGES,
   REQUIRED_RELATIONS,

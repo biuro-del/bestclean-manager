@@ -257,6 +257,8 @@ test('schemaReady jest testowane na celowo osłabionych uprawnieniach i każda p
   assert.match(harnessSource, /runtime:SESSION_SET_GRAPH/)
   assert.match(harnessSource, /runtime:APP_ROLE_GRAPH/)
   assert.match(harnessSource, /:FUNCTION_ACL'[\s\S]*?:UNEXPECTED_EXECUTE'/)
+  assert.match(harnessSource, /create or replace function public\.workforce_schedule_actor_is_active/i)
+  assert.match(harnessSource, /workforce_schedule_actor_is_active\(text\):DEFINITION/i)
   assert.match(harnessSource, /:OWNER_MEMBERSHIP/)
   assert.match(harnessSource, /:UPDATE:EXCESS/)
   assert.ok((harnessSource.match(/client\.query\('rollback'\)/g) || []).length >= 2)
