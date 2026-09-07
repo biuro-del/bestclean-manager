@@ -70,11 +70,12 @@ function useDialogA11y(ref, onClose) {
   }, [ref]);
 }
 
-function PortalDialog({ children, className = "", describedBy, labelledBy, onClose, side = false }) {
+function PortalDialog({ children, className = "", closeLocked = false, describedBy, labelledBy, onClose, side = false }) {
   const ref = useRef(null);
-  useDialogA11y(ref, onClose);
+  const requestClose = () => { if (!closeLocked) onClose?.(); };
+  useDialogA11y(ref, requestClose);
   return createPortal(
-    <div className={`tm-schedule-overlay ${side ? "is-side" : ""}`} onMouseDown={(event) => event.target === event.currentTarget && onClose()} role="presentation">
+    <div className={`tm-schedule-overlay ${side ? "is-side" : ""}`} onMouseDown={(event) => event.target === event.currentTarget && requestClose()} role="presentation">
       <section aria-describedby={describedBy} aria-labelledby={labelledBy} aria-modal="true" className={`tm-schedule-dialog ${className}`} ref={ref} role="dialog" tabIndex={-1}>
         {children}
       </section>
@@ -121,16 +122,16 @@ export function ShiftDrawer({ busy = false, deliveryDisabled = true, initialShif
   const save = (publishNow = false) => onSave({ ...form, publishNow });
 
   return (
-    <PortalDialog className="tm-schedule-shift-drawer" labelledBy={titleId} onClose={onClose} side>
+    <PortalDialog className="tm-schedule-shift-drawer" closeLocked={busy} labelledBy={titleId} onClose={onClose} side>
       <header className="tm-schedule-drawer-header">
-        <IconButton label="Zamknij edycję zmiany" onClick={onClose}><X size={21} /></IconButton>
+        <IconButton disabled={busy} label="Zamknij edycję zmiany" onClick={onClose}><X size={21} /></IconButton>
         <div>
           <p>{isNew ? "Nowa pozycja grafiku" : "Edycja zmiany"}</p>
           <h2 id={titleId}>{form.title || "Zmiana bez nazwy"}</h2>
         </div>
       </header>
       <nav aria-label="Sekcje zmiany" className="tm-schedule-drawer-tabs">
-        {[["details", "Szczegóły zmiany"], ["tasks", "Zadania"], ...(templatesEnabled ? [["templates", "Szablony"]] : []), ["activity", "Aktywność"]].map(([id, label]) => (
+        {[["details", "Szczegóły zmiany"], ["tasks", "Zadania"], ...(templatesEnabled ? [["templates", "Szablony"]] : [])].map(([id, label]) => (
           <button aria-current={tab === id ? "page" : undefined} className={tab === id ? "is-active" : ""} key={id} onClick={() => setTab(id)} type="button">{label}</button>
         ))}
       </nav>
@@ -160,15 +161,13 @@ export function ShiftDrawer({ busy = false, deliveryDisabled = true, initialShif
         {templatesEnabled && tab === "templates" && (
           <div className="tm-schedule-template-list"><div className="tm-schedule-section-heading"><Copy size={22} /><div><h3>Użyj szablonu</h3><p>Wypełnij najważniejsze pola jednym kliknięciem.</p></div></div>{templates.map((template) => <button key={template.id} onClick={() => { setForm({ ...form, title: template.name, startTime: template.startTime, endTime: template.endTime, breakMinutes: template.breakMinutes, locationId: template.locationId, requiredHeadcount: template.requiredHeadcount }); setTab("details"); }} type="button"><strong>{template.name}</strong><span>{template.startTime}–{template.endTime} · obsada {template.requiredHeadcount}</span></button>)}</div>
         )}
-        {tab === "activity" && (
-          <div className="tm-schedule-activity-log"><div className="tm-schedule-section-heading"><Info size={22} /><div><h3>Aktywność dla zmiany</h3><p>Historia operacji wewnętrznych.</p></div></div><ol><li><span />{isNew ? "Przygotowano nową zmianę" : "Wczytano istniejącą zmianę"}<small>Bieżąca sesja</small></li><li><span />Oczekuje na zapis<small>Teraz</small></li></ol></div>
-        )}
       </div>
       <footer className="tm-schedule-drawer-footer">
         {!isNew && <button className="tm-schedule-danger-button" disabled={busy} onClick={() => onDelete(initialShift.id)} type="button"><Trash size={18} /> Usuń</button>}
         <div>
-          <button className="tm-schedule-secondary-button" disabled={busy} onClick={() => save(false)} type="button"><FloppyDisk size={18} /> {busy ? "Zapisuję…" : "Zapisz jako szkic"}</button>
-          <button className="tm-schedule-primary-button" disabled={busy} onClick={() => save(deliveryDisabled ? false : true)} type="button"><PaperPlaneTilt size={18} /> {busy ? "Zapisuję…" : deliveryDisabled ? "Zapisz zmianę" : "Zapisz i opublikuj"}</button>
+          {deliveryDisabled
+            ? <button className="tm-schedule-primary-button" disabled={busy} onClick={() => save(false)} type="button"><FloppyDisk size={18} /> {busy ? "Zapisuję…" : "Zapisz szkic"}</button>
+            : <><button className="tm-schedule-secondary-button" disabled={busy} onClick={() => save(false)} type="button"><FloppyDisk size={18} /> {busy ? "Zapisuję…" : "Zapisz jako szkic"}</button><button className="tm-schedule-primary-button" disabled={busy} onClick={() => save(true)} type="button"><PaperPlaneTilt size={18} /> {busy ? "Zapisuję…" : "Zapisz i opublikuj"}</button></>}
         </div>
       </footer>
     </PortalDialog>
@@ -180,8 +179,8 @@ export function PublishDialog({ busy = false, deliveryDisabled = true, shifts, o
   const [notify, setNotify] = useState(!deliveryDisabled);
   const totals = useMemo(() => ({ minutes: shifts.reduce((sum, shift) => sum + getShiftMinutes(shift), 0), users: new Set(shifts.flatMap((shift) => shift.assigneeIds)).size }), [shifts]);
   return (
-    <PortalDialog className="tm-schedule-publish-dialog" labelledBy={titleId} onClose={onClose}>
-      <IconButton className="tm-schedule-dialog-close" label={deliveryDisabled ? "Zamknij zatwierdzanie" : "Zamknij publikowanie"} onClick={onClose}><X size={20} /></IconButton>
+    <PortalDialog className="tm-schedule-publish-dialog" closeLocked={busy} labelledBy={titleId} onClose={onClose}>
+      <IconButton className="tm-schedule-dialog-close" disabled={busy} label={deliveryDisabled ? "Zamknij zatwierdzanie" : "Zamknij publikowanie"} onClick={onClose}><X size={20} /></IconButton>
       <span className="tm-schedule-dialog-hero"><PaperPlaneTilt size={34} weight="duotone" /></span>
       <h2 id={titleId}>{deliveryDisabled ? "Zatwierdź zmiany" : "Publikuj zmiany"}</h2>
       <p>{periodLabel}</p>
@@ -220,7 +219,7 @@ export function CopyWeekDialog({ busy = false, onClose, onCopy, sourceLabel, tar
   };
 
   return (
-    <PortalDialog className="tm-schedule-copy-dialog" describedBy={descriptionId} labelledBy={titleId} onClose={close}>
+    <PortalDialog className="tm-schedule-copy-dialog" closeLocked={locked} describedBy={descriptionId} labelledBy={titleId} onClose={close}>
       <header className="tm-schedule-modal-header">
         <div><p>Grafik</p><h2 id={titleId}>Skopiuj tydzień</h2></div>
         <IconButton disabled={locked} label="Zamknij kopiowanie tygodnia" onClick={close}><X size={21} /></IconButton>
@@ -335,7 +334,7 @@ export function SettingsDialog({ busy = false, deliveryDisabled = true, initialS
   };
 
   return (
-    <PortalDialog className="tm-schedule-settings-dialog" labelledBy={titleId} onClose={close}>
+    <PortalDialog className="tm-schedule-settings-dialog" closeLocked={locked} labelledBy={titleId} onClose={close}>
       <header className="tm-schedule-modal-header">
         <div><p>Konfiguracja Grafiku</p><h2 id={titleId}>Ustawienia operacyjne</h2></div>
         <IconButton disabled={locked} label="Zamknij ustawienia" onClick={close}><X size={21} /></IconButton>

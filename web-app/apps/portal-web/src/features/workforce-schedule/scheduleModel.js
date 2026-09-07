@@ -17,6 +17,22 @@ export function getWeekDays(startIso) {
   return Array.from({ length: 7 }, (_, index) => addDays(startIso, index));
 }
 
+export function mondayFor(iso) {
+  const date = parseIsoDate(iso);
+  const day = date.getUTCDay();
+  return addDays(iso, day === 0 ? -6 : 1 - day);
+}
+
+export function monthStartFor(iso) {
+  const date = parseIsoDate(iso);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1, 12)).toISOString().slice(0, 10);
+}
+
+export function addMonths(iso, amount) {
+  const date = parseIsoDate(monthStartFor(iso));
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + amount, 1, 12)).toISOString().slice(0, 10);
+}
+
 export function minutesFromTime(time) {
   const [hours, minutes] = String(time).split(":").map(Number);
   return hours * 60 + minutes;
