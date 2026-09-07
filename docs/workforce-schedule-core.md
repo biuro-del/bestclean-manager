@@ -61,6 +61,36 @@ Okno ustawień nie zawiera atrap opcji prezentacyjnych i nie steruje
 dostarczaniem do aplikacji pracownika, powiadomieniami, Zleceniami ani
 Kalendarzem.
 
+## Kopiowanie tygodnia
+
+Kopiowanie tygodnia jest jedną, atomową komendą `COPY_WEEK`. Frontend wysyła
+wyłącznie poniedziałek tygodnia źródłowego oraz posortowaną listę
+`expectedVersions` wszystkich potwierdzonych zmian źródłowych. Zmiana oznaczona
+`pendingDeletion` nie jest źródłem kopii. Lokalny szkic bez serwerowego ID,
+rewizji i wersji blokuje operację zamiast być kopiowanym optymistycznie.
+
+Serwer ponownie odczytuje i blokuje bieżące, niearchiwalne rewizje źródłowe,
+porównuje ich pełny zestaw oraz wersje z żądaniem, a następnie sprawdza pusty
+tydzień docelowy. Rekord docelowy oznaczony `pendingDeletion` nadal zajmuje
+tydzień i blokuje kopiowanie. Daty są przesuwane o siedem dni kalendarzowych w
+strefie Grafiku, a czasy UTC są wyliczane ponownie, tak aby zachować lokalną
+godzinę również na granicy DST. Każda kopia otrzymuje nowe ID i powstaje jako
+szkic z `revision=1`, `version=1`, bez stanu publikacji.
+
+UI nie dopisuje kopii do stanu lokalnego i nie wykonuje serii `UPSERT_SHIFT`.
+Przechodzi do następnego tygodnia oraz pokazuje sukces dopiero po jednej
+odpowiedzi zawierającej dokładny receipt: `orgId`, zakres źródłowy, zakres
+docelowy, `createdCount` i mapowanie każdego `sourceShiftId` na nowe `shiftId`,
+datę, rewizję i wersję. Brak, nadmiar lub duplikat wpisu, obce `orgId`, zły zakres
+albo inna wersja powodują odrzucenie potwierdzenia i odświeżenie widoku.
+Jeżeli zapis mógł zostać przyjęty, lecz receipt nie przeszedł walidacji, ponowienie
+tej samej operacji zachowuje pierwotny klucz idempotencji i odbiera zapisany
+wynik zamiast próbować tworzyć drugi komplet kopii.
+Odpowiedź zakończona po zmianie sesji lub organizacji jest ignorowana i nie może
+zmienić zakresu, komunikatu ani blokady zapisu nowej sesji. Klucz idempotencji
+obejmuje organizację i cały payload, a efekty `delivery`, `notifications` i
+`downstream` pozostają wyłączone.
+
 ## Niedozwolone zależności
 
 Kod Grafiku nie może importować ani wywoływać:

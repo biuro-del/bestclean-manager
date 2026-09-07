@@ -297,7 +297,8 @@ function normalizeCommand(value) {
   const idempotencyKey = identifier(value?.idempotencyKey, 'idempotencyKey', 128)
   const effects = normalizeInternalEffects(value?.effects)
   const payload = value?.payload && typeof value.payload === 'object' && !Array.isArray(value.payload) ? value.payload : {}
-  return { type, orgId, idempotencyKey, effects, payload, requestHash: stableHash({ type, orgId, effects, payload }) }
+  const canonicalPayload = type === 'COPY_WEEK' ? normalizeWeekCopy(payload) : payload
+  return { type, orgId, idempotencyKey, effects, payload, requestHash: stableHash({ type, orgId, effects, payload: canonicalPayload }) }
 }
 
 function normalizePublication(value) {
@@ -312,6 +313,28 @@ function normalizePublication(value) {
   }
   const payload = { ...range, expectedVersions, warningFingerprint }
   return { orgId, idempotencyKey, effects, ...payload, requestHash: stableHash({ type: 'PUBLISH_INTERNAL', orgId, effects, payload }) }
+}
+
+function normalizeWeekCopy(value) {
+  const allowedKeys = new Set(['expectedVersions', 'sourceWeekStart'])
+  const unknownKeys = value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.keys(value).filter((key) => !allowedKeys.has(key))
+    : []
+  if (unknownKeys.length) {
+    fail(400, 'WORKFORCE_SCHEDULE_INVALID_COPY_WEEK', 'Komenda kopiowania tygodnia zawiera nieobsługiwane pola.', { fields: unknownKeys.sort() })
+  }
+  const sourceWeekStart = isoDate(value?.sourceWeekStart, 'sourceWeekStart')
+  if (new Date(`${sourceWeekStart}T12:00:00.000Z`).getUTCDay() !== 1) {
+    fail(400, 'WORKFORCE_SCHEDULE_INVALID_COPY_WEEK', 'Tydzień źródłowy musi zaczynać się w poniedziałek.')
+  }
+  const expectedVersions = normalizeExpectedVersions(value?.expectedVersions)
+  return {
+    from: sourceWeekStart,
+    to: addLocalDays(sourceWeekStart, 6),
+    targetFrom: addLocalDays(sourceWeekStart, 7),
+    targetTo: addLocalDays(sourceWeekStart, 13),
+    expectedVersions,
+  }
 }
 
 function classifyPublicationConflicts(value = []) {
@@ -371,6 +394,7 @@ function intervalsOverlap(first, second) {
 }
 
 module.exports = {
+  addLocalDays,
   WORKFORCE_SCHEDULE_INTERNAL_EFFECTS,
   WORKFORCE_SCHEDULE_MAX_PUBLICATION_ITEMS,
   WORKFORCE_SCHEDULE_MAX_RANGE_DAYS,
@@ -385,6 +409,7 @@ module.exports = {
   normalizeInternalEffects,
   normalizePublication,
   normalizeShiftInput,
+  normalizeWeekCopy,
   optionalText,
   parseDateRange,
   resolveShiftInterval,

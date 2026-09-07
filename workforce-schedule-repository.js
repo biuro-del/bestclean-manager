@@ -1366,17 +1366,26 @@ function createWorkforceScheduleRepository(client) {
     }
   }
 
-  async function assertActiveLocation(orgId, locationId) {
+  async function assertActiveLocations(orgId, locationIds) {
+    const expected = uniqueIdentifiers(locationIds)
+    if (!expected.length) return
     const result = await client.query(
       `select l.location_id, l.source_object_id
          from public.workforce_schedule_location l
-        where l.org_id = $1::text and l.location_id = $2::text and l.status = 'ACTIVE'
+        where l.org_id = $1::text and l.location_id = any($2::text[]) and l.status = 'ACTIVE'
         for share of l`,
-      [orgId, locationId],
+      [orgId, expected],
     )
-    const location = result.rows[0]
-    if (!location) throw error(409, 'WORKFORCE_SCHEDULE_LOCATION_UNAVAILABLE', 'Wybrany obiekt nie jest aktywny w Grafiku.')
-    await lockObjectSources(orgId, [location.source_object_id])
+    const found = new Set(result.rows.map((row) => text(row.location_id)))
+    const missing = expected.filter((locationId) => !found.has(locationId))
+    if (missing.length) {
+      throw error(409, 'WORKFORCE_SCHEDULE_LOCATION_UNAVAILABLE', 'Co najmniej jeden obiekt nie jest aktywny w Grafiku.', { locationIds: missing })
+    }
+    await lockObjectSources(orgId, result.rows.map((row) => row.source_object_id))
+  }
+
+  async function assertActiveLocation(orgId, locationId) {
+    await assertActiveLocations(orgId, [locationId])
   }
 
   async function assertActivePeople(orgId, personIds) {
@@ -1474,6 +1483,157 @@ function createWorkforceScheduleRepository(client) {
       if (!updated.rows[0]) throw error(409, 'WORKFORCE_SCHEDULE_STALE_VERSION', 'Zmiana została zmieniona przez inną osobę.')
     }
     return { before, shift: await readOneShift(orgId, shiftId) }
+  }
+
+  async function lockWeekCopySource({ orgId, from, to }) {
+    const locked = await client.query(
+      `select h.shift_id
+         from public.workforce_schedule_shift h
+         join public.workforce_schedule_shift_revision r
+           on r.org_id = h.org_id and r.shift_id = h.shift_id
+          and r.revision_no = h.current_revision_no
+        where h.org_id = $1::text
+          and r.business_date between $2::date and $3::date
+          and h.lifecycle_status <> 'ARCHIVED'
+          and r.is_deleted = false
+        order by r.business_date asc, r.starts_at asc, h.shift_id asc
+        for update of h`,
+      [orgId, from, to],
+    )
+    if (!locked.rows.length) return []
+    const lockedIds = new Set(locked.rows.map((row) => text(row.shift_id)))
+    const rows = await readShiftRows({ orgId, from, to })
+    return rows.filter((row) => lockedIds.has(text(row.shift_id))).map(mapShift)
+  }
+
+  async function assertWeekCopyTargetEmpty({ orgId, from, to }) {
+    const result = await client.query(
+      `select h.shift_id
+         from public.workforce_schedule_shift h
+         join public.workforce_schedule_shift_revision r
+           on r.org_id = h.org_id and r.shift_id = h.shift_id
+          and r.revision_no = h.current_revision_no
+         left join public.workforce_schedule_shift_revision published
+           on published.org_id = h.org_id and published.shift_id = h.shift_id
+          and published.revision_no = h.published_revision_no
+        where h.org_id = $1::text
+          and (r.business_date between $2::date and $3::date
+               or (h.lifecycle_status = 'CHANGED_AFTER_PUBLISH'
+                   and published.business_date between $2::date and $3::date))
+          and h.lifecycle_status <> 'ARCHIVED'
+        order by least(r.business_date, coalesce(published.business_date, r.business_date)) asc,
+                 r.starts_at asc, h.shift_id asc
+        limit 1
+        for update of h`,
+      [orgId, from, to],
+    )
+    if (result.rows[0]) {
+      throw error(
+        409,
+        'WORKFORCE_SCHEDULE_COPY_TARGET_NOT_EMPTY',
+        'Tydzień docelowy zawiera już zmiany. Kopiowanie zostało zatrzymane, aby nie utworzyć duplikatów.',
+        { targetFrom: from, targetTo: to },
+      )
+    }
+  }
+
+  async function copyShifts({ orgId, actorUid, copies }) {
+    if (!Array.isArray(copies) || !copies.length) {
+      throw error(409, 'WORKFORCE_SCHEDULE_NOTHING_TO_COPY', 'Tydzień źródłowy nie zawiera zmian do skopiowania.')
+    }
+    await assertActiveLocations(orgId, copies.map((copy) => copy.shift.locationId))
+    await assertActivePeople(orgId, copies.flatMap((copy) => copy.shift.personIds))
+    const rows = copies.map(({ sourceShiftId, shiftId, shift }) => ({
+      source_shift_id: sourceShiftId,
+      shift_id: shiftId,
+      business_date: shift.date,
+      title: shift.title,
+      local_start_time: shift.startTime,
+      local_end_time: shift.endTime,
+      starts_at: shift.startsAt,
+      ends_at: shift.endsAt,
+      time_zone: shift.timeZone,
+      break_minutes: shift.breakMinutes,
+      required_headcount: shift.requiredHeadcount,
+      location_id: shift.locationId,
+      notes: shift.notes,
+      person_ids: shift.personIds,
+      instructions: shift.instructions,
+    }))
+    const headsJson = JSON.stringify(rows.map((row) => ({ shift_id: row.shift_id })))
+    const revisionsJson = JSON.stringify(rows.map((row) => ({
+      shift_id: row.shift_id,
+      business_date: row.business_date,
+      title: row.title,
+      local_start_time: row.local_start_time,
+      local_end_time: row.local_end_time,
+      starts_at: row.starts_at,
+      ends_at: row.ends_at,
+      time_zone: row.time_zone,
+      break_minutes: row.break_minutes,
+      required_headcount: row.required_headcount,
+      location_id: row.location_id,
+      notes: row.notes,
+    })))
+    const assigneesJson = JSON.stringify(rows.flatMap((row) => row.person_ids.map((personId) => ({
+      shift_id: row.shift_id,
+      person_id: personId,
+    }))))
+    const instructionsJson = JSON.stringify(rows.flatMap((row) => row.instructions.map((instruction) => ({
+      shift_id: row.shift_id,
+      position: instruction.position,
+      text: instruction.text,
+    }))))
+    await client.query(
+      `insert into public.workforce_schedule_shift (
+         org_id, shift_id, lifecycle_status, current_revision_no, published_revision_no,
+         version, created_by_uid, updated_by_uid
+       )
+       select $1::text, item.shift_id, 'DRAFT', 1, null, 1, $2::text, $2::text
+         from jsonb_to_recordset($3::jsonb) as item(shift_id text)`,
+      [orgId, actorUid, headsJson],
+    )
+    await client.query(
+      `insert into public.workforce_schedule_shift_revision (
+         org_id, shift_id, revision_no, business_date, title, local_start_time, local_end_time,
+         starts_at, ends_at, time_zone, break_minutes, required_headcount, location_id, notes,
+         is_deleted, created_by_uid
+       )
+       select $1::text, item.shift_id, 1, item.business_date::date, item.title,
+              item.local_start_time::time, item.local_end_time::time,
+              item.starts_at::timestamptz, item.ends_at::timestamptz, item.time_zone,
+              item.break_minutes, item.required_headcount, item.location_id,
+              nullif(item.notes, ''), false, $2::text
+         from jsonb_to_recordset($3::jsonb) as item(
+           shift_id text, business_date text, title text, local_start_time text,
+           local_end_time text, starts_at text, ends_at text, time_zone text,
+           break_minutes integer, required_headcount integer, location_id text, notes text
+         )`,
+      [orgId, actorUid, revisionsJson],
+    )
+    await client.query(
+      `insert into public.workforce_schedule_shift_revision_assignee
+         (org_id, shift_id, revision_no, person_id)
+       select $1::text, item.shift_id, 1, item.person_id
+         from jsonb_to_recordset($2::jsonb) as item(shift_id text, person_id text)`,
+      [orgId, assigneesJson],
+    )
+    await client.query(
+      `insert into public.workforce_schedule_shift_instruction
+         (org_id, shift_id, revision_no, position, instruction)
+       select $1::text, item.shift_id, 1, item.position, item.text
+         from jsonb_to_recordset($2::jsonb) as item(
+           shift_id text, position integer, text text
+         )`,
+      [orgId, instructionsJson],
+    )
+    return rows.map((row) => ({
+      sourceShiftId: row.source_shift_id,
+      shiftId: row.shift_id,
+      date: row.business_date,
+      revision: 1,
+      version: 1,
+    }))
   }
 
   async function copyRevision({ orgId, shift, actorUid, isDeleted = false }) {
@@ -1731,11 +1891,14 @@ function createWorkforceScheduleRepository(client) {
   return {
     appendAudit,
     archiveShift,
+    assertWeekCopyTargetEmpty,
     bootstrap,
     claimCommand,
     completeCommand,
+    copyShifts,
     listPublicationConflicts,
     lockOrganization,
+    lockWeekCopySource,
     lockPublicationDependencies,
     lockPublicationScope,
     publish,

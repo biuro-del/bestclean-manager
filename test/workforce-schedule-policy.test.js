@@ -13,6 +13,7 @@ const {
   normalizeInternalEffects,
   normalizePublication,
   normalizeShiftInput,
+  normalizeWeekCopy,
   parseDateRange,
   resolveShiftInterval,
   stableHash,
@@ -142,6 +143,62 @@ test('publikacja wymaga dokładnych wersji i zerowych efektów', () => {
     () => normalizePublication({ ...result, expectedVersions: [{ shiftId: 'a', version: 1 }, { shiftId: 'a', version: 1 }] }),
     /duplikaty/,
   )
+})
+
+test('COPY_WEEK ma staly siedmiodniowy zakres i dokladny snapshot wersji', () => {
+  const result = normalizeWeekCopy({
+    sourceWeekStart: '2026-03-23',
+    expectedVersions: [{ shiftId: 'shift-b', version: 4 }, { shiftId: 'shift-a', version: 2 }],
+  })
+
+  assert.deepEqual(result, {
+    from: '2026-03-23',
+    to: '2026-03-29',
+    targetFrom: '2026-03-30',
+    targetTo: '2026-04-05',
+    expectedVersions: [{ shiftId: 'shift-a', version: 2 }, { shiftId: 'shift-b', version: 4 }],
+  })
+  assert.throws(
+    () => normalizeWeekCopy({ sourceWeekStart: '2026-03-24', expectedVersions: [{ shiftId: 'shift-a', version: 2 }] }),
+    (caught) => caught.code === 'WORKFORCE_SCHEDULE_INVALID_COPY_WEEK',
+  )
+  assert.throws(
+    () => normalizeWeekCopy({ sourceWeekStart: '2026-03-23', targetWeekStart: '2026-04-06', expectedVersions: [{ shiftId: 'shift-a', version: 2 }] }),
+    (caught) => caught.code === 'WORKFORCE_SCHEDULE_INVALID_COPY_WEEK'
+      && caught.details?.fields?.includes('targetWeekStart'),
+  )
+  assert.throws(
+    () => normalizeWeekCopy({
+      sourceWeekStart: '2026-03-23',
+      expectedVersions: [{ shiftId: 'shift-a', version: 2 }, { shiftId: 'shift-a', version: 2 }],
+    }),
+    (caught) => caught.code === 'WORKFORCE_SCHEDULE_INVALID_VERSIONS',
+  )
+})
+
+test('hash logicznie tej samej komendy COPY_WEEK nie zalezy od kolejnosci wersji', () => {
+  const first = normalizeCommand({
+    type: 'COPY_WEEK',
+    orgId: 'bestclean',
+    idempotencyKey: 'copy-1',
+    effects: noEffects(),
+    payload: {
+      sourceWeekStart: '2026-03-23',
+      expectedVersions: [{ shiftId: 'shift-b', version: 4 }, { shiftId: 'shift-a', version: 2 }],
+    },
+  })
+  const second = normalizeCommand({
+    type: 'COPY_WEEK',
+    orgId: 'bestclean',
+    idempotencyKey: 'copy-1',
+    effects: noEffects(),
+    payload: {
+      expectedVersions: [{ shiftId: 'shift-a', version: 2 }, { shiftId: 'shift-b', version: 4 }],
+      sourceWeekStart: '2026-03-23',
+    },
+  })
+
+  assert.equal(first.requestHash, second.requestHash)
 })
 
 test('konflikty blokujące są oddzielone od ostrzeżeń z fingerprintem', () => {

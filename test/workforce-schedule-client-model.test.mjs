@@ -388,6 +388,77 @@ test('kanoniczna odpowiedź zapisu zachowuje identyfikator i wersje serwera', as
   assert.equal(isConfirmedWorkforceScheduleShift({ id: 'sh-local', revision: 1, version: 0 }), false)
 })
 
+test('COPY_WEEK buduje wersjonowany snapshot tylko z pełnych, nieusuniętych zmian tygodnia', async () => {
+  const { buildWorkforceScheduleWeekCopyPayload } = await modelModule
+  const payload = buildWorkforceScheduleWeekCopyPayload([
+    { id: 'shift-b', shiftId: 'shift-b', date: '2026-09-08', revision: 2, version: 7 },
+    { id: 'shift-deleted', shiftId: 'shift-deleted', date: '2026-09-09', pendingDeletion: true, revision: 4, version: 9 },
+    { id: 'shift-outside', shiftId: 'shift-outside', date: '2026-09-14', revision: 1, version: 3 },
+    { id: 'shift-a', shiftId: 'shift-a', date: '2026-09-07', revision: 5, version: 11 },
+  ], '2026-09-07')
+
+  assert.deepEqual(payload, {
+    sourceWeekStart: '2026-09-07',
+    expectedVersions: [
+      { shiftId: 'shift-a', version: 11 },
+      { shiftId: 'shift-b', version: 7 },
+    ],
+  })
+  assert.doesNotMatch(JSON.stringify(payload), /shift-deleted|shift-outside/)
+})
+
+test('COPY_WEEK blokuje niepotwierdzone źródło i niepoprawny początek tygodnia', async () => {
+  const { buildWorkforceScheduleWeekCopyPayload } = await modelModule
+  const confirmed = [{ id: 'shift-1', shiftId: 'shift-1', date: '2026-09-07', revision: 1, version: 2 }]
+
+  assert.throws(
+    () => buildWorkforceScheduleWeekCopyPayload([
+      ...confirmed,
+      { id: 'local-only', date: '2026-09-08', revision: 1, version: 0 },
+    ], '2026-09-07'),
+    { code: 'WORKFORCE_SCHEDULE_COPY_SOURCE_NOT_CONFIRMED' },
+  )
+  assert.throws(
+    () => buildWorkforceScheduleWeekCopyPayload(confirmed, '2026-09-08'),
+    { code: 'WORKFORCE_SCHEDULE_INVALID_COPY_WEEK' },
+  )
+})
+
+test('COPY_WEEK akceptuje wyłącznie pełny receipt tej organizacji, zakresu i wszystkich kopii', async () => {
+  const { normalizeWorkforceScheduleWeekCopyReceipt } = await modelModule
+  const sourceShifts = [
+    { id: 'shift-a', shiftId: 'shift-a', date: '2026-09-07', revision: 3, version: 5 },
+    { id: 'shift-b', shiftId: 'shift-b', date: '2026-09-10', revision: 2, version: 8 },
+  ]
+  const expected = { orgId: 'bestclean', sourceShifts, sourceWeekStart: '2026-09-07' }
+  const receipt = {
+    orgId: 'bestclean',
+    sourceFrom: '2026-09-07',
+    sourceTo: '2026-09-13',
+    targetFrom: '2026-09-14',
+    targetTo: '2026-09-20',
+    createdCount: 2,
+    created: [
+      { sourceShiftId: 'shift-a', shiftId: 'copy-a', date: '2026-09-14', revision: 1, version: 1 },
+      { sourceShiftId: 'shift-b', shiftId: 'copy-b', date: '2026-09-17', revision: 1, version: 1 },
+    ],
+  }
+
+  assert.deepEqual(normalizeWorkforceScheduleWeekCopyReceipt(receipt, expected), receipt)
+  for (const invalid of [
+    { ...receipt, orgId: 'other-org' },
+    { ...receipt, targetFrom: '2026-09-15' },
+    { ...receipt, createdCount: 1 },
+    { ...receipt, created: receipt.created.slice(0, 1), createdCount: 1 },
+    { ...receipt, created: [{ ...receipt.created[0], date: '2026-09-15' }, receipt.created[1]] },
+    { ...receipt, created: [{ ...receipt.created[0], version: 2 }, receipt.created[1]] },
+    { ...receipt, created: [receipt.created[0], { ...receipt.created[1], sourceShiftId: 'shift-a' }] },
+    { ...receipt, unexpected: true },
+  ]) {
+    assert.equal(normalizeWorkforceScheduleWeekCopyReceipt(invalid, expected), null)
+  }
+})
+
 test('potwierdzenie publikacji scala wersje serwera i usuwa potwierdzone archiwum', async () => {
   const { applyWorkforceSchedulePublication } = await modelModule
   const result = applyWorkforceSchedulePublication([

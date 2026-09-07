@@ -129,6 +129,8 @@ rollback migracji musi pozostawić zero tabel i funkcji Grafiku.
   `current_user=workforce_schedule_app`;
 - synchronizacja katalogów, konfiguracja, utworzenie, odczyt, edycja,
   archiwizacja i wewnętrzna publikacja zmiany;
+- zbiorcze kopiowanie tygodnia do szkiców oraz pełny rollback wszystkich tabel
+  kopii po wymuszonym błędzie między insertem nagłówków i rewizji;
 - dokładne efekty publikacji `{delivery:false, notifications:false,
   downstream:false}`;
 - izolacja RLS między organizacjami;

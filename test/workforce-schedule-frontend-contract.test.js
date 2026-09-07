@@ -98,10 +98,39 @@ test("host oczekuje na zapis, używa idempotencji i wymaga jawnego potwierdzenia
   assert.doesNotMatch(componentSource, /publishNow:\s*true/);
 });
 
+test("kopiowanie tygodnia jest jedną operacją serwera bez optymistycznego dopisywania zmian", async () => {
+  const hostSource = await readFile(path.join(moduleRoot, "index.js"), "utf8");
+  const componentSource = await readFile(path.join(moduleRoot, "ScheduleContent.jsx"), "utf8");
+  const transportSource = await readFile(path.resolve(
+    moduleRoot,
+    "..",
+    "..",
+    "services",
+    "workforceScheduleTransport.js",
+  ), "utf8");
+  const copyStart = componentSource.indexOf('  const copyWeek = async () => {');
+  const publishStart = componentSource.indexOf('  const publishSchedule = async () => {', copyStart);
+  const copySource = componentSource.slice(copyStart, publishStart);
+
+  assert.ok(copyStart >= 0 && publishStart > copyStart);
+  assert.match(copySource, /await runMutation\("onWeekCopy", \{/);
+  assert.match(copySource, /sourceShifts:\s*weekCopySource/);
+  assert.match(copySource, /if \(!saved\) return/);
+  assert.match(copySource, /saved\.targetFrom/);
+  assert.match(copySource, /saved\.createdCount/);
+  assert.doesNotMatch(copySource, /setShifts|duplicateShift|\.forEach\(|onShiftCreate|emitSnapshot/);
+  assert.match(hostSource, /onWeekCopy:\s*\(payload\)\s*=>\s*runWrite\(\(\)\s*=>\s*copyWeek\(payload\)/);
+  assert.match(hostSource, /service\.copyWorkforceScheduleWeek\(orgId, payload, \{ idempotencyKey \}\)/);
+  assert.match(hostSource, /normalizeWorkforceScheduleWeekCopyReceipt\(response\?\.copy/);
+  assert.match(hostSource, /WORKFORCE_SCHEDULE_INVALID_COPY_RESPONSE/);
+  assert.match(transportSource, /'COPY_WEEK'/);
+  assert.match(transportSource, /sendCommand\(orgId, 'COPY_WEEK', payload, optionsValue\)/);
+});
+
 test("konfiguracja i zapis ignorują wyniki starej sesji", async () => {
   const hostSource = await readFile(path.join(moduleRoot, "index.js"), "utf8");
   const configureStart = hostSource.indexOf("  async function configure()")
-  const runWriteStart = hostSource.indexOf("  async function runWrite(task)", configureStart)
+  const runWriteStart = hostSource.indexOf("  async function runWrite(task", configureStart)
   const saveShiftStart = hostSource.indexOf("  async function saveShift", runWriteStart)
   const configureSource = hostSource.slice(configureStart, runWriteStart)
   const runWriteSource = hostSource.slice(runWriteStart, saveShiftStart)

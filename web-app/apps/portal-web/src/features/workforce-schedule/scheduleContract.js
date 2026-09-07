@@ -5,6 +5,7 @@ export const WORKFORCE_SCHEDULE_ADAPTER_METHODS = Object.freeze([
   "onShiftUpdate",
   "onShiftDelete",
   "onShiftMove",
+  "onWeekCopy",
   "onSchedulePublish",
   "onRequestResolve",
   "onSettingsSave",

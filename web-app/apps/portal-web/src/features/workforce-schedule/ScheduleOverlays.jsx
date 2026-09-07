@@ -70,12 +70,12 @@ function useDialogA11y(ref, onClose) {
   }, [ref]);
 }
 
-function PortalDialog({ children, className = "", labelledBy, onClose, side = false }) {
+function PortalDialog({ children, className = "", describedBy, labelledBy, onClose, side = false }) {
   const ref = useRef(null);
   useDialogA11y(ref, onClose);
   return createPortal(
     <div className={`tm-schedule-overlay ${side ? "is-side" : ""}`} onMouseDown={(event) => event.target === event.currentTarget && onClose()} role="presentation">
-      <section aria-labelledby={labelledBy} aria-modal="true" className={`tm-schedule-dialog ${className}`} ref={ref} role="dialog" tabIndex={-1}>
+      <section aria-describedby={describedBy} aria-labelledby={labelledBy} aria-modal="true" className={`tm-schedule-dialog ${className}`} ref={ref} role="dialog" tabIndex={-1}>
         {children}
       </section>
     </div>,
@@ -191,6 +191,65 @@ export function PublishDialog({ busy = false, deliveryDisabled = true, shifts, o
         : <label className="tm-schedule-notify-row"><span><Bell size={20} /><span><strong>Powiadom zespół</strong><small>{notify ? `${Math.max(totals.users, users.length)} użytkowników otrzyma informację` : "Bez wysyłania powiadomień"}</small></span></span><input checked={notify} onChange={(e) => setNotify(e.target.checked)} role="switch" type="checkbox" /></label>}
       <div className="tm-schedule-publish-list">{shifts.slice(0, 4).map((shift) => <span key={shift.id}><CalendarBlank size={16} /><strong>{shift.title}</strong><small>{shift.date} · {shift.startTime}–{shift.endTime}</small></span>)}</div>
       <footer><button className="tm-schedule-secondary-button" disabled={busy} onClick={onClose} type="button">Zamknij</button><button className="tm-schedule-primary-button" disabled={busy} onClick={() => onPublish(deliveryDisabled ? false : notify)} type="button">{busy ? "Zatwierdzam…" : deliveryDisabled ? "Zatwierdź wewnętrznie" : "Opublikuj"}</button></footer>
+    </PortalDialog>
+  );
+}
+
+export function CopyWeekDialog({ busy = false, onClose, onCopy, sourceLabel, targetLabel, total = 0 }) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const count = Number.isSafeInteger(Number(total)) && Number(total) > 0 ? Number(total) : 0;
+  const locked = busy || submitting;
+  const close = () => { if (!locked) onClose(); };
+
+  const copy = async () => {
+    if (locked || count < 1) return;
+    setError("");
+    setSubmitting(true);
+    try {
+      const saved = await onCopy?.();
+      if (saved) return;
+      setSubmitting(false);
+      setError("Tydzień nie został skopiowany. Sprawdź komunikat systemu i spróbuj ponownie.");
+    } catch {
+      setSubmitting(false);
+      setError("Tydzień nie został skopiowany. Spróbuj ponownie.");
+    }
+  };
+
+  return (
+    <PortalDialog className="tm-schedule-copy-dialog" describedBy={descriptionId} labelledBy={titleId} onClose={close}>
+      <header className="tm-schedule-modal-header">
+        <div><p>Grafik</p><h2 id={titleId}>Skopiuj tydzień</h2></div>
+        <IconButton disabled={locked} label="Zamknij kopiowanie tygodnia" onClick={close}><X size={21} /></IconButton>
+      </header>
+      <div aria-busy={locked} className="tm-schedule-copy-content">
+        <p id={descriptionId}>Sprawdź zakres i liczbę zmian przed utworzeniem kopii.</p>
+        <dl className="tm-schedule-copy-range">
+          <div><dt>Tydzień źródłowy</dt><dd>{sourceLabel || "—"}</dd></div>
+          <span aria-hidden="true">→</span>
+          <div><dt>Tydzień docelowy</dt><dd>{targetLabel || "—"}</dd></div>
+        </dl>
+        <div className="tm-schedule-copy-total" role="status">
+          <Copy size={24} weight="duotone" />
+          <span><strong>{count}</strong>{count === 1 ? " zmiana do skopiowania" : count > 1 && count < 5 ? " zmiany do skopiowania" : " zmian do skopiowania"}</span>
+        </div>
+        <div className="tm-schedule-copy-note" role="note">
+          <Info size={20} />
+          <span><strong>Kopie zostaną zapisane jako szkice.</strong> Pracownicy ich nie zobaczą i nie otrzymają powiadomień.</span>
+        </div>
+        <div className="tm-schedule-copy-warning" role="note">
+          <WarningCircle size={20} />
+          <span><strong>Tydzień docelowy musi być pusty.</strong> Jeśli zawiera już zmianę, kopiowanie zostanie bezpiecznie zatrzymane.</span>
+        </div>
+        {error && <p className="tm-schedule-copy-error" role="alert">{error}</p>}
+      </div>
+      <footer className="tm-schedule-settings-footer tm-schedule-copy-footer">
+        <button className="tm-schedule-secondary-button" disabled={locked} onClick={close} type="button">Anuluj</button>
+        <button className="tm-schedule-primary-button" disabled={locked || count < 1} onClick={() => void copy()} type="button">{locked ? "Kopiuję…" : "Skopiuj jako szkice"}</button>
+      </footer>
     </PortalDialog>
   );
 }

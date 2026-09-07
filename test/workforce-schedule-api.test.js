@@ -6,6 +6,34 @@ const { createWorkforceScheduleApi } = require('../workforce-schedule-api')
 
 const noEffects = () => ({ delivery: false, notifications: false, downstream: false })
 
+const copyWeekBody = (payload = {}) => ({
+  type: 'COPY_WEEK',
+  orgId: 'bestclean',
+  idempotencyKey: 'copy-week-1',
+  effects: noEffects(),
+  payload: {
+    sourceWeekStart: '2026-03-23',
+    expectedVersions: [{ shiftId: 'shift-source-1', version: 2 }],
+    ...payload,
+  },
+})
+
+const sourceShift = (overrides = {}) => ({
+  shiftId: 'shift-source-1',
+  version: 2,
+  title: 'Zmiana poranna',
+  date: '2026-03-23',
+  startTime: '07:00',
+  endTime: '15:00',
+  breakMinutes: 30,
+  requiredHeadcount: 1,
+  locationId: 'location-1',
+  notes: 'Otworz magazyn',
+  personIds: ['person-1'],
+  instructions: ['Odprawa'],
+  ...overrides,
+})
+
 function fixture(options = {}) {
   const calls = []
   const responses = []
@@ -32,6 +60,25 @@ function fixture(options = {}) {
       }
     },
     async saveShift(input) { calls.push(['saveShift', input]); return { before: null, shift: { shiftId: 'shift-1', version: 1 } } },
+    async lockWeekCopySource(input) {
+      calls.push(['lockWeekCopySource', input])
+      return options.copySource === undefined ? [sourceShift()] : options.copySource
+    },
+    async assertWeekCopyTargetEmpty(input) {
+      calls.push(['assertWeekCopyTargetEmpty', input])
+      if (options.copyTargetError) throw options.copyTargetError
+    },
+    async copyShifts(input) {
+      calls.push(['copyShifts', input])
+      if (options.copyShiftsError) throw options.copyShiftsError
+      return input.copies.map((copy) => ({
+        sourceShiftId: copy.sourceShiftId,
+        shiftId: copy.shiftId,
+        date: copy.shift.date,
+        revision: 1,
+        version: 1,
+      }))
+    },
     async archiveShift(input) { calls.push(['archiveShift', input]); return { before: { shiftId: input.shiftId }, shift: { shiftId: input.shiftId, pendingDeletion: true } } },
     async lockPublicationScope(input) { calls.push(['lockPublicationScope', input]); return options.shifts || [{ shiftId: 'shift-1', version: 2, revision: 2, isDeleted: false }] },
     async lockPublicationDependencies(input) { calls.push(['lockPublicationDependencies', input]) },
@@ -523,6 +570,136 @@ test('zapis zmiany wymaga wersji i aktywnych encji repozytorium', async () => {
   assert.equal(call.shift.timeZone, 'Europe/Warsaw')
   assert.equal(call.shift.startsAt, '2026-08-24T05:00:00.000Z')
   assert.deepEqual(call.shift.personIds, ['person-1'])
+})
+
+test('COPY_WEEK kopiuje tydzien jako jeden atomowy zapis i przelicza DST z czasu lokalnego', async () => {
+  const f = fixture({ body: copyWeekBody() })
+
+  await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
+
+  assert.equal(f.errors.length, 0)
+  assert.deepEqual(f.calls.find(([name]) => name === 'authorize')[1], {
+    orgId: 'bestclean',
+    uid: 'uid-1',
+    action: 'EDIT',
+  })
+  assert.deepEqual(f.calls.find(([name]) => name === 'lockWeekCopySource')[1], {
+    orgId: 'bestclean',
+    from: '2026-03-23',
+    to: '2026-03-29',
+  })
+  assert.deepEqual(f.calls.find(([name]) => name === 'assertWeekCopyTargetEmpty')[1], {
+    orgId: 'bestclean',
+    from: '2026-03-30',
+    to: '2026-04-05',
+  })
+  const copyInput = f.calls.find(([name]) => name === 'copyShifts')[1]
+  assert.equal(copyInput.copies.length, 1)
+  assert.equal(copyInput.copies[0].sourceShiftId, 'shift-source-1')
+  assert.equal(copyInput.copies[0].shiftId, 'wss_id-1')
+  assert.equal(copyInput.copies[0].shift.date, '2026-03-30')
+  assert.equal(copyInput.copies[0].shift.startsAt, '2026-03-30T05:00:00.000Z')
+  assert.equal(copyInput.copies[0].shift.endsAt, '2026-03-30T13:00:00.000Z')
+  assert.equal(copyInput.copies[0].shift.title, 'Zmiana poranna')
+  assert.deepEqual(copyInput.copies[0].shift.instructions, [{ position: 1, text: 'Odprawa' }])
+  assert.deepEqual(f.responses[0].payload.copy, {
+    orgId: 'bestclean',
+    sourceFrom: '2026-03-23',
+    sourceTo: '2026-03-29',
+    targetFrom: '2026-03-30',
+    targetTo: '2026-04-05',
+    createdCount: 1,
+    created: [{ sourceShiftId: 'shift-source-1', shiftId: 'wss_id-1', date: '2026-03-30', revision: 1, version: 1 }],
+  })
+  const audit = f.calls.find(([name]) => name === 'audit')[1]
+  assert.equal(audit.entityType, 'WEEK')
+  assert.equal(audit.action, 'COPIED')
+  assert.deepEqual(audit.after, f.responses[0].payload)
+  assert.ok(f.calls.findIndex(([name]) => name === 'copyShifts') < f.calls.findIndex(([name]) => name === 'audit'))
+  assert.ok(f.calls.findIndex(([name]) => name === 'audit') < f.calls.findIndex(([name]) => name === 'complete'))
+  assert.ok(f.calls.findIndex(([name]) => name === 'complete') < f.calls.findIndex(([name, sql]) => name === 'sql' && sql === 'commit'))
+})
+
+test('COPY_WEEK odrzuca nieaktualny snapshot przed sprawdzeniem celu i zapisem', async () => {
+  const f = fixture({
+    body: copyWeekBody(),
+    copySource: [sourceShift({ version: 3 })],
+  })
+
+  await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
+
+  assert.equal(f.errors[0].code, 'WORKFORCE_SCHEDULE_STALE_VERSION')
+  assert.equal(f.calls.some(([name]) => name === 'assertWeekCopyTargetEmpty'), false)
+  assert.equal(f.calls.some(([name]) => name === 'copyShifts'), false)
+  assert.equal(f.calls.some(([name]) => name === 'audit'), false)
+  assert.equal(f.calls.some(([name]) => name === 'complete'), false)
+  assert.equal(f.calls.some(([name, sql]) => name === 'sql' && sql === 'rollback'), true)
+})
+
+test('COPY_WEEK nie zapisuje niczego, gdy tydzien docelowy jest zajety', async () => {
+  const targetError = new Error('Tydzien docelowy zawiera juz zmiany.')
+  targetError.statusCode = 409
+  targetError.publicCode = 'WORKFORCE_SCHEDULE_COPY_TARGET_NOT_EMPTY'
+  targetError.publicMessage = 'Tydzien docelowy zawiera juz zmiany.'
+  const f = fixture({ body: copyWeekBody(), copyTargetError: targetError })
+
+  await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
+
+  assert.equal(f.errors[0].code, 'WORKFORCE_SCHEDULE_COPY_TARGET_NOT_EMPTY')
+  assert.equal(f.calls.some(([name]) => name === 'assertWeekCopyTargetEmpty'), true)
+  assert.equal(f.calls.some(([name]) => name === 'copyShifts'), false)
+  assert.equal(f.calls.some(([name]) => name === 'audit'), false)
+  assert.equal(f.calls.some(([name]) => name === 'complete'), false)
+  assert.equal(f.calls.some(([name, sql]) => name === 'sql' && sql === 'commit'), false)
+  assert.equal(f.calls.some(([name, sql]) => name === 'sql' && sql === 'rollback'), true)
+})
+
+test('blad zbiorczego zapisu COPY_WEEK wycofuje cala komende bez audytu i receipt', async () => {
+  const f = fixture({
+    body: copyWeekBody(),
+    copyShiftsError: new Error('second batch insert failed'),
+  })
+
+  await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
+
+  assert.equal(f.responses.length, 0)
+  assert.equal(f.errors[0].status, 500)
+  assert.equal(f.calls.some(([name]) => name === 'copyShifts'), true)
+  assert.equal(f.calls.some(([name]) => name === 'audit'), false)
+  assert.equal(f.calls.some(([name]) => name === 'complete'), false)
+  assert.equal(f.calls.some(([name, sql]) => name === 'sql' && sql === 'commit'), false)
+  assert.equal(f.calls.some(([name, sql]) => name === 'sql' && sql === 'rollback'), true)
+})
+
+test('idempotentny replay COPY_WEEK nie czyta ponownie zrodla ani nie tworzy kopii', async () => {
+  const storedResponse = {
+    ok: true,
+    idempotent: false,
+    effects: noEffects(),
+    copy: {
+      orgId: 'bestclean',
+      sourceFrom: '2026-03-23',
+      sourceTo: '2026-03-29',
+      targetFrom: '2026-03-30',
+      targetTo: '2026-04-05',
+      createdCount: 1,
+      created: [{ sourceShiftId: 'shift-source-1', shiftId: 'wss-existing', date: '2026-03-30', revision: 1, version: 1 }],
+    },
+  }
+  const f = fixture({
+    body: copyWeekBody(),
+    claim: { replay: true, response: storedResponse },
+  })
+
+  await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
+
+  assert.equal(f.errors.length, 0)
+  assert.equal(f.responses[0].payload.idempotent, true)
+  assert.deepEqual(f.responses[0].payload.copy, storedResponse.copy)
+  assert.equal(f.calls.some(([name]) => name === 'lockWeekCopySource'), false)
+  assert.equal(f.calls.some(([name]) => name === 'assertWeekCopyTargetEmpty'), false)
+  assert.equal(f.calls.some(([name]) => name === 'copyShifts'), false)
+  assert.equal(f.calls.some(([name]) => name === 'audit'), false)
 })
 
 test('publikacja bez zerowych efektów jest odrzucana przed bazą', async () => {

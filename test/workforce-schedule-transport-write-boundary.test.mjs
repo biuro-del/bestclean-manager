@@ -60,15 +60,19 @@ test('jawne komendy zapisu trafiają tylko do commands i zawsze wyłączają efe
   await f.transport.syncCatalogs('bestclean')
   await f.transport.upsertShift('bestclean', { businessDate: '2026-09-07' })
   await f.transport.archiveShift('bestclean', { shiftId: 'shift-1', expectedVersion: 1 })
+  await f.transport.copyWeek('bestclean', {
+    sourceWeekStart: '2026-09-07',
+    expectedVersions: [{ shiftId: 'shift-1', version: 1 }],
+  })
 
-  assert.equal(f.calls.length, 4)
+  assert.equal(f.calls.length, 5)
   assert.deepEqual(
     f.calls.map(({ url }) => url),
-    Array(4).fill('https://portal.example.test/root/api/portal/workforce-schedule/commands'),
+    Array(5).fill('https://portal.example.test/root/api/portal/workforce-schedule/commands'),
   )
   assert.deepEqual(
     f.calls.map(({ init }) => JSON.parse(init.body).type),
-    ['SET_CONFIGURATION', 'SYNC_CATALOGS', 'UPSERT_SHIFT', 'ARCHIVE_SHIFT'],
+    ['SET_CONFIGURATION', 'SYNC_CATALOGS', 'UPSERT_SHIFT', 'ARCHIVE_SHIFT', 'COPY_WEEK'],
   )
   for (const { init } of f.calls) {
     const body = JSON.parse(init.body)
@@ -76,6 +80,32 @@ test('jawne komendy zapisu trafiają tylko do commands i zawsze wyłączają efe
     assert.equal(body.orgId, 'bestclean')
     assert.deepEqual(body.effects, effectsDisabled)
   }
+})
+
+test('COPY_WEEK wysyła jeden atomowy command z wersjami źródeł i bez efektów zewnętrznych', async () => {
+  const f = await fixture()
+  const payload = {
+    sourceWeekStart: '2026-09-07',
+    expectedVersions: [
+      { shiftId: 'shift-1', version: 4 },
+      { shiftId: 'shift-2', version: 7 },
+    ],
+  }
+
+  await f.transport.copyWeek('bestclean', payload, { idempotencyKey: 'copy-week-operation-1' })
+
+  assert.equal(f.calls.length, 1)
+  assert.equal(
+    f.calls[0].url,
+    'https://portal.example.test/root/api/portal/workforce-schedule/commands',
+  )
+  assert.deepEqual(JSON.parse(f.calls[0].init.body), {
+    type: 'COPY_WEEK',
+    orgId: 'bestclean',
+    idempotencyKey: 'copy-week-operation-1',
+    effects: effectsDisabled,
+    payload,
+  })
 })
 
 test('transport odrzuca komendy spoza niezależnego Grafiku i ręczne rozszczepienie katalogów', async () => {
@@ -178,6 +208,14 @@ test('rejestr operacji zachowuje klucz po niejednoznacznym błędzie sieci i zwa
   registry.fail(afterSuccess, { code: 'WORKFORCE_SCHEDULE_CLIENT_VALIDATION', status: 400 })
   const afterDeterministicFailure = registry.begin('upsert-shift', payload)
   assert.notEqual(afterDeterministicFailure.key, afterSuccess.key)
+
+  registry.fail(afterDeterministicFailure, {
+    code: 'WORKFORCE_SCHEDULE_INVALID_COPY_RESPONSE',
+    retryWithSameIdempotencyKey: true,
+  })
+  const afterUnverifiedReceipt = registry.begin('upsert-shift', payload)
+  assert.equal(afterUnverifiedReceipt.key, afterDeterministicFailure.key)
+  assert.equal(afterUnverifiedReceipt.token, afterDeterministicFailure.token)
 })
 
 test('stare zakończenie po clear nie usuwa nowszego klucza tej samej operacji', async () => {

@@ -1984,6 +1984,126 @@
   margin-top: 18px;
 }
 
+.tm-schedule-copy-dialog {
+  width: min(560px, 100%);
+}
+
+.tm-schedule-copy-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  overflow: auto;
+}
+
+.tm-schedule-copy-content > p:first-child {
+  margin: 0;
+  color: #6f7e8e;
+  font-size: 13px;
+}
+
+.tm-schedule-copy-range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  margin: 2px 0;
+}
+
+.tm-schedule-copy-range > div {
+  min-width: 0;
+  padding: 12px;
+  background: #f7f9fa;
+  border: 1px solid #e0e6e9;
+  border-radius: 9px;
+}
+
+.tm-schedule-copy-range dt {
+  margin-bottom: 4px;
+  color: #7b8998;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tm-schedule-copy-range dd {
+  margin: 0;
+  color: #2f3f53;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.tm-schedule-copy-range > span {
+  color: #81909f;
+  font-size: 20px;
+}
+
+.tm-schedule-copy-total,
+.tm-schedule-copy-note,
+.tm-schedule-copy-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe5ec;
+  border-radius: 9px;
+}
+
+.tm-schedule-copy-total {
+  align-items: center;
+  color: #236ea8;
+  background: #f2f8fc;
+}
+
+.tm-schedule-copy-total strong {
+  font-size: 18px;
+}
+
+.tm-schedule-copy-note,
+.tm-schedule-copy-warning {
+  color: #526476;
+  background: #fff;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tm-schedule-copy-note svg,
+.tm-schedule-copy-warning svg {
+  flex: 0 0 auto;
+}
+
+.tm-schedule-copy-note strong,
+.tm-schedule-copy-warning strong {
+  display: block;
+  margin-bottom: 2px;
+  color: #33465a;
+}
+
+.tm-schedule-copy-warning {
+  color: #7b5c22;
+  background: #fffaf0;
+  border-color: #ead8ad;
+}
+
+.tm-schedule-copy-error {
+  margin: 0;
+  padding: 10px 12px;
+  color: #a92e43;
+  background: #fff3f5;
+  border: 1px solid #efc6cd;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tm-schedule-copy-footer {
+  justify-content: flex-end;
+}
+
 .tm-schedule-requests-dialog {
   width: min(820px, 100%);
   min-height: min(650px, calc(100vh - 48px));

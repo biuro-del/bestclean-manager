@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto')
 const {
+  addLocalDays,
   WORKFORCE_SCHEDULE_MAX_PUBLICATION_ITEMS,
   WorkforceScheduleError,
   classifyPublicationConflicts,
@@ -10,6 +11,7 @@ const {
   normalizeIanaTimeZone,
   normalizePublication,
   normalizeShiftInput,
+  normalizeWeekCopy,
   parseDateRange,
   text,
 } = require('./workforce-schedule-policy')
@@ -364,6 +366,71 @@ function createWorkforceScheduleApi(dependencies = {}) {
       const shift = normalizeShiftInput(payload, settings.timeZone)
       const result = await repository.saveShift({ orgId: command.orgId, shift, actorUid: identity.uid, createShiftId: () => `wss_${createId()}` })
       return { entityType: 'SHIFT', entityId: result.shift.shiftId, action: result.before ? 'UPDATED' : 'CREATED', before: result.before, response: { shift: result.shift } }
+    }
+    if (command.type === 'COPY_WEEK') {
+      const settings = await repository.readSettings(command.orgId)
+      if (!settings?.timeZone) {
+        throw apiError(409, 'WORKFORCE_SCHEDULE_TIME_ZONE_REQUIRED', 'Najpierw ustaw jawną strefę czasową Grafiku.')
+      }
+      const copy = normalizeWeekCopy(payload)
+      const sourceShifts = await repository.lockWeekCopySource({
+        orgId: command.orgId,
+        from: copy.from,
+        to: copy.to,
+      })
+      if (!sourceShifts.length) {
+        throw apiError(409, 'WORKFORCE_SCHEDULE_NOTHING_TO_COPY', 'Tydzień źródłowy nie zawiera zmian do skopiowania.')
+      }
+      if (sourceShifts.length > WORKFORCE_SCHEDULE_MAX_PUBLICATION_ITEMS) {
+        throw apiError(
+          409,
+          'WORKFORCE_SCHEDULE_COPY_SCOPE_TOO_LARGE',
+          'Tydzień zawiera zbyt wiele zmian do jednej bezpiecznej operacji kopiowania.',
+          { count: sourceShifts.length, limit: WORKFORCE_SCHEDULE_MAX_PUBLICATION_ITEMS },
+        )
+      }
+      const versions = compareExpectedVersions(copy.expectedVersions, sourceShifts)
+      if (!versions.valid) {
+        throw apiError(409, 'WORKFORCE_SCHEDULE_STALE_VERSION', 'Lista wersji nie odpowiada aktualnym zmianom tygodnia źródłowego.', versions)
+      }
+      await repository.assertWeekCopyTargetEmpty({
+        orgId: command.orgId,
+        from: copy.targetFrom,
+        to: copy.targetTo,
+      })
+      const copies = sourceShifts.map((sourceShift) => ({
+        sourceShiftId: sourceShift.shiftId,
+        shiftId: `wss_${createId()}`,
+        shift: normalizeShiftInput({
+          expectedVersion: 0,
+          title: sourceShift.title,
+          date: addLocalDays(sourceShift.date, 7),
+          startTime: sourceShift.startTime,
+          endTime: sourceShift.endTime,
+          breakMinutes: sourceShift.breakMinutes,
+          requiredHeadcount: sourceShift.requiredHeadcount,
+          locationId: sourceShift.locationId,
+          notes: sourceShift.notes,
+          personIds: sourceShift.personIds,
+          instructions: sourceShift.instructions,
+        }, settings.timeZone),
+      }))
+      const created = await repository.copyShifts({ orgId: command.orgId, actorUid: identity.uid, copies })
+      const receipt = {
+        orgId: command.orgId,
+        sourceFrom: copy.from,
+        sourceTo: copy.to,
+        targetFrom: copy.targetFrom,
+        targetTo: copy.targetTo,
+        createdCount: created.length,
+        created,
+      }
+      return {
+        entityType: 'WEEK',
+        entityId: `${command.orgId}:${copy.targetFrom}`,
+        action: 'COPIED',
+        response: { copy: receipt },
+      }
     }
     if (command.type === 'ARCHIVE_SHIFT') {
       const shiftId = identifier(payload.shiftId, 'shiftId', 96)

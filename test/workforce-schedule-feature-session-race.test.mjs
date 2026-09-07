@@ -44,6 +44,7 @@ async function loadFeatureFactory() {
     const dependencies = {
       ScheduleContent: function ScheduleContent() {},
       assertWorkforceScheduleSelectableReferences: clientModel.assertWorkforceScheduleSelectableReferences,
+      buildWorkforceScheduleWeekCopyPayload: clientModel.buildWorkforceScheduleWeekCopyPayload,
       buildWorkforceScheduleShiftPayload: clientModel.buildWorkforceScheduleShiftPayload,
       createElement(type, props, ...children) {
         return {
@@ -66,6 +67,7 @@ async function loadFeatureFactory() {
       normalizeWorkforceScheduleBootstrap: clientModel.normalizeWorkforceScheduleBootstrap,
       normalizeWorkforceScheduleSettings: clientModel.normalizeWorkforceScheduleSettings,
       normalizeWorkforceScheduleShift: clientModel.normalizeWorkforceScheduleShift,
+      normalizeWorkforceScheduleWeekCopyReceipt: clientModel.normalizeWorkforceScheduleWeekCopyReceipt,
       summarizeWorkforceScheduleCatalogSync: catalogSync.summarizeWorkforceScheduleCatalogSync,
       workforceScheduleCatalogConflictsFromError: clientModel.workforceScheduleCatalogConflictsFromError,
       workforceSchedulePublicationCandidates: clientModel.workforceSchedulePublicationCandidates,
@@ -139,6 +141,7 @@ function bootstrap(overrides = {}) {
 async function createFixture(t) {
   const renders = []
   const notices = []
+  const copyCalls = []
   const configureCalls = []
   const shiftCalls = []
   const fetchCalls = []
@@ -174,6 +177,11 @@ async function createFixture(t) {
     setWorkforceScheduleConfiguration(orgId, configuration, options) {
       const pending = deferred()
       configureCalls.push({ configuration, options, orgId, pending })
+      return pending.promise
+    },
+    copyWorkforceScheduleWeek(orgId, payload, options) {
+      const pending = deferred()
+      copyCalls.push({ orgId, options, payload, pending })
       return pending.promise
     },
     upsertWorkforceScheduleShift(orgId, payload) {
@@ -219,6 +227,7 @@ async function createFixture(t) {
 
   return {
     configureCalls,
+    copyCalls,
     feature,
     fetchCalls,
     lastRender: () => renders.at(-1),
@@ -337,6 +346,127 @@ test('zmiana organizacji podczas runWrite odrzuca stary wynik i nie zwalnia nowe
 
   await waitFor(() => f.fetchCalls.filter((orgId) => orgId === 'org-b').length >= 2, 'current session refresh')
   assert.equal(f.lastRender().props.snapshot.users[0].id, 'person-org-b')
+})
+
+test('COPY_WEEK ignoruje receipt starej organizacji i nie zwalnia blokady bieżącej operacji', async (t) => {
+  const f = await createFixture(t)
+  await f.feature.refresh({ syncCatalogs: false })
+  const sourceFor = (orgId, date, version) => ({
+    date,
+    id: `shift-${orgId}`,
+    revision: 1,
+    shiftId: `shift-${orgId}`,
+    version,
+  })
+  const receiptFor = (orgId, source, sourceFrom, targetFrom, targetTo) => ({
+    copy: {
+      orgId,
+      sourceFrom,
+      sourceTo: sourceFrom === '2026-09-07' ? '2026-09-13' : '2026-09-20',
+      targetFrom,
+      targetTo,
+      createdCount: 1,
+      created: [{
+        sourceShiftId: source.shiftId,
+        shiftId: `copy-${orgId}`,
+        date: targetFrom,
+        revision: 1,
+        version: 1,
+      }],
+    },
+  })
+
+  const oldSource = sourceFor('org-a', '2026-09-07', 3)
+  const oldWrite = f.lastRender().props.adapter.onWeekCopy({
+    sourceShifts: [oldSource],
+    sourceWeekStart: '2026-09-07',
+  })
+  await waitFor(() => f.copyCalls.length === 1, 'old organization week copy')
+
+  f.session.activeOrgId = 'org-b'
+  f.feature.resetSession()
+  await f.feature.refresh({ syncCatalogs: false })
+  const currentAdapter = f.lastRender().props.adapter
+  const currentSource = sourceFor('org-b', '2026-09-14', 5)
+  const currentWrite = currentAdapter.onWeekCopy({
+    sourceShifts: [currentSource],
+    sourceWeekStart: '2026-09-14',
+  })
+  await waitFor(() => f.copyCalls.length === 2, 'current organization week copy')
+
+  f.copyCalls[0].pending.resolve(receiptFor(
+    'org-a', oldSource, '2026-09-07', '2026-09-14', '2026-09-20',
+  ))
+  assert.equal(await oldWrite, false)
+  await assert.rejects(
+    currentAdapter.onWeekCopy({ sourceShifts: [currentSource], sourceWeekStart: '2026-09-14' }),
+    { code: 'WORKFORCE_SCHEDULE_WRITE_IN_PROGRESS' },
+  )
+
+  f.copyCalls[1].pending.resolve(receiptFor(
+    'org-b', currentSource, '2026-09-14', '2026-09-21', '2026-09-27',
+  ))
+  const saved = await currentWrite
+
+  assert.equal(saved.orgId, 'org-b')
+  assert.equal(saved.targetFrom, '2026-09-21')
+  assert.equal(f.copyCalls[0].orgId, 'org-a')
+  assert.equal(f.copyCalls[1].orgId, 'org-b')
+  assert.deepEqual(f.copyCalls[1].payload, {
+    sourceWeekStart: '2026-09-14',
+    expectedVersions: [{ shiftId: 'shift-org-b', version: 5 }],
+  })
+  assert.match(f.copyCalls[1].options.idempotencyKey, /^ws-/)
+  await waitFor(() => f.fetchCalls.filter((orgId) => orgId === 'org-b').length >= 2, 'current organization refresh')
+  assert.equal(f.lastRender().props.snapshot.users[0].id, 'person-org-b')
+})
+
+test('COPY_WEEK ponawia niezweryfikowane potwierdzenie z tym samym kluczem idempotencji', async (t) => {
+  const f = await createFixture(t)
+  await f.feature.refresh({ syncCatalogs: false })
+  const source = {
+    date: '2026-09-07',
+    id: 'shift-org-a',
+    revision: 1,
+    shiftId: 'shift-org-a',
+    version: 3,
+  }
+  const copy = () => f.lastRender().props.adapter.onWeekCopy({
+    sourceShifts: [source],
+    sourceWeekStart: '2026-09-07',
+  })
+
+  const firstWrite = copy()
+  await waitFor(() => f.copyCalls.length === 1, 'first week copy')
+  f.copyCalls[0].pending.resolve({ copy: { createdCount: 1 } })
+  await assert.rejects(firstWrite, { code: 'WORKFORCE_SCHEDULE_INVALID_COPY_RESPONSE' })
+  await waitFor(() => f.fetchCalls.length >= 2, 'refresh after unverified receipt')
+
+  const retryWrite = copy()
+  await waitFor(() => f.copyCalls.length === 2, 'retried week copy')
+  assert.equal(
+    f.copyCalls[1].options.idempotencyKey,
+    f.copyCalls[0].options.idempotencyKey,
+  )
+  f.copyCalls[1].pending.resolve({
+    copy: {
+      orgId: 'org-a',
+      sourceFrom: '2026-09-07',
+      sourceTo: '2026-09-13',
+      targetFrom: '2026-09-14',
+      targetTo: '2026-09-20',
+      createdCount: 1,
+      created: [{
+        sourceShiftId: source.shiftId,
+        shiftId: 'copy-org-a',
+        date: '2026-09-14',
+        revision: 1,
+        version: 1,
+      }],
+    },
+  })
+  const saved = await retryWrite
+  assert.equal(saved.created[0].shiftId, 'copy-org-a')
 })
 
 test('OWNER może świadomie wymusić kolejne synchronizacje z nowym kluczem, a COORDINATOR pozostaje read-only', async (t) => {

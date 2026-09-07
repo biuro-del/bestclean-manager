@@ -8,6 +8,10 @@ const { Client } = require('pg')
 const {
   createWorkforceScheduleRepository,
 } = require('../workforce-schedule-repository')
+const {
+  addLocalDays,
+  normalizeShiftInput,
+} = require('../workforce-schedule-policy')
 
 const ROOT_DIR = path.resolve(__dirname, '..')
 const MIGRATION_PATH = path.join(
@@ -759,6 +763,201 @@ function shiftInput({ shiftId = '', expectedVersion = 0, locationId, personId, e
     notes: 'Only the isolated PG17 harness can create this row.',
     instructions: [{ position: 1, text: 'Harness instruction' }],
   }
+}
+
+function buildWeekCopies(sourceShifts, targetShiftIds) {
+  assert.equal(sourceShifts.length, targetShiftIds.length)
+  return sourceShifts.map((sourceShift, index) => ({
+    sourceShiftId: sourceShift.shiftId,
+    shiftId: targetShiftIds[index],
+    shift: normalizeShiftInput({
+      expectedVersion: 0,
+      title: sourceShift.title,
+      date: addLocalDays(sourceShift.date, 7),
+      startTime: sourceShift.startTime,
+      endTime: sourceShift.endTime,
+      breakMinutes: sourceShift.breakMinutes,
+      requiredHeadcount: sourceShift.requiredHeadcount,
+      locationId: sourceShift.locationId,
+      notes: sourceShift.notes,
+      personIds: sourceShift.personIds,
+      instructions: sourceShift.instructions,
+    }, sourceShift.timeZone),
+  }))
+}
+
+async function readCopyWeekStorage(client, { orgId, shiftIds }) {
+  const result = await client.query(
+    `select (
+              select count(*)::integer
+                from public.workforce_schedule_shift
+               where org_id = $1::text and shift_id = any($2::text[])
+            ) as head_count,
+            (
+              select count(*)::integer
+                from public.workforce_schedule_shift_revision
+               where org_id = $1::text and shift_id = any($2::text[])
+            ) as revision_count,
+            (
+              select count(*)::integer
+                from public.workforce_schedule_shift_revision_assignee
+               where org_id = $1::text and shift_id = any($2::text[])
+            ) as assignee_count,
+            (
+              select count(*)::integer
+                from public.workforce_schedule_shift_instruction
+               where org_id = $1::text and shift_id = any($2::text[])
+            ) as instruction_count,
+            coalesce((
+              select bool_and(
+                lifecycle_status = 'DRAFT'
+                and current_revision_no = 1
+                and published_revision_no is null
+                and version = 1
+              )
+                from public.workforce_schedule_shift
+               where org_id = $1::text and shift_id = any($2::text[])
+            ), false) as all_initial_drafts`,
+    [orgId, shiftIds],
+  )
+  return result.rows[0]
+}
+
+async function assertCopyWeekBulkAndAtomicRollback(client) {
+  const orgId = 'harness-alpha'
+  const actorUid = 'uid-alpha-admin'
+  const sourceFrom = '2030-01-21'
+  const sourceTo = '2030-01-27'
+  const targetFrom = '2030-01-28'
+  const targetTo = '2030-02-03'
+  const rollbackTargetFrom = '2030-02-04'
+  const rollbackTargetTo = '2030-02-10'
+  const sourceIds = ['shift-copy-source-a', 'shift-copy-source-b']
+  const copiedIds = ['shift-copy-success-a', 'shift-copy-success-b']
+  const rollbackIds = ['shift-copy-rollback-a', 'shift-copy-rollback-b']
+
+  await withRuntimeTransaction(client, { orgId, actorUid }, async (repository) => {
+    const catalogs = await repository.bootstrap({ orgId, from: sourceFrom, to: sourceTo })
+    assert.equal(catalogs.people.length, 1)
+    assert.equal(catalogs.locations.length, 1)
+    const common = {
+      expectedVersion: 0,
+      breakMinutes: 15,
+      requiredHeadcount: 1,
+      locationId: catalogs.locations[0].locationId,
+      personIds: [catalogs.people[0].personId],
+      notes: 'COPY_WEEK PostgreSQL 17 atomicity harness.',
+    }
+    const inputs = [
+      normalizeShiftInput({
+        ...common,
+        title: 'COPY_WEEK source A',
+        date: '2030-01-21',
+        startTime: '08:00',
+        endTime: '12:00',
+        instructions: ['Prepare equipment'],
+      }, 'Europe/Warsaw'),
+      normalizeShiftInput({
+        ...common,
+        title: 'COPY_WEEK source B',
+        date: '2030-01-23',
+        startTime: '13:30',
+        endTime: '18:00',
+        instructions: ['Close the service area'],
+      }, 'Europe/Warsaw'),
+    ]
+    for (const [index, shift] of inputs.entries()) {
+      const created = await repository.saveShift({
+        orgId,
+        actorUid,
+        createShiftId: () => sourceIds[index],
+        shift,
+      })
+      assert.equal(created.shift.shiftId, sourceIds[index])
+    }
+  })
+
+  const receipt = await withRuntimeTransaction(client, { orgId, actorUid }, async (repository) => {
+    const sourceShifts = await repository.lockWeekCopySource({ orgId, from: sourceFrom, to: sourceTo })
+    assert.deepEqual(sourceShifts.map((shift) => shift.shiftId), sourceIds)
+    await repository.assertWeekCopyTargetEmpty({ orgId, from: targetFrom, to: targetTo })
+    return repository.copyShifts({
+      orgId,
+      actorUid,
+      copies: buildWeekCopies(sourceShifts, copiedIds),
+    })
+  })
+  assert.deepEqual(receipt, [
+    { sourceShiftId: sourceIds[0], shiftId: copiedIds[0], date: '2030-01-28', revision: 1, version: 1 },
+    { sourceShiftId: sourceIds[1], shiftId: copiedIds[1], date: '2030-01-30', revision: 1, version: 1 },
+  ])
+
+  await withRuntimeTransaction(client, { orgId, actorUid }, async (repository) => {
+    assert.deepEqual(await readCopyWeekStorage(client, { orgId, shiftIds: copiedIds }), {
+      head_count: 2,
+      revision_count: 2,
+      assignee_count: 2,
+      instruction_count: 2,
+      all_initial_drafts: true,
+    })
+    const target = await repository.bootstrap({ orgId, from: targetFrom, to: targetTo })
+    assert.deepEqual(target.shifts.map((shift) => ({
+      shiftId: shift.shiftId,
+      date: shift.date,
+      title: shift.title,
+      instructions: shift.instructions,
+    })), [
+      { shiftId: copiedIds[0], date: '2030-01-28', title: 'COPY_WEEK source A', instructions: ['Prepare equipment'] },
+      { shiftId: copiedIds[1], date: '2030-01-30', title: 'COPY_WEEK source B', instructions: ['Close the service area'] },
+    ])
+  })
+
+  let completedHeadWrites = 0
+  let forcedFailure = null
+  try {
+    await withRuntimeTransaction(client, { orgId, actorUid }, async (repository) => {
+      const sourceShifts = await repository.lockWeekCopySource({ orgId, from: targetFrom, to: targetTo })
+      await repository.assertWeekCopyTargetEmpty({ orgId, from: rollbackTargetFrom, to: rollbackTargetTo })
+      const failingClient = {
+        query: async (statement, values) => {
+          const sql = text(typeof statement === 'string' ? statement : statement?.text)
+            .replace(/\s+/g, ' ')
+            .toLowerCase()
+          const isHeadInsert = sql.startsWith('insert into public.workforce_schedule_shift (')
+          const isRevisionInsert = sql.startsWith('insert into public.workforce_schedule_shift_revision (')
+          if (isRevisionInsert && completedHeadWrites === 1) {
+            const failure = new Error('HARNESS_FORCED_COPY_WEEK_FAILURE_AFTER_HEAD_INSERT')
+            failure.code = 'HARNESS_FORCED_COPY_WEEK_FAILURE'
+            throw failure
+          }
+          const result = await client.query(statement, values)
+          if (isHeadInsert) completedHeadWrites += 1
+          return result
+        },
+      }
+      return createWorkforceScheduleRepository(failingClient).copyShifts({
+        orgId,
+        actorUid,
+        copies: buildWeekCopies(sourceShifts, rollbackIds),
+      })
+    })
+  } catch (error) {
+    forcedFailure = error
+  }
+  assert.equal(completedHeadWrites, 1)
+  assert.equal(forcedFailure?.code, 'HARNESS_FORCED_COPY_WEEK_FAILURE')
+  assert.equal(forcedFailure?.message, 'HARNESS_FORCED_COPY_WEEK_FAILURE_AFTER_HEAD_INSERT')
+
+  await withRuntimeTransaction(client, { orgId, actorUid }, async () => {
+    assert.deepEqual(await readCopyWeekStorage(client, { orgId, shiftIds: rollbackIds }), {
+      head_count: 0,
+      revision_count: 0,
+      assignee_count: 0,
+      instruction_count: 0,
+      all_initial_drafts: false,
+    })
+    assert.equal((await readCopyWeekStorage(client, { orgId, shiftIds: copiedIds })).head_count, 2)
+  })
 }
 
 async function publishPending(client, { publicationId, idempotencyKey }) {
@@ -1633,6 +1832,7 @@ async function runHarness({ args = process.argv.slice(2), env = process.env } = 
     await assertWorkerUidBindingBoundary(runtimeClient)
 
     await runCrudAndPublication(runtimeClient)
+    await assertCopyWeekBulkAndAtomicRollback(runtimeClient)
     await assertTenantIsolation(runtimeClient)
     await assertSourceTablesAreReadOnly(runtimeClient)
     await assertSchemaReadyFailsClosed(adminClient, MIGRATION_OWNER_ROLE)
@@ -1669,6 +1869,7 @@ async function runHarness({ args = process.argv.slice(2), env = process.env } = 
         'migration',
         'schema-ready',
         'crud-and-internal-publication',
+        'copy-week-bulk-and-atomic-rollback',
         'cross-tenant-rls',
         'source-read-only',
         'privilege-regressions-fail-closed',

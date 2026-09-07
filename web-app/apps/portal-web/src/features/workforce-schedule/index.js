@@ -11,6 +11,7 @@ import {
 } from './scheduleContract.js'
 import {
   assertWorkforceScheduleSelectableReferences,
+  buildWorkforceScheduleWeekCopyPayload,
   buildWorkforceScheduleShiftPayload,
   formatWorkforceScheduleWarning,
   isConfirmedWorkforceScheduleSettings,
@@ -18,6 +19,7 @@ import {
   normalizeWorkforceScheduleBootstrap,
   normalizeWorkforceScheduleSettings,
   normalizeWorkforceScheduleShift,
+  normalizeWorkforceScheduleWeekCopyReceipt,
   workforceScheduleCatalogConflictsFromError,
   workforceSchedulePublicationCandidates,
 } from './workforceScheduleClientModel.js'
@@ -181,12 +183,13 @@ export function createWorkforceScheduleFeature(ctx = {}) {
     return incoming
   }
 
-  async function runIdempotent(action, payload, request) {
+  async function runIdempotent(action, payload, request, confirm = (result) => result) {
     const operation = operationRegistry.begin(action, payload)
     try {
       const result = await request(operation.key)
+      const confirmed = await confirm(result)
       operationRegistry.complete(operation)
-      return result
+      return confirmed
     } catch (error) {
       operationRegistry.fail(operation, error)
       throw error
@@ -231,6 +234,11 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       onShiftDelete: (payload) => runWrite(() => archiveShift(payload)),
       onShiftMove: (payload) => runWrite(() => saveShift(payload)),
       onShiftUpdate: (payload) => runWrite(() => saveShift(payload)),
+      onWeekCopy: (payload) => runWrite(() => copyWeek(payload), {
+        onConfirmed: (receipt) => {
+          state.range = { from: receipt.targetFrom, to: receipt.targetTo, viewMode: 'week' }
+        },
+      }),
       ...(canConfigure() ? {
         onSettingsSave: (payload) => updateSettings(payload),
       } : {}),
@@ -245,6 +253,7 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       catalogSyncHasMoreConflicts: state.catalogSync.hasMoreConflicts,
       catalogSyncStale: state.catalogSync.stale,
       catalogSyncSummary: state.catalogSync.summary,
+      copyWeekEnabled: canEdit(),
       deliveryDisabled: true,
       editingEnabled: canEdit(),
       mode: 'internal',
@@ -474,7 +483,7 @@ export function createWorkforceScheduleFeature(ctx = {}) {
     }
   }
 
-  async function runWrite(task) {
+  async function runWrite(task, options = {}) {
     if (state.busy) {
       const error = new Error('Poprzedni zapis Grafiku jeszcze trwa.')
       error.code = 'WORKFORCE_SCHEDULE_WRITE_IN_PROGRESS'
@@ -497,6 +506,7 @@ export function createWorkforceScheduleFeature(ctx = {}) {
         error.code = 'WORKFORCE_SCHEDULE_WRITE_NOT_CONFIRMED'
         throw error
       }
+      options.onConfirmed?.(result)
       return result
     } catch (error) {
       if (!asyncGuard.isCurrent(operationContext)) return false
@@ -587,6 +597,27 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       throw error
     }
     return savedShift
+  }
+
+  async function copyWeek({ sourceShifts = [], sourceWeekStart = '' } = {}) {
+    const orgId = currentOrgId()
+    const payload = buildWorkforceScheduleWeekCopyPayload(sourceShifts, sourceWeekStart)
+    return runIdempotent('copy-week', { orgId, payload }, (idempotencyKey) => (
+      service.copyWorkforceScheduleWeek(orgId, payload, { idempotencyKey })
+    ), (response) => {
+      const receipt = normalizeWorkforceScheduleWeekCopyReceipt(response?.copy, {
+        orgId,
+        sourceShifts,
+        sourceWeekStart,
+      })
+      if (!receipt) {
+        const error = new Error('Serwer nie zwrócił pełnego potwierdzenia skopiowania tygodnia. Odśwież Grafik przed kolejną operacją.')
+        error.code = 'WORKFORCE_SCHEDULE_INVALID_COPY_RESPONSE'
+        error.retryWithSameIdempotencyKey = true
+        throw error
+      }
+      return receipt
+    })
   }
 
   async function archiveShift({ previousShift, shiftId }) {

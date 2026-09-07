@@ -896,6 +896,148 @@ test('nieaktywne snapshoty pozostają niedostępne dla nowych przypisań', () =>
   assert.match(repositorySource, /saveShift[\s\S]*assertActiveLocation[\s\S]*assertActivePeople/i)
 })
 
+test('COPY_WEEK source locks and returns only the active current revision in range', async () => {
+  const calls = []
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params })
+      if (/select h\.shift_id\s+from public\.workforce_schedule_shift h[\s\S]*r\.is_deleted = false/i.test(sql)) {
+        return { rows: [{ shift_id: 'shift-locked' }] }
+      }
+      if (/select h\.shift_id, h\.lifecycle_status/i.test(sql)) {
+        const base = {
+          lifecycle_status: 'PUBLISHED',
+          current_revision_no: 2,
+          published_revision_no: 2,
+          version: 4,
+          revision_no: 2,
+          business_date: '2026-03-23',
+          title: 'Zmiana poranna',
+          local_start_time: '07:00:00',
+          local_end_time: '15:00:00',
+          starts_at: '2026-03-23T06:00:00.000Z',
+          ends_at: '2026-03-23T14:00:00.000Z',
+          time_zone: 'Europe/Warsaw',
+          break_minutes: 30,
+          required_headcount: 1,
+          location_id: 'location-1',
+          notes: '',
+          person_ids: ['person-1'],
+          instructions: ['Odprawa'],
+          is_deleted: false,
+        }
+        return { rows: [
+          { ...base, shift_id: 'shift-locked' },
+          { ...base, shift_id: 'shift-not-locked' },
+        ] }
+      }
+      return { rows: [] }
+    },
+  }
+  const repository = createWorkforceScheduleRepository(client)
+
+  const result = await repository.lockWeekCopySource({
+    orgId: 'bestclean',
+    from: '2026-03-23',
+    to: '2026-03-29',
+  })
+
+  assert.deepEqual(result.map((shift) => shift.shiftId), ['shift-locked'])
+  assert.equal(result[0].version, 4)
+  assert.deepEqual(result[0].personIds, ['person-1'])
+  const lock = calls.find(({ sql }) => /r\.is_deleted = false/i.test(sql))
+  assert.deepEqual(lock.params, ['bestclean', '2026-03-23', '2026-03-29'])
+  assert.match(lock.sql, /h\.lifecycle_status <> 'ARCHIVED'/i)
+  assert.match(lock.sql, /r\.revision_no = h\.current_revision_no/i)
+  assert.match(lock.sql, /for update of h/i)
+})
+
+test('COPY_WEEK treats a pending deletion in the target week as an occupied target', async () => {
+  const calls = []
+  const repository = createWorkforceScheduleRepository({
+    async query(sql, params = []) {
+      calls.push({ sql, params })
+      return { rows: [{ shift_id: 'shift-pending-deletion' }] }
+    },
+  })
+
+  await assert.rejects(
+    repository.assertWeekCopyTargetEmpty({ orgId: 'bestclean', from: '2026-03-30', to: '2026-04-05' }),
+    (caught) => caught.code === 'WORKFORCE_SCHEDULE_COPY_TARGET_NOT_EMPTY'
+      && caught.details?.targetFrom === '2026-03-30'
+      && caught.details?.targetTo === '2026-04-05',
+  )
+  assert.match(calls[0].sql, /h\.lifecycle_status <> 'ARCHIVED'/i)
+  assert.doesNotMatch(calls[0].sql, /r\.is_deleted = false/i)
+  assert.match(calls[0].sql, /left join public\.workforce_schedule_shift_revision published/i)
+  assert.match(calls[0].sql, /h\.lifecycle_status = 'CHANGED_AFTER_PUBLISH'[\s\S]*published\.business_date between/i)
+  assert.match(calls[0].sql, /for update of h/i)
+})
+
+test('COPY_WEEK writes heads revisions assignees and instruction objects in four batch steps', async () => {
+  const calls = []
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params })
+      if (/select l\.location_id, l\.source_object_id/i.test(sql)) {
+        return { rows: [{ location_id: 'location-1', source_object_id: 'object-1' }] }
+      }
+      if (/workforce_schedule_lock_object_sources/i.test(sql)) {
+        return { rows: [{ source_object_id: 'object-1', active: true, status: 'ACTIVE' }] }
+      }
+      if (/select p\.person_id, p\.source_worker_id_normalized/i.test(sql)) {
+        return { rows: [{ person_id: 'person-1', source_worker_id_normalized: 'w001' }] }
+      }
+      if (/workforce_schedule_lock_worker_sources/i.test(sql)) {
+        return { rows: [{ source_worker_id_normalized: 'w001', active: true, status: 'ACTIVE' }] }
+      }
+      return { rows: [] }
+    },
+  }
+  const repository = createWorkforceScheduleRepository(client)
+  const shift = {
+    date: '2026-03-30',
+    title: 'Zmiana poranna',
+    startTime: '07:00',
+    endTime: '15:00',
+    startsAt: '2026-03-30T05:00:00.000Z',
+    endsAt: '2026-03-30T13:00:00.000Z',
+    timeZone: 'Europe/Warsaw',
+    breakMinutes: 30,
+    requiredHeadcount: 1,
+    locationId: 'location-1',
+    notes: 'Otworz magazyn',
+    personIds: ['person-1'],
+    instructions: [{ position: 1, text: 'Odprawa' }],
+  }
+
+  const result = await repository.copyShifts({
+    orgId: 'bestclean',
+    actorUid: 'admin-1',
+    copies: [{ sourceShiftId: 'shift-source-1', shiftId: 'shift-copy-1', shift }],
+  })
+
+  assert.deepEqual(result, [{
+    sourceShiftId: 'shift-source-1',
+    shiftId: 'shift-copy-1',
+    date: '2026-03-30',
+    revision: 1,
+    version: 1,
+  }])
+  const inserts = calls.filter(({ sql }) => /^\s*insert into public\.workforce_schedule_/i.test(sql))
+  assert.equal(inserts.length, 4)
+  assert.match(inserts[0].sql, /workforce_schedule_shift \(/i)
+  assert.match(inserts[0].sql, /'DRAFT', 1, null, 1/i)
+  assert.match(inserts[1].sql, /workforce_schedule_shift_revision \(/i)
+  assert.match(inserts[2].sql, /workforce_schedule_shift_revision_assignee/i)
+  assert.match(inserts[3].sql, /workforce_schedule_shift_instruction/i)
+  assert.deepEqual(inserts[0].params.slice(0, 2), ['bestclean', 'admin-1'])
+  assert.deepEqual(JSON.parse(inserts[0].params[2]), [{ shift_id: 'shift-copy-1' }])
+  assert.deepEqual(JSON.parse(inserts[2].params[1]), [{ shift_id: 'shift-copy-1', person_id: 'person-1' }])
+  assert.deepEqual(JSON.parse(inserts[3].params[1]), [{ shift_id: 'shift-copy-1', position: 1, text: 'Odprawa' }])
+  assert.equal(calls.some(({ sql }) => /outbox|notify|delivery/i.test(sql)), false)
+})
+
 test('synchronizacja używa stabilnych ID źródłowych, nie nazwy ani adresu', async () => {
   const calls = []
   const client = {

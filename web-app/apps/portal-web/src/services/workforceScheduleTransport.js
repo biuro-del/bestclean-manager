@@ -3,6 +3,7 @@ const WORKFORCE_SCHEDULE_PATH = '/portal/workforce-schedule'
 
 const WRITE_COMMANDS = new Set([
   'ARCHIVE_SHIFT',
+  'COPY_WEEK',
   'SET_CONFIGURATION',
   'SYNC_CATALOGS',
   'UPSERT_SHIFT',
@@ -229,7 +230,8 @@ export function createWorkforceScheduleOperationRegistry(createKey = createWorkf
       const current = currentEntry(operation)
       if (!current) return
       const status = Number(requestError?.status) || 0
-      const retryMayRepeatAnAcceptedWrite = requestError?.code === 'WORKFORCE_SCHEDULE_NETWORK_ERROR'
+      const retryMayRepeatAnAcceptedWrite = requestError?.retryWithSameIdempotencyKey === true
+        || requestError?.code === 'WORKFORCE_SCHEDULE_NETWORK_ERROR'
         || [408, 425, 429].includes(status)
         || status >= 500
       if (!retryMayRepeatAnAcceptedWrite) keys.delete(current.signature)
@@ -397,6 +399,9 @@ export function createWorkforceScheduleTransport(options = {}) {
   return {
     archiveShift: (orgId, payload, optionsValue) => (
       sendCommand(orgId, 'ARCHIVE_SHIFT', payload, optionsValue)
+    ),
+    copyWeek: (orgId, payload, optionsValue) => (
+      sendCommand(orgId, 'COPY_WEEK', payload, optionsValue)
     ),
     fetchBootstrap,
     publish,

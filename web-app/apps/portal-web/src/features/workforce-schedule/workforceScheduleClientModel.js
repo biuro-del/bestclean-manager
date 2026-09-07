@@ -28,6 +28,15 @@ function catalogSelectable(value = {}) {
   return !status || status === 'ACTIVE'
 }
 
+function addIsoDays(value, amount) {
+  const normalized = text(value)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return ''
+  const date = new Date(`${normalized}T12:00:00.000Z`)
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== normalized) return ''
+  date.setUTCDate(date.getUTCDate() + amount)
+  return date.toISOString().slice(0, 10)
+}
+
 function normalizeBootstrapCatalogSync(value) {
   if (!exactKeys(value, ['lastSyncedAt', 'locations', 'people'])) return null
   const timestamp = text(value.lastSyncedAt)
@@ -70,6 +79,99 @@ export function normalizeWorkforceScheduleShift(shift = {}) {
 export function isConfirmedWorkforceScheduleShift(shift = {}) {
   const normalized = normalizeWorkforceScheduleShift(shift)
   return Boolean(normalized.id && normalized.revision > 0 && normalized.version > 0)
+}
+
+export function buildWorkforceScheduleWeekCopyPayload(shifts = [], sourceWeekStartValue = '') {
+  const sourceWeekStart = text(sourceWeekStartValue)
+  const sourceWeekEnd = addIsoDays(sourceWeekStart, 6)
+  const monday = sourceWeekStart && new Date(`${sourceWeekStart}T12:00:00.000Z`).getUTCDay() === 1
+  if (!sourceWeekEnd || !monday) {
+    const error = new Error('Kopiowany tydzień musi zaczynać się w poniedziałek.')
+    error.code = 'WORKFORCE_SCHEDULE_INVALID_COPY_WEEK'
+    throw error
+  }
+  const eligible = (Array.isArray(shifts) ? shifts : [])
+    .filter((shift) => !shift?.pendingDeletion && text(shift?.date) >= sourceWeekStart && text(shift?.date) <= sourceWeekEnd)
+  if (!eligible.length || eligible.some((shift) => !isConfirmedWorkforceScheduleShift(shift))) {
+    const error = new Error(eligible.length
+      ? 'Nie wszystkie zmiany tygodnia mają potwierdzoną wersję serwera. Odśwież Grafik przed kopiowaniem.'
+      : 'Tydzień źródłowy nie zawiera zmian do skopiowania.')
+    error.code = eligible.length ? 'WORKFORCE_SCHEDULE_COPY_SOURCE_NOT_CONFIRMED' : 'WORKFORCE_SCHEDULE_NOTHING_TO_COPY'
+    throw error
+  }
+  const expectedVersions = eligible.map((shift) => ({
+    shiftId: text(shift.shiftId || shift.id),
+    version: positiveInteger(shift.version),
+  })).sort((left, right) => left.shiftId.localeCompare(right.shiftId, 'en'))
+  if (new Set(expectedVersions.map((item) => item.shiftId)).size !== expectedVersions.length) {
+    const error = new Error('Tydzień źródłowy zawiera powielone identyfikatory zmian.')
+    error.code = 'WORKFORCE_SCHEDULE_INVALID_COPY_WEEK'
+    throw error
+  }
+  return { sourceWeekStart, expectedVersions }
+}
+
+export function normalizeWorkforceScheduleWeekCopyReceipt(receipt, expected = {}) {
+  if (!exactKeys(receipt, ['created', 'createdCount', 'orgId', 'sourceFrom', 'sourceTo', 'targetFrom', 'targetTo'])) return null
+  const orgId = text(expected.orgId)
+  const sourceWeekStart = text(expected.sourceWeekStart)
+  const sourceWeekEnd = addIsoDays(sourceWeekStart, 6)
+  const targetFrom = addIsoDays(sourceWeekStart, 7)
+  const targetTo = addIsoDays(sourceWeekStart, 13)
+  if (
+    !orgId
+    || text(receipt.orgId) !== orgId
+    || text(receipt.sourceFrom) !== sourceWeekStart
+    || text(receipt.sourceTo) !== sourceWeekEnd
+    || text(receipt.targetFrom) !== targetFrom
+    || text(receipt.targetTo) !== targetTo
+    || !Array.isArray(receipt.created)
+    || !Number.isSafeInteger(receipt.createdCount)
+    || receipt.createdCount !== receipt.created.length
+  ) return null
+
+  const sourceShifts = Array.isArray(expected.sourceShifts) ? expected.sourceShifts : []
+  let payload
+  try {
+    payload = buildWorkforceScheduleWeekCopyPayload(sourceShifts, sourceWeekStart)
+  } catch {
+    return null
+  }
+  if (receipt.created.length !== payload.expectedVersions.length) return null
+  const sourceById = new Map(sourceShifts.map((shift) => [text(shift.shiftId || shift.id), shift]))
+  const expectedIds = new Set(payload.expectedVersions.map((item) => item.shiftId))
+  const createdIds = new Set()
+  const confirmedSourceIds = new Set()
+  const created = []
+  for (const item of receipt.created) {
+    if (!exactKeys(item, ['date', 'revision', 'shiftId', 'sourceShiftId', 'version'])) return null
+    const sourceShiftId = text(item.sourceShiftId)
+    const shiftId = text(item.shiftId)
+    const sourceShift = sourceById.get(sourceShiftId)
+    if (
+      !expectedIds.has(sourceShiftId)
+      || !shiftId
+      || expectedIds.has(shiftId)
+      || createdIds.has(shiftId)
+      || confirmedSourceIds.has(sourceShiftId)
+      || positiveInteger(item.revision) !== 1
+      || positiveInteger(item.version) !== 1
+      || text(item.date) !== addIsoDays(sourceShift?.date, 7)
+    ) return null
+    createdIds.add(shiftId)
+    confirmedSourceIds.add(sourceShiftId)
+    created.push({ sourceShiftId, shiftId, date: text(item.date), revision: 1, version: 1 })
+  }
+  if (confirmedSourceIds.size !== expectedIds.size) return null
+  return {
+    orgId,
+    sourceFrom: sourceWeekStart,
+    sourceTo: sourceWeekEnd,
+    targetFrom,
+    targetTo,
+    createdCount: created.length,
+    created,
+  }
 }
 
 export function normalizeWorkforceScheduleSettings(settings) {

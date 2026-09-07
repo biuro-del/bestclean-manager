@@ -53,7 +53,7 @@ import {
   normalizeWorkforceScheduleShift,
   workforceScheduleStructuralConflictsFromError,
 } from "./workforceScheduleClientModel.js";
-import { PublishDialog, RequestsDialog, SettingsDialog, ShiftDrawer } from "./ScheduleOverlays.jsx";
+import { CopyWeekDialog, PublishDialog, RequestsDialog, SettingsDialog, ShiftDrawer } from "./ScheduleOverlays.jsx";
 import "./schedule.css";
 
 const WEEKDAY_SHORT = ["niedz.", "pon.", "wt.", "śr.", "czw.", "pt.", "sob."];
@@ -350,6 +350,7 @@ export function ScheduleContent({
   catalogSyncHasMoreConflicts = false,
   catalogSyncStale = false,
   catalogSyncSummary = null,
+  copyWeekEnabled = false,
   deliveryDisabled = true,
   editingEnabled = true,
   exportEnabled = false,
@@ -367,6 +368,7 @@ export function ScheduleContent({
   onShiftDelete,
   onShiftMove,
   onShiftUpdate,
+  onWeekCopy,
   onSnapshotChange,
   requestsEnabled = false,
   scheduleSettings = null,
@@ -399,6 +401,7 @@ export function ScheduleContent({
     ...providedAdapter,
     ...(onShiftCreate ? { onShiftCreate } : {}),
     ...(onShiftUpdate ? { onShiftUpdate } : {}),
+    ...(onWeekCopy ? { onWeekCopy } : {}),
     ...(onShiftDelete ? { onShiftDelete } : {}),
     ...(onShiftMove ? { onShiftMove } : {}),
     ...(onSchedulePublish ? { onSchedulePublish } : {}),
@@ -407,7 +410,7 @@ export function ScheduleContent({
     ...(onExport ? { onExport } : {}),
     ...(onRangeChange ? { onRangeChange } : {}),
     ...(onSnapshotChange ? { onSnapshotChange } : {}),
-  }), [providedAdapter, onShiftCreate, onShiftUpdate, onShiftDelete, onShiftMove, onSchedulePublish, onRequestResolve, onSettingsSave, onExport, onRangeChange, onSnapshotChange]);
+  }), [providedAdapter, onShiftCreate, onShiftUpdate, onShiftDelete, onShiftMove, onWeekCopy, onSchedulePublish, onRequestResolve, onSettingsSave, onExport, onRangeChange, onSnapshotChange]);
   const [shifts, setShifts] = useState(() => [...source.shifts]);
   const [requests, setRequests] = useState(() => [...source.requests]);
   const [weekStart, setWeekStart] = useState(source.weekStart);
@@ -434,6 +437,7 @@ export function ScheduleContent({
   const visibleShifts = useMemo(() => filterShifts(shifts, query, locationFilter, userFilter), [shifts, query, locationFilter, userFilter]);
   const currentShifts = useMemo(() => visibleShifts.filter((shift) => days.includes(shift.date)), [visibleShifts, days]);
   const weekShifts = useMemo(() => shifts.filter((shift) => days.includes(shift.date)), [shifts, days]);
+  const weekCopySource = useMemo(() => weekShifts.filter((shift) => !shift.pendingDeletion), [weekShifts]);
   const changes = useMemo(() => dirtyShifts(shifts), [shifts]);
   const conflicts = useMemo(() => findConflicts(weekShifts, users, weeklyLimitMinutes), [weekShifts, users, weeklyLimitMinutes]);
   const summary = useMemo(() => summarizeShifts(currentShifts), [currentShifts]);
@@ -679,14 +683,18 @@ export function ScheduleContent({
     onNotify("Wyczyszczono szkice w tym tygodniu.");
   };
 
-  const copyWeek = () => {
-    const copies = shifts.filter((shift) => days.includes(shift.date)).map((shift) => duplicateShift(shift, `sh-${Date.now()}-${shift.id}`, addDays(shift.date, 7)));
-    const nextShifts = [...shifts, ...copies];
-    setShifts(nextShifts);
-    setMenu(null);
-    copies.forEach((shift) => void emit("onShiftCreate", { shift, source: "copy-week" }).catch(() => {}));
-    emitSnapshot("week-copy", nextShifts);
-    onNotify("Skopiowano tydzień do następnego okresu.");
+  const copyWeek = async () => {
+    const saved = await runMutation("onWeekCopy", {
+      sourceShifts: weekCopySource,
+      sourceWeekStart: days[0],
+    });
+    if (!saved) return;
+    setOverlay(null);
+    setViewMode("week");
+    setWeekStart(saved.targetFrom);
+    setSelectedDay(saved.targetFrom);
+    onNotify(`Skopiowano ${saved.createdCount} ${saved.createdCount === 1 ? "zmianę" : "zmian"} jako szkice następnego tygodnia.`);
+    return saved;
   };
 
   const publishSchedule = async () => {
@@ -747,7 +755,7 @@ export function ScheduleContent({
             <button className="tm-schedule-date-button" onClick={() => setViewMode("month")} type="button"><CalendarBlank size={17} /><span>{viewMode === "day" ? `${dateParts(selectedDay).day} ${dateParts(selectedDay).month} ${dateParts(selectedDay).year}` : viewMode === "month" ? `${dateParts(weekStart).month} ${dateParts(weekStart).year}` : rangeLabel(weekStart)}</span></button>
           </div>
           <div className="tm-schedule-toolbar-right">
-            {(advancedActionsEnabled || exportEnabled) && <div className="tm-schedule-popover-anchor"><button aria-expanded={menu === "actions"} disabled={mutationBusy} onClick={() => setMenu(menu === "actions" ? null : "actions")} type="button">Działania <CaretDown size={14} /></button>{menu === "actions" && <MenuLayer className="tm-schedule-actions-menu">{advancedActionsEnabled && <button onClick={clearWeekDrafts} role="menuitem" type="button"><Trash size={17} /> Wyczyść szkice</button>}{advancedActionsEnabled && <button onClick={copyWeek} role="menuitem" type="button"><Copy size={17} /> Skopiuj do następnego tygodnia</button>}{exportEnabled && <button onClick={() => { setMenu(null); void emit("onExport", { shifts: currentShifts, weekStart }); onNotify("Przygotowano dane grafiku do eksportu."); }} role="menuitem" type="button"><DownloadSimple size={17} /> Eksportuj grafik</button>}</MenuLayer>}</div>}
+            {(advancedActionsEnabled || exportEnabled || (copyWeekEnabled && viewMode === "week")) && <div className="tm-schedule-popover-anchor"><button aria-expanded={menu === "actions"} disabled={mutationBusy} onClick={() => setMenu(menu === "actions" ? null : "actions")} type="button">Działania <CaretDown size={14} /></button>{menu === "actions" && <MenuLayer className="tm-schedule-actions-menu">{advancedActionsEnabled && <button onClick={clearWeekDrafts} role="menuitem" type="button"><Trash size={17} /> Wyczyść szkice</button>}{copyWeekEnabled && viewMode === "week" && <button disabled={!weekCopySource.length} onClick={() => { setOverlay("copy-week"); setMenu(null); }} role="menuitem" type="button"><Copy size={17} /> Skopiuj do następnego tygodnia</button>}{exportEnabled && <button onClick={() => { setMenu(null); void emit("onExport", { shifts: currentShifts, weekStart }); onNotify("Przygotowano dane grafiku do eksportu."); }} role="menuitem" type="button"><DownloadSimple size={17} /> Eksportuj grafik</button>}</MenuLayer>}</div>}
             {editingEnabled && <div className="tm-schedule-popover-anchor"><button className="tm-schedule-add-button" disabled={!activeLocations.length} onClick={() => setMenu(menu === "add" ? null : "add")} type="button"><Plus size={17} /> Dodaj <CaretDown size={14} /></button>{menu === "add" && <MenuLayer className="tm-schedule-add-menu"><button onClick={() => openNewShift()} role="menuitem" type="button"><Clock size={18} /> Nowa zmiana</button>{requestsEnabled && <button onClick={() => { setOverlay("requests"); setMenu(null); }} role="menuitem" type="button"><Users size={18} /> Wniosek / wolna zmiana</button>}{templatesEnabled && <button disabled={!templates.length} onClick={() => { setEditorShift({ ...templates[0], date: selectedDay, assigneeIds: [], notes: "", tasks: [] }); setMenu(null); }} role="menuitem" type="button"><Copy size={18} /> Z szablonu</button>}</MenuLayer>}</div>}
             {editingEnabled && <button className="tm-schedule-publish-button" disabled={!changes.length || mutationBusy} onClick={() => setOverlay("publish")} type="button"><PaperPlaneTilt size={17} /> {deliveryDisabled ? "Zatwierdź" : "Opublikuj"}{changes.length ? ` (${changes.length})` : ""}</button>}
           </div>
@@ -778,6 +786,7 @@ export function ScheduleContent({
       {overlay === "publish" && <PublishDialog busy={mutationBusy} deliveryDisabled={deliveryDisabled} onClose={() => setOverlay(null)} onPublish={publishSchedule} periodLabel={rangeLabel(weekStart)} shifts={changes} users={users} />}
       {requestsEnabled && overlay === "requests" && <RequestsDialog onClose={() => setOverlay(null)} onResolve={resolveRequest} requests={requests} users={users} />}
       {settingsEnabled && overlay === "settings" && <SettingsDialog busy={mutationBusy} deliveryDisabled={deliveryDisabled} initialSettings={scheduleSettings} onClose={() => setOverlay(null)} onSave={saveScheduleSettings} />}
+      {copyWeekEnabled && overlay === "copy-week" && <CopyWeekDialog busy={mutationBusy} onClose={() => setOverlay(null)} onCopy={copyWeek} sourceLabel={rangeLabel(weekStart)} targetLabel={rangeLabel(addDays(weekStart, 7))} total={weekCopySource.length} />}
     </section>
   );
 }
