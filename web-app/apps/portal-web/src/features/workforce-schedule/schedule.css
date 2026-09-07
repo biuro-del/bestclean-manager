@@ -242,6 +242,97 @@
   color: #1f405d;
 }
 
+.tm-schedule-catalog-sync {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 14px;
+  margin: -5px 0 16px;
+  color: #3d4e61;
+  background: #fff;
+  border: 1px solid #dde5ea;
+  border-radius: 10px;
+}
+
+.tm-schedule-catalog-sync > div,
+.tm-schedule-catalog-sync > div > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.tm-schedule-catalog-sync > div {
+  gap: 10px;
+}
+
+.tm-schedule-catalog-sync > div > svg {
+  flex: 0 0 auto;
+  color: #2a96f7;
+}
+
+.tm-schedule-catalog-sync > div > span {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tm-schedule-catalog-sync strong {
+  color: #26384d;
+  font-size: 12px;
+}
+
+.tm-schedule-catalog-sync small {
+  color: #738297;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.tm-schedule-catalog-sync small.is-error {
+  color: #b42318;
+}
+
+.tm-schedule-catalog-sync.has-error {
+  border-color: #f2c4c0;
+  background: #fffafa;
+}
+
+.tm-schedule-catalog-sync.is-stale {
+  border-color: #e8bd72;
+  background: #fffaf0;
+}
+
+.tm-schedule-catalog-sync.is-stale > div > svg {
+  color: #b66a13;
+}
+
+.tm-schedule-catalog-sync > button {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 0 12px;
+  color: #285f9b;
+  background: #f4f9ff;
+  border: 1px solid #cfe2f4;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.tm-schedule-catalog-sync > button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.tm-schedule-catalog-sync .is-spinning {
+  animation: workforce-schedule-spin 0.8s linear infinite;
+}
+
 .tm-schedule-title-actions {
   gap: 8px;
 }
@@ -570,6 +661,93 @@
 
 .tm-schedule-catalog-warning svg {
   flex: 0 0 auto;
+}
+
+.tm-schedule-structural-conflicts {
+  padding: 12px 15px 14px;
+  color: #7a271a;
+  background: #fff7f6;
+  border-bottom: 1px solid #f1c7c2;
+}
+
+.tm-schedule-structural-conflicts:focus-visible {
+  outline: 3px solid rgb(37 99 235 / 28%);
+  outline-offset: 2px;
+}
+
+.tm-schedule-structural-conflicts.is-catalog-sync {
+  margin: -8px 0 16px;
+  border: 1px solid #f1c7c2;
+  border-radius: 10px;
+}
+
+.tm-schedule-structural-conflicts > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.tm-schedule-structural-conflicts > header > svg {
+  flex: 0 0 auto;
+  color: #d92d20;
+}
+
+.tm-schedule-structural-conflicts > header > div {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.tm-schedule-structural-conflicts > header > button {
+  padding: 4px 8px;
+  color: #9c2b20;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.tm-schedule-structural-conflicts ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 7px;
+  padding: 0;
+  margin: 10px 0 0 29px;
+  list-style: none;
+}
+
+.tm-schedule-structural-conflicts li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #f0cfcb;
+  border-radius: 8px;
+  font-size: 10px;
+}
+
+.tm-schedule-structural-conflicts li span,
+.tm-schedule-structural-conflicts li small {
+  color: #7d4c46;
+  line-height: 1.4;
+}
+
+.tm-schedule-structural-conflicts > p {
+  margin: 9px 0 0 29px;
+  color: #985b53;
+  font-size: 10px;
+}
+
+.tm-schedule-structural-conflicts li small {
+  margin-top: 3px;
+  color: #985b53;
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .tm-schedule-canvas {
@@ -1464,6 +1642,21 @@
   border-radius: 8px;
 }
 
+.tm-schedule-assignees > label.is-inactive,
+.tm-schedule-resource-cell.is-inactive,
+.tm-schedule-agenda-location.is-inactive {
+  color: #7d8792;
+  background: #f7f8f9;
+}
+
+.tm-schedule-assignees > label.is-inactive {
+  border-style: dashed;
+}
+
+.tm-schedule-day-cell.is-inactive {
+  background: #fafbfb;
+}
+
 .tm-schedule-assignees > label > input[type="checkbox"] {
   width: 16px;
   height: 16px;
@@ -1980,6 +2173,11 @@
   .tm-schedule-title-card h1 { font-size: 20px; }
   .tm-schedule-title-card p { display: none; }
   .tm-schedule-boundary-banner { margin-bottom: 9px; align-items: flex-start; }
+  .tm-schedule-catalog-sync { align-items: stretch; flex-direction: column; margin-bottom: 9px; }
+  .tm-schedule-catalog-sync > button { width: 100%; }
+  .tm-schedule-structural-conflicts.is-catalog-sync { margin: 0 0 9px; }
+  .tm-schedule-structural-conflicts ul { grid-template-columns: 1fr; margin-left: 0; }
+  .tm-schedule-structural-conflicts > p { margin-left: 0; }
   .tm-schedule-title-actions { gap: 4px; }
   .tm-schedule-title-actions > button,
   .tm-schedule-resource-select { width: 38px; min-width: 38px; padding: 0; justify-content: center; }

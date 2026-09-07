@@ -51,6 +51,7 @@ import {
   applyWorkforceSchedulePublication,
   isConfirmedWorkforceScheduleShift,
   normalizeWorkforceScheduleShift,
+  workforceScheduleStructuralConflictsFromError,
 } from "./workforceScheduleClientModel.js";
 import { PublishDialog, RequestsDialog, SettingsDialog, ShiftDrawer } from "./ScheduleOverlays.jsx";
 import "./schedule.css";
@@ -61,6 +62,39 @@ const UNKNOWN_LOCATION = Object.freeze({ id: "unknown-location", name: "Nieznana
 
 function userName(user) {
   return user?.displayName || `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || "Nieprzypisany";
+}
+
+function isCatalogSelectable(item) {
+  return item?.selectable !== false;
+}
+
+function formatCatalogSyncTimestamp(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "brak potwierdzonego czasu";
+  return new Intl.DateTimeFormat("pl-PL", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "Europe/Warsaw",
+  }).format(date);
+}
+
+function catalogSyncCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : "?";
+}
+
+function catalogSyncChangeSummary(summary) {
+  if (summary?.source !== "receipt") return "";
+  return `Zmiany w tej operacji — pracownicy: +${catalogSyncCount(summary.people?.created)}, ${catalogSyncCount(summary.people?.updated)} zaktualizowanych, ${catalogSyncCount(summary.people?.deactivated)} wyłączonych; obiekty: +${catalogSyncCount(summary.locations?.created)}, ${catalogSyncCount(summary.locations?.updated)} zaktualizowanych, ${catalogSyncCount(summary.locations?.deactivated)} wyłączonych.`;
+}
+
+function conflictContext(conflict) {
+  const affected = conflict?.affected || {};
+  const parts = [];
+  if (affected.shiftId) parts.push(`ID zmiany: ${affected.shiftId}`);
+  if (affected.personId) parts.push(`ID pracownika: ${affected.personId}`);
+  if (affected.locationId) parts.push(`ID obiektu: ${affected.locationId}`);
+  if (affected.date) parts.push(`Data: ${affected.date}`);
+  return parts.join(" · ");
 }
 
 function dateParts(iso) {
@@ -166,7 +200,8 @@ function WeekGrid({ conflicts, days, display, dragEnabled, editingEnabled, group
   const [announcement, setAnnouncement] = useState("");
   const draggedRef = useRef(null);
   const dropTargetRef = useRef(null);
-  const resources = grouping === "location" ? locations : users.map((user) => ({ id: user.id, name: userName(user), color: "#506de2", softColor: "#eef1ff", initials: user.initials }));
+  const activeLocation = locations.find(isCatalogSelectable);
+  const resources = grouping === "location" ? locations : users.map((user) => ({ id: user.id, name: userName(user), color: "#506de2", softColor: "#eef1ff", initials: user.initials, selectable: user.selectable }));
   const resourceShifts = (resourceId, day) => shifts.filter((shift) => shift.date === day && (grouping === "location" ? shift.locationId === resourceId : shift.assigneeIds.includes(resourceId)));
   const visibleResources = display.showEmpty ? resources : resources.filter((resource) => days.some((day) => resourceShifts(resource.id, day).length));
   const weekSummary = summarizeShifts(shifts);
@@ -254,20 +289,21 @@ function WeekGrid({ conflicts, days, display, dragEnabled, editingEnabled, group
         {days.map((day) => { const part = dateParts(day); const dayShifts = shifts.filter((shift) => shift.date === day); return <div className={`tm-schedule-day-head ${day === todayIso ? "is-today" : ""}`} key={day} role="columnheader"><span>{part.weekday}</span><strong>{part.day}</strong>{display.showSummary && <small>{formatDuration(dayShifts.reduce((sum, shift) => sum + getShiftMinutes(shift), 0))} · {dayShifts.length}</small>}</div>; })}
         {visibleResources.map((resource) => (
           <div className="tm-schedule-grid-row" key={resource.id} role="row">
-            <div className="tm-schedule-resource-cell" role="rowheader"><span className="tm-schedule-resource-mark" style={{ background: resource.color }}>{grouping === "user" ? resource.initials : ""}</span><div><strong>{resource.name}</strong><small>{resourceShifts(resource.id, days[0]).length || ""}{grouping === "location" ? " aktywnych zmian" : ""}</small></div></div>
+            <div className={`tm-schedule-resource-cell ${isCatalogSelectable(resource) ? "" : "is-inactive"}`} role="rowheader"><span className="tm-schedule-resource-mark" style={{ background: resource.color }}>{grouping === "user" ? resource.initials : ""}</span><div><strong>{resource.name}</strong><small>{isCatalogSelectable(resource) ? `${resourceShifts(resource.id, days[0]).length || ""}${grouping === "location" ? " aktywnych zmian" : ""}` : "Nieaktywny"}</small></div></div>
             {days.map((day) => {
               const items = resourceShifts(resource.id, day);
               const targetKey = `${resource.id}-${day}`;
               const activeTarget = dropTarget?.key === targetKey;
+              const cellSelectable = isCatalogSelectable(resource) && Boolean(activeLocation);
               return <div
                 aria-label={`${resource.name}, ${day}${activeTarget ? dropTarget.valid ? ", dozwolone miejsce upuszczenia" : `, niedozwolone miejsce upuszczenia: ${dropTarget.message}` : ""}`}
-                className={`tm-schedule-day-cell ${activeTarget ? dropTarget.valid ? "is-drag-target" : "is-drop-invalid" : ""}`}
-                data-drop-day={day}
-                data-drop-resource={resource.id}
+                className={`tm-schedule-day-cell ${cellSelectable ? "" : "is-inactive"} ${activeTarget ? dropTarget.valid ? "is-drag-target" : "is-drop-invalid" : ""}`}
+                data-drop-day={cellSelectable ? day : undefined}
+                data-drop-resource={cellSelectable ? resource.id : undefined}
                 key={targetKey}
-                onDoubleClick={() => onCellClick(day, grouping === "location" ? resource.id : locations[0]?.id)}
+                onDoubleClick={() => cellSelectable && onCellClick(day, grouping === "location" ? resource.id : activeLocation.id)}
                 role="gridcell"
-              >{editingEnabled && <button aria-label={`Dodaj zmianę: ${resource.name}, ${day}`} className="tm-schedule-cell-add" disabled={!locations.length} onClick={() => onCellClick(day, grouping === "location" ? resource.id : locations[0]?.id)} type="button"><Plus size={16} /></button>}{items.map((shift) => <ShiftCard actionsEnabled={editingEnabled} conflicts={conflicts} dragEnabled={dragEnabled} dragging={dragged?.shift.id === shift.id && dragged.originResourceId === resource.id} key={shift.id} location={locations.find((location) => location.id === shift.locationId) || UNKNOWN_LOCATION} onAction={onShiftAction} onDragCancel={handleDragCancel} onDragMove={handleDragMove} onDragStart={handleDragStart} onDragStop={handleDragStop} onOpen={onShiftOpen} originResourceId={resource.id} shift={shift} users={users} />)}</div>;
+              >{editingEnabled && cellSelectable && <button aria-label={`Dodaj zmianę: ${resource.name}, ${day}`} className="tm-schedule-cell-add" onClick={() => onCellClick(day, grouping === "location" ? resource.id : activeLocation.id)} type="button"><Plus size={16} /></button>}{items.map((shift) => <ShiftCard actionsEnabled={editingEnabled} conflicts={conflicts} dragEnabled={dragEnabled} dragging={dragged?.shift.id === shift.id && dragged.originResourceId === resource.id} key={shift.id} location={locations.find((location) => location.id === shift.locationId) || UNKNOWN_LOCATION} onAction={onShiftAction} onDragCancel={handleDragCancel} onDragMove={handleDragMove} onDragStart={handleDragStart} onDragStop={handleDragStop} onOpen={onShiftOpen} originResourceId={resource.id} shift={shift} users={users} />)}</div>;
             })}
           </div>
         ))}
@@ -279,15 +315,16 @@ function WeekGrid({ conflicts, days, display, dragEnabled, editingEnabled, group
 
 function DayAgenda({ conflicts, day, editingEnabled, locations, onCellClick, onShiftAction, onShiftOpen, shifts, users }) {
   const part = dateParts(day);
+  const activeLocation = locations.find(isCatalogSelectable);
   return (
     <div className="tm-schedule-agenda">
-      <header><div><span>{part.weekday}</span><strong>{part.day} {part.month}</strong></div>{editingEnabled && <button disabled={!locations.length} onClick={() => onCellClick(day, locations[0]?.id)} type="button"><Plus size={18} /> Dodaj zmianę</button>}</header>
+      <header><div><span>{part.weekday}</span><strong>{part.day} {part.month}</strong></div>{editingEnabled && <button disabled={!activeLocation} onClick={() => onCellClick(day, activeLocation?.id)} type="button"><Plus size={18} /> Dodaj zmianę</button>}</header>
       {locations.map((location) => {
         const items = shifts.filter((shift) => shift.date === day && shift.locationId === location.id);
         if (!items.length) return null;
-        return <section key={location.id}><div className="tm-schedule-agenda-location"><span style={{ background: location.color }} /><div><strong>{location.name}</strong><small>{items.length} {items.length === 1 ? "zmiana" : "zmiany"}</small></div></div><div className="tm-schedule-agenda-cards">{items.map((shift) => <ShiftCard actionsEnabled={editingEnabled} conflicts={conflicts} key={shift.id} location={location} onAction={onShiftAction} onOpen={onShiftOpen} shift={shift} users={users} />)}</div></section>;
+        return <section key={location.id}><div className={`tm-schedule-agenda-location ${isCatalogSelectable(location) ? "" : "is-inactive"}`}><span style={{ background: location.color }} /><div><strong>{location.name}</strong><small>{isCatalogSelectable(location) ? `${items.length} ${items.length === 1 ? "zmiana" : "zmiany"}` : `Nieaktywny · ${items.length} ${items.length === 1 ? "zmiana" : "zmiany"}`}</small></div></div><div className="tm-schedule-agenda-cards">{items.map((shift) => <ShiftCard actionsEnabled={editingEnabled} conflicts={conflicts} key={shift.id} location={location} onAction={onShiftAction} onOpen={onShiftOpen} shift={shift} users={users} />)}</div></section>;
       })}
-      {!shifts.some((shift) => shift.date === day) && <div className="tm-schedule-empty-state"><CalendarBlank size={38} /><strong>Brak zmian tego dnia</strong><p>{locations.length ? editingEnabled ? "Dodaj pierwszą zmianę lub przejdź do innej daty." : "W tym dniu nie zaplanowano zmian." : "Najpierw wczytaj katalog obiektów."}</p>{editingEnabled && <button disabled={!locations.length} onClick={() => onCellClick(day, locations[0]?.id)} type="button"><Plus size={17} /> Dodaj zmianę</button>}</div>}
+      {!shifts.some((shift) => shift.date === day) && <div className="tm-schedule-empty-state"><CalendarBlank size={38} /><strong>Brak zmian tego dnia</strong><p>{activeLocation ? editingEnabled ? "Dodaj pierwszą zmianę lub przejdź do innej daty." : "W tym dniu nie zaplanowano zmian." : "Najpierw wczytaj aktywny katalog obiektów."}</p>{editingEnabled && <button disabled={!activeLocation} onClick={() => onCellClick(day, activeLocation?.id)} type="button"><Plus size={17} /> Dodaj zmianę</button>}</div>}
     </div>
   );
 }
@@ -306,12 +343,20 @@ function MonthGrid({ locations, monthDate, onDayOpen, shifts, todayIso }) {
 export function ScheduleContent({
   advancedActionsEnabled = false,
   adapter: providedAdapter,
+  catalogRefreshBusy = false,
+  catalogRefreshEnabled = false,
+  catalogSyncConflicts = [],
+  catalogSyncError = "",
+  catalogSyncHasMoreConflicts = false,
+  catalogSyncStale = false,
+  catalogSyncSummary = null,
   deliveryDisabled = true,
   editingEnabled = true,
   exportEnabled = false,
   globalSearch = "",
   locations: providedLocations,
   mode = "internal",
+  onCatalogRefresh,
   onExport,
   onNotify = () => {},
   onRangeChange,
@@ -348,6 +393,7 @@ export function ScheduleContent({
     ...(snapshotVersion !== undefined ? { version: snapshotVersion } : {}),
   }), [snapshot, snapshotVersion, providedUsers, providedLocations, providedShifts, providedRequests, providedTemplates, providedTodayIso, providedWeekStart]);
   const { locations, templates, todayIso, users } = source;
+  const activeLocations = useMemo(() => locations.filter(isCatalogSelectable), [locations]);
   const adapter = useMemo(() => createWorkforceScheduleAdapter({
     ...providedAdapter,
     ...(onShiftCreate ? { onShiftCreate } : {}),
@@ -377,7 +423,9 @@ export function ScheduleContent({
   const [editorShift, setEditorShift] = useState(null);
   const [dragEnabled, setDragEnabled] = useState(false);
   const [mutationBusy, setMutationBusy] = useState(false);
+  const [structuralConflicts, setStructuralConflicts] = useState([]);
   const toolbarRef = useRef(null);
+  const structuralConflictRef = useRef(null);
   const appliedVersionRef = useRef(source.version);
   const mutationBusyRef = useRef(false);
   const days = useMemo(() => getWeekDays(weekStart), [weekStart]);
@@ -395,13 +443,22 @@ export function ScheduleContent({
     appliedVersionRef.current = source.version;
     setShifts([...source.shifts]);
     setRequests([...source.requests]);
+    setStructuralConflicts([]);
   }, [source]);
 
   const emit = async (method, payload) => {
     try {
       return await notifyScheduleAdapter(adapter, method, { ...payload, deliveryDisabled, mode });
     } catch (error) {
-      onNotify(error?.message || "Nie udało się zapisać zmiany grafiku.", "error");
+      const blocking = workforceScheduleStructuralConflictsFromError(error);
+      if (blocking.length) {
+        setStructuralConflicts(blocking);
+        setOverlay(null);
+        setEditorShift(null);
+      }
+      onNotify(blocking.length
+        ? `Nie można zatwierdzić Grafiku. Popraw ${blocking.length === 1 ? "wskazany konflikt" : `${blocking.length} wskazanych konfliktów`}.`
+        : error?.message || "Nie udało się zapisać zmiany grafiku.", "error");
       throw error;
     }
   };
@@ -428,6 +485,7 @@ export function ScheduleContent({
         onNotify("Serwer nie potwierdził zapisu Grafiku. Odśwież widok przed kolejną operacją.", "error");
         return null;
       }
+      setStructuralConflicts([]);
       return result;
     } catch {
       return null;
@@ -472,18 +530,33 @@ export function ScheduleContent({
     return () => document.removeEventListener("pointerdown", closeMenus);
   }, []);
 
-  const openNewShift = (date = selectedDay, locationId = locations[0]?.id) => {
+  useEffect(() => {
+    if (!structuralConflicts.length || overlay) return undefined;
+    const frame = window.requestAnimationFrame(() => structuralConflictRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [overlay, structuralConflicts]);
+
+  const openNewShift = (date = selectedDay, locationId = activeLocations[0]?.id) => {
     if (!editingEnabled) return;
-    if (!locationId) {
-      onNotify("Najpierw wczytaj co najmniej jeden obiekt.", "error");
+    const location = activeLocations.find((candidate) => candidate.id === locationId);
+    if (!location) {
+      onNotify("Wybierz aktywny obiekt przed dodaniem zmiany.", "error");
       return;
     }
-    setEditorShift({ date, locationId, title: "Nowa zmiana", startTime: "09:00", endTime: "17:00", breakMinutes: 30, requiredHeadcount: 1, assigneeIds: [], notes: "", tasks: [] });
+    setEditorShift({ date, locationId: location.id, title: "Nowa zmiana", startTime: "09:00", endTime: "17:00", breakMinutes: 30, requiredHeadcount: 1, assigneeIds: [], notes: "", tasks: [] });
     setMenu(null);
   };
 
   const saveShift = async (form) => {
     const { publishNow, ...values } = form;
+    const selectedLocation = locations.find((location) => location.id === values.locationId);
+    const unavailablePeople = values.assigneeIds
+      .map((personId) => users.find((user) => user.id === personId))
+      .filter((user) => !user || !isCatalogSelectable(user));
+    if (!selectedLocation || !isCatalogSelectable(selectedLocation) || unavailablePeople.length) {
+      onNotify("Usuń nieaktywnych pracowników i wybierz aktywny obiekt przed zapisaniem zmiany.", "error");
+      return;
+    }
     const previousShift = values.id ? shifts.find((shift) => shift.id === values.id) : null;
     const revision = previousShift ? (previousShift.revision || 0) + 1 : 1;
     const nextShift = previousShift
@@ -643,6 +716,19 @@ export function ScheduleContent({
 
       {(mode === "internal" || deliveryDisabled) && <div className="tm-schedule-boundary-banner" role="status"><Info size={19} weight="duotone" /><span><strong>Wewnętrzne planowanie</strong> Pracownicy nie widzą tego grafiku. Zapis nie uruchamia aplikacji pracownika ani powiadomień.</span></div>}
 
+      {catalogRefreshEnabled && <section aria-busy={catalogRefreshBusy} aria-label="Synchronizacja katalogów Grafiku" className={`tm-schedule-catalog-sync ${catalogSyncError ? "has-error" : ""} ${catalogSyncStale ? "is-stale" : ""}`} data-state={catalogSyncStale ? "stale" : catalogRefreshBusy ? "loading" : "ready"}>
+        <div><ArrowsClockwise className={catalogRefreshBusy ? "is-spinning" : ""} size={20} /><span><strong>Katalog pracowników i obiektów</strong><small>{catalogSyncSummary
+          ? <>Ostatnia synchronizacja: {formatCatalogSyncTimestamp(catalogSyncSummary.lastSyncedAt)} · {catalogSyncCount(catalogSyncSummary.people?.active)} aktywnych pracowników · {catalogSyncCount(catalogSyncSummary.locations?.active)} aktywnych obiektów{Number(catalogSyncSummary.people?.inactive) > 0 ? ` · ${catalogSyncSummary.people.inactive} nieaktywnych pracowników` : ""}{Number(catalogSyncSummary.locations?.inactive) > 0 ? ` · ${catalogSyncSummary.locations.inactive} nieaktywnych obiektów` : ""}</>
+          : "Brak potwierdzonej synchronizacji w tej sesji."}</small>{catalogSyncChangeSummary(catalogSyncSummary) && <small>{catalogSyncChangeSummary(catalogSyncSummary)}</small>}{catalogSyncStale ? <small className="is-error" role="alert"><strong>Widok katalogu jest nieaktualny.</strong> {catalogSyncError}</small> : catalogSyncError && <small className="is-error" role="alert">{catalogSyncError}</small>}</span></div>
+        <button disabled={catalogRefreshBusy || mutationBusy} onClick={() => void onCatalogRefresh?.()} type="button"><ArrowsClockwise size={17} /> {catalogRefreshBusy ? "Odświeżam…" : "Odśwież pracowników i obiekty"}</button>
+      </section>}
+
+      {catalogRefreshEnabled && catalogSyncConflicts.length > 0 && <section className="tm-schedule-structural-conflicts is-catalog-sync" role="alert">
+        <header><WarningCircle size={20} weight="fill" /><div><strong>Synchronizacja zatrzymana przez używane dane</strong><span>Te pozycje nadal występują w bieżącym lub przyszłym Grafiku. Najpierw popraw wskazane zmiany.</span></div></header>
+        <ul>{catalogSyncConflicts.map((conflict) => { const context = conflictContext(conflict); return <li key={conflict.id}><strong>{conflict.label}</strong><span>{conflict.message}</span>{context && <small>{context}</small>}</li>; })}</ul>
+        {catalogSyncHasMoreConflicts && <p>Lista jest skrócona. Po poprawieniu widocznych pozycji uruchom synchronizację ponownie.</p>}
+      </section>}
+
       <div className="tm-schedule-panel">
         <div className="tm-schedule-toolbar" ref={toolbarRef}>
           <div className="tm-schedule-toolbar-left">
@@ -654,7 +740,7 @@ export function ScheduleContent({
           </div>
           <div className="tm-schedule-toolbar-right">
             {(advancedActionsEnabled || exportEnabled) && <div className="tm-schedule-popover-anchor"><button aria-expanded={menu === "actions"} disabled={mutationBusy} onClick={() => setMenu(menu === "actions" ? null : "actions")} type="button">Działania <CaretDown size={14} /></button>{menu === "actions" && <MenuLayer className="tm-schedule-actions-menu">{advancedActionsEnabled && <button onClick={clearWeekDrafts} role="menuitem" type="button"><Trash size={17} /> Wyczyść szkice</button>}{advancedActionsEnabled && <button onClick={copyWeek} role="menuitem" type="button"><Copy size={17} /> Skopiuj do następnego tygodnia</button>}{exportEnabled && <button onClick={() => { setMenu(null); void emit("onExport", { shifts: currentShifts, weekStart }); onNotify("Przygotowano dane grafiku do eksportu."); }} role="menuitem" type="button"><DownloadSimple size={17} /> Eksportuj grafik</button>}</MenuLayer>}</div>}
-            {editingEnabled && <div className="tm-schedule-popover-anchor"><button className="tm-schedule-add-button" disabled={!locations.length} onClick={() => setMenu(menu === "add" ? null : "add")} type="button"><Plus size={17} /> Dodaj <CaretDown size={14} /></button>{menu === "add" && <MenuLayer className="tm-schedule-add-menu"><button onClick={() => openNewShift()} role="menuitem" type="button"><Clock size={18} /> Nowa zmiana</button>{requestsEnabled && <button onClick={() => { setOverlay("requests"); setMenu(null); }} role="menuitem" type="button"><Users size={18} /> Wniosek / wolna zmiana</button>}{templatesEnabled && <button disabled={!templates.length} onClick={() => { setEditorShift({ ...templates[0], date: selectedDay, assigneeIds: [], notes: "", tasks: [] }); setMenu(null); }} role="menuitem" type="button"><Copy size={18} /> Z szablonu</button>}</MenuLayer>}</div>}
+            {editingEnabled && <div className="tm-schedule-popover-anchor"><button className="tm-schedule-add-button" disabled={!activeLocations.length} onClick={() => setMenu(menu === "add" ? null : "add")} type="button"><Plus size={17} /> Dodaj <CaretDown size={14} /></button>{menu === "add" && <MenuLayer className="tm-schedule-add-menu"><button onClick={() => openNewShift()} role="menuitem" type="button"><Clock size={18} /> Nowa zmiana</button>{requestsEnabled && <button onClick={() => { setOverlay("requests"); setMenu(null); }} role="menuitem" type="button"><Users size={18} /> Wniosek / wolna zmiana</button>}{templatesEnabled && <button disabled={!templates.length} onClick={() => { setEditorShift({ ...templates[0], date: selectedDay, assigneeIds: [], notes: "", tasks: [] }); setMenu(null); }} role="menuitem" type="button"><Copy size={18} /> Z szablonu</button>}</MenuLayer>}</div>}
             {editingEnabled && <button className="tm-schedule-publish-button" disabled={!changes.length || mutationBusy} onClick={() => setOverlay("publish")} type="button"><PaperPlaneTilt size={17} /> {deliveryDisabled ? "Zatwierdź" : "Opublikuj"}{changes.length ? ` (${changes.length})` : ""}</button>}
           </div>
         </div>
@@ -662,7 +748,12 @@ export function ScheduleContent({
         {filtersOpen && <div className="tm-schedule-subtoolbar"><label><MagnifyingGlass size={17} /><input onChange={(event) => setLocalSearch(event.target.value)} placeholder="Szukaj zmian" value={localSearch} />{localSearch && <button aria-label="Wyczyść wyszukiwanie" onClick={() => setLocalSearch("")} type="button"><X size={15} /></button>}</label><div><label><Funnel size={16} /><span className="tm-sr-only">Filtr lokalizacji</span><select onChange={(event) => setLocationFilter(event.target.value)} value={locationFilter}><option value="all">Wszystkie lokalizacje</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label><UserCircle size={16} /><span className="tm-sr-only">Filtr użytkownika</span><select onChange={(event) => setUserFilter(event.target.value)} value={userFilter}><option value="all">Cały zespół</option>{users.map((user) => <option key={user.id} value={user.id}>{userName(user)}</option>)}</select></label></div></div>}
 
         {!editingEnabled && <div className="tm-schedule-catalog-warning" role="status"><Info size={19} /><span><strong>Tryb podglądu.</strong> Twoja rola pozwala przeglądać Grafik bez wprowadzania zmian.</span></div>}
-        {(!locations.length || !users.length) && <div className="tm-schedule-catalog-warning" role="status"><WarningCircle size={19} /><span><strong>Niepełny katalog</strong> {!locations.length && !users.length ? "Brakuje obiektów i pracowników." : !locations.length ? "Brakuje obiektów." : "Brakuje pracowników."} Grafik nie uzupełnia tych danych przykładami.</span></div>}
+        {(!activeLocations.length || !users.some(isCatalogSelectable)) && <div className="tm-schedule-catalog-warning" role="status"><WarningCircle size={19} /><span><strong>Niepełny katalog</strong> {!activeLocations.length && !users.some(isCatalogSelectable) ? "Brakuje aktywnych obiektów i pracowników." : !activeLocations.length ? "Brakuje aktywnych obiektów." : "Brakuje aktywnych pracowników."} Grafik nie uzupełnia tych danych przykładami.</span></div>}
+
+        {structuralConflicts.length > 0 && <section className="tm-schedule-structural-conflicts" ref={structuralConflictRef} role="alert" tabIndex={-1}>
+          <header><WarningCircle size={20} weight="fill" /><div><strong>Konflikty blokują zatwierdzenie Grafiku</strong><span>Popraw poniższe pozycje i spróbuj ponownie.</span></div><button onClick={() => setStructuralConflicts([])} type="button">Ukryj</button></header>
+          <ul>{structuralConflicts.map((conflict) => { const context = conflictContext(conflict); return <li key={conflict.id}><strong>{conflict.label}</strong><span>{conflict.message}</span>{context && <small>{context}</small>}</li>; })}</ul>
+        </section>}
 
         {display.showProblems && (conflicts.length > 0 || pendingRequests > 0) && <div className="tm-schedule-alert"><WarningCircle size={19} weight="fill" /><span><strong>{conflicts.length} {conflicts.length === 1 ? "problem" : "problemy"} w grafiku</strong> · {summary.openSlots} wolnych miejsc{requestsEnabled ? ` · ${pendingRequests} wnioski czekają` : ""}</span>{requestsEnabled && <button onClick={() => setOverlay("requests")} type="button">Sprawdź</button>}</div>}
 
@@ -673,7 +764,7 @@ export function ScheduleContent({
         </div>
       </div>
 
-      {editingEnabled && <div className="tm-schedule-mobile-bar"><button disabled={!locations.length || mutationBusy} onClick={() => openNewShift(selectedDay)} type="button"><Plus size={19} /> Dodaj</button><button disabled={!changes.length || mutationBusy} onClick={() => setOverlay("publish")} type="button"><PaperPlaneTilt size={18} /> {deliveryDisabled ? "Zatwierdź" : "Opublikuj"}{changes.length ? ` (${changes.length})` : ""}</button></div>}
+      {editingEnabled && <div className="tm-schedule-mobile-bar"><button disabled={!activeLocations.length || mutationBusy} onClick={() => openNewShift(selectedDay)} type="button"><Plus size={19} /> Dodaj</button><button disabled={!changes.length || mutationBusy} onClick={() => setOverlay("publish")} type="button"><PaperPlaneTilt size={18} /> {deliveryDisabled ? "Zatwierdź" : "Opublikuj"}{changes.length ? ` (${changes.length})` : ""}</button></div>}
 
       {editorShift && <ShiftDrawer busy={mutationBusy} deliveryDisabled={deliveryDisabled} initialShift={editorShift} locations={locations} onClose={() => setEditorShift(null)} onDelete={deleteShift} onSave={saveShift} templates={templates} templatesEnabled={templatesEnabled} todayIso={todayIso} users={users} />}
       {overlay === "publish" && <PublishDialog busy={mutationBusy} deliveryDisabled={deliveryDisabled} onClose={() => setOverlay(null)} onPublish={publishSchedule} periodLabel={rangeLabel(weekStart)} shifts={changes} users={users} />}

@@ -133,3 +133,32 @@ test("klient Grafiku odrzuca sesję platformową zamiast wysyłać jej token", a
   assert.match(serviceSource, /WORKFORCE_SCHEDULE_PLATFORM_CONTEXT_FORBIDDEN/);
   assert.doesNotMatch(serviceSource, /platformAuthHeaders/);
 });
+
+test("ręczna synchronizacja katalogów i nieaktywne snapshoty pozostają w bezpiecznej granicy UI", async () => {
+  const hostSource = await readFile(path.join(moduleRoot, "index.js"), "utf8");
+  const componentSource = await readFile(path.join(moduleRoot, "ScheduleContent.jsx"), "utf8");
+  const overlaysSource = await readFile(path.join(moduleRoot, "ScheduleOverlays.jsx"), "utf8");
+  const syncSource = await readFile(path.join(moduleRoot, "workforceScheduleCatalogSync.js"), "utf8");
+
+  assert.match(hostSource, /catalogRefreshEnabled: canConfigure\(\)/);
+  assert.match(hostSource, /\{ force: true \}/);
+  assert.match(hostSource, /sync-catalogs-manual/);
+  assert.match(componentSource, /Odśwież pracowników i obiekty/);
+  assert.match(componentSource, /isCatalogSelectable/);
+  assert.match(componentSource, /data-drop-day=\{cellSelectable \? day : undefined\}/);
+  assert.match(componentSource, /catalogSyncStale/);
+  assert.match(componentSource, /data-state=\{catalogSyncStale \? "stale"/);
+  assert.match(componentSource, /setStructuralConflicts\(blocking\);[\s\S]{0,160}setOverlay\(null\);[\s\S]{0,80}setEditorShift\(null\)/);
+  assert.match(componentSource, /structuralConflictRef\.current\?\.focus\(\)/);
+  assert.match(componentSource, /ref=\{structuralConflictRef\} role="alert" tabIndex=\{-1\}/);
+  const contextStart = componentSource.indexOf('function conflictContext(conflict)');
+  const contextEnd = componentSource.indexOf('\nfunction ShiftCard', contextStart);
+  const contextSource = componentSource.slice(contextStart, contextEnd);
+  assert.ok(contextStart >= 0 && contextEnd > contextStart);
+  assert.match(contextSource, /ID zmiany|ID pracownika|ID obiektu|Data/);
+  assert.doesNotMatch(contextSource, /userName|displayName|\.name|\.title/);
+  assert.match(overlaysSource, /Nieaktywny/);
+  assert.match(syncSource, /delivery.*downstream.*notifications/);
+  assert.doesNotMatch(componentSource, /features\/(orders|calendar)|services\/(orders|calendar)/);
+  assert.doesNotMatch(hostSource, /features\/(orders|calendar)|services\/(orders|calendar)/);
+});

@@ -43,6 +43,7 @@ async function loadFeatureFactory() {
     ])
     const dependencies = {
       ScheduleContent: function ScheduleContent() {},
+      assertWorkforceScheduleSelectableReferences: clientModel.assertWorkforceScheduleSelectableReferences,
       buildWorkforceScheduleShiftPayload: clientModel.buildWorkforceScheduleShiftPayload,
       createElement(type, props, ...children) {
         return {
@@ -63,6 +64,8 @@ async function loadFeatureFactory() {
       isConfirmedWorkforceScheduleShift: clientModel.isConfirmedWorkforceScheduleShift,
       normalizeWorkforceScheduleBootstrap: clientModel.normalizeWorkforceScheduleBootstrap,
       normalizeWorkforceScheduleShift: clientModel.normalizeWorkforceScheduleShift,
+      summarizeWorkforceScheduleCatalogSync: catalogSync.summarizeWorkforceScheduleCatalogSync,
+      workforceScheduleCatalogConflictsFromError: clientModel.workforceScheduleCatalogConflictsFromError,
       workforceSchedulePublicationCandidates: clientModel.workforceSchedulePublicationCandidates,
     }
     const names = Object.keys(dependencies)
@@ -137,6 +140,7 @@ async function createFixture(t) {
   const configureCalls = []
   const shiftCalls = []
   const fetchCalls = []
+  const syncCalls = []
   const session = {
     activeOrgId: 'org-a',
     capabilities: { workforceScheduling: true },
@@ -148,11 +152,13 @@ async function createFixture(t) {
     async fetchWorkforceScheduleBootstrap(orgId) {
       fetchCalls.push(orgId)
       return bootstrap({
-        people: [{ displayName: `User ${orgId}`, personId: `person-${orgId}` }],
+        locations: [{ locationId: `location-${orgId.replace(/^org-/, '')}`, name: `Location ${orgId}`, status: 'ACTIVE' }],
+        people: [{ displayName: `User ${orgId}`, personId: `person-${orgId}`, status: 'ACTIVE' }],
         setupRequired,
       })
     },
-    async syncWorkforceScheduleCatalogs(orgId) {
+    async syncWorkforceScheduleCatalogs(orgId, payload, options) {
+      syncCalls.push({ orgId, payload, options })
       return {
         effects: { delivery: false, downstream: false, notifications: false },
         idempotent: false,
@@ -215,9 +221,11 @@ async function createFixture(t) {
     lastRender: () => renders.at(-1),
     notices,
     renders,
+    service,
     session,
     setSetupRequired(value) { setupRequired = value },
     shiftCalls,
+    syncCalls,
   }
 }
 
@@ -308,4 +316,166 @@ test('zmiana organizacji podczas runWrite odrzuca stary wynik i nie zwalnia nowe
 
   await waitFor(() => f.fetchCalls.filter((orgId) => orgId === 'org-b').length >= 2, 'current session refresh')
   assert.equal(f.lastRender().props.snapshot.users[0].id, 'person-org-b')
+})
+
+test('OWNER może świadomie wymusić kolejne synchronizacje z nowym kluczem, a COORDINATOR pozostaje read-only', async (t) => {
+  const f = await createFixture(t)
+  await f.feature.refresh({ syncCatalogs: false })
+
+  assert.equal(f.lastRender().props.catalogRefreshEnabled, true)
+  assert.equal(f.lastRender().props.editingEnabled, true)
+  await f.lastRender().props.onCatalogRefresh()
+  await f.lastRender().props.onCatalogRefresh()
+
+  assert.equal(f.syncCalls.length, 2)
+  assert.notEqual(f.syncCalls[0].options.idempotencyKey, f.syncCalls[1].options.idempotencyKey)
+  assert.equal(f.lastRender().props.catalogSyncSummary.people.active, 0)
+  assert.equal(f.lastRender().props.catalogSyncSummary.locations.active, 0)
+  assert.match(f.lastRender().props.catalogSyncSummary.lastSyncedAt, /^\d{4}-\d{2}-\d{2}T/)
+
+  f.session.roleCode = 'COORDINATOR'
+  f.feature.resetSession()
+  await f.feature.refresh({ syncCatalogs: false })
+
+  assert.equal(f.lastRender().props.catalogRefreshEnabled, false)
+  assert.equal(f.lastRender().props.editingEnabled, false)
+})
+
+test('błąd ręcznej synchronizacji nie nadpisuje ostatniego sukcesu i przekazuje tylko bezpieczne konflikty', async (t) => {
+  const f = await createFixture(t)
+  await f.feature.refresh({ syncCatalogs: false })
+  await f.lastRender().props.onCatalogRefresh()
+  const previousSummary = f.lastRender().props.catalogSyncSummary
+
+  f.service.syncWorkforceScheduleCatalogs = async () => {
+    const error = new Error('Nie można wyłączyć używanego obiektu.')
+    error.code = 'WORKFORCE_SCHEDULE_OBJECT_IN_USE'
+    error.details = {
+      affected: [{ locationId: 'location-a', shiftId: 'shift-1', date: '2026-09-08', secret: 'ukryte' }],
+      hasMore: false,
+    }
+    throw error
+  }
+  const refreshed = await f.lastRender().props.onCatalogRefresh()
+
+  assert.equal(refreshed, false)
+  assert.deepEqual(f.lastRender().props.catalogSyncSummary, previousSummary)
+  assert.deepEqual(f.lastRender().props.catalogSyncConflicts[0].affected, {
+    locationId: 'location-a',
+    shiftId: 'shift-1',
+    date: '2026-09-08',
+  })
+  assert.doesNotMatch(JSON.stringify(f.lastRender().props.catalogSyncConflicts), /ukryte/)
+})
+
+test('receipt synchronizacji pozostaje po bootstrapie z tym samym czasem', async (t) => {
+  const f = await createFixture(t)
+  await f.feature.refresh({ syncCatalogs: false })
+  const synchronizedAt = '2026-09-07T10:15:30.000Z'
+  f.service.syncWorkforceScheduleCatalogs = async (orgId, payload, options) => {
+    f.syncCalls.push({ orgId, payload, options })
+    return {
+      effects: { delivery: false, downstream: false, notifications: false },
+      idempotent: false,
+      locations: [],
+      ok: true,
+      orgId,
+      people: [],
+      receipt: {
+        version: 1,
+        orgId,
+        synchronizedAt,
+        people: { active: 7, created: 2, updated: 3, deactivated: 1 },
+        locations: { active: 4, created: 1, updated: 2, deactivated: 0 },
+        effects: { delivery: false, notifications: false, downstream: false },
+      },
+    }
+  }
+  f.service.fetchWorkforceScheduleBootstrap = async (orgId) => bootstrap({
+    catalogSync: {
+      lastSyncedAt: synchronizedAt,
+      people: { active: 7, inactive: 1 },
+      locations: { active: 4, inactive: 0 },
+    },
+    locations: [{ locationId: `location-${orgId.replace(/^org-/, '')}`, name: `Location ${orgId}`, status: 'ACTIVE' }],
+    people: [{ displayName: `User ${orgId}`, personId: `person-${orgId}`, status: 'ACTIVE' }],
+  })
+
+  assert.equal(await f.lastRender().props.onCatalogRefresh(), true)
+  assert.deepEqual(f.lastRender().props.catalogSyncSummary, {
+    lastSyncedAt: synchronizedAt,
+    source: 'receipt',
+    people: { active: 7, created: 2, updated: 3, deactivated: 1 },
+    locations: { active: 4, created: 1, updated: 2, deactivated: 0 },
+  })
+})
+
+test('nowy receipt jest ujawniany dopiero po udanym bootstrapie, a błąd zachowuje poprzedni widok', async (t) => {
+  const f = await createFixture(t)
+  await f.feature.refresh({ syncCatalogs: false })
+  await f.lastRender().props.onCatalogRefresh()
+  const previousSummary = f.lastRender().props.catalogSyncSummary
+  const previousSnapshot = f.lastRender().props.snapshot
+  const synchronizedAt = '2026-09-07T12:30:00.000Z'
+  f.service.syncWorkforceScheduleCatalogs = async (orgId) => ({
+    effects: { delivery: false, downstream: false, notifications: false },
+    idempotent: false,
+    locations: [],
+    ok: true,
+    orgId,
+    people: [],
+    receipt: {
+      version: 1,
+      orgId,
+      synchronizedAt,
+      people: { active: 9, created: 2, updated: 1, deactivated: 0 },
+      locations: { active: 5, created: 1, updated: 0, deactivated: 0 },
+      effects: { delivery: false, notifications: false, downstream: false },
+    },
+  })
+  f.service.fetchWorkforceScheduleBootstrap = async () => {
+    throw new Error('bootstrap unavailable')
+  }
+
+  assert.equal(await f.lastRender().props.onCatalogRefresh(), false)
+  assert.deepEqual(f.lastRender().props.catalogSyncSummary, previousSummary)
+  assert.equal(f.lastRender().props.snapshot, previousSnapshot)
+  assert.equal(f.lastRender().props.catalogSyncStale, true)
+  assert.match(f.lastRender().props.catalogSyncError, /Wyświetlane dane mogą być nieaktualne/)
+  assert.notEqual(f.lastRender().props.catalogSyncSummary.lastSyncedAt, synchronizedAt)
+  assert.equal(f.notices.at(-1).tone, 'error')
+})
+
+test('konflikt strukturalny bez mutacji nie uruchamia odświeżenia', async (t) => {
+  const f = await createFixture(t)
+  await f.feature.refresh({ syncCatalogs: false })
+  const fetchesBeforePublication = f.fetchCalls.length
+  f.service.publishWorkforceSchedule = async () => {
+    const error = new Error('Grafik zawiera konflikt strukturalny.')
+    error.code = 'WORKFORCE_SCHEDULE_PUBLICATION_BLOCKED'
+    error.details = {
+      blocking: [{ type: 'OVERLAP', affected: { personId: 'person-org-a', shiftId: 'shift-1', date: '2026-09-07' } }],
+    }
+    throw error
+  }
+
+  await assert.rejects(
+    f.lastRender().props.adapter.onSchedulePublish({
+      changes: [{
+        assigneeIds: ['person-org-a'],
+        date: '2026-09-07',
+        endTime: '12:00',
+        id: 'shift-1',
+        locationId: 'location-a',
+        publishedRevision: 1,
+        revision: 2,
+        shiftId: 'shift-1',
+        startTime: '08:00',
+        version: 1,
+      }],
+    }),
+    { code: 'WORKFORCE_SCHEDULE_PUBLICATION_BLOCKED' },
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(f.fetchCalls.length, fetchesBeforePublication)
 })

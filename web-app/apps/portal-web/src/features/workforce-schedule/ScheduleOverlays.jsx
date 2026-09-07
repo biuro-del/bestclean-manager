@@ -92,6 +92,10 @@ function userName(user) {
   return user.displayName || `${user.firstName || ""} ${user.lastName || ""}`.trim();
 }
 
+function isCatalogSelectable(item) {
+  return item?.selectable !== false;
+}
+
 export function ShiftDrawer({ busy = false, deliveryDisabled = true, initialShift, locations, onClose, onDelete, onSave, templates, templatesEnabled = false, todayIso, users }) {
   const titleId = useId();
   const isNew = !initialShift?.id;
@@ -103,7 +107,7 @@ export function ShiftDrawer({ busy = false, deliveryDisabled = true, initialShif
     startTime: initialShift?.startTime || "09:00",
     endTime: initialShift?.endTime || "17:00",
     breakMinutes: initialShift?.breakMinutes ?? 30,
-    locationId: initialShift?.locationId || locations[0]?.id,
+    locationId: initialShift?.locationId || locations.find(isCatalogSelectable)?.id,
     assigneeIds: initialShift?.assigneeIds || [],
     requiredHeadcount: initialShift?.requiredHeadcount || 1,
     notes: initialShift?.notes || "",
@@ -136,12 +140,12 @@ export function ShiftDrawer({ busy = false, deliveryDisabled = true, initialShif
           <div className="tm-schedule-form-grid">
             <label className="is-wide">Tytuł zmiany<input onChange={(e) => setForm({ ...form, title: e.target.value })} value={form.title} /></label>
             <label>Data<input onChange={(e) => setForm({ ...form, date: e.target.value })} type="date" value={form.date} /></label>
-            <label>Lokalizacja<select onChange={(e) => setForm({ ...form, locationId: e.target.value })} value={form.locationId}>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label>
+            <label>Lokalizacja<select onChange={(e) => setForm({ ...form, locationId: e.target.value })} value={form.locationId}>{locations.map((location) => <option disabled={!isCatalogSelectable(location)} key={location.id} value={location.id}>{location.name}{isCatalogSelectable(location) ? "" : " — Nieaktywny"}</option>)}</select></label>
             <label>Od<input onChange={(e) => setForm({ ...form, startTime: e.target.value })} type="time" value={form.startTime} /></label>
             <label>Do<input onChange={(e) => setForm({ ...form, endTime: e.target.value })} type="time" value={form.endTime} /></label>
             <label>Przerwa<select onChange={(e) => setForm({ ...form, breakMinutes: Number(e.target.value) })} value={form.breakMinutes}><option value="0">Bez przerwy</option><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label>
             <label>Wymagana obsada<input min="1" onChange={(e) => setForm({ ...form, requiredHeadcount: Number(e.target.value) })} type="number" value={form.requiredHeadcount} /></label>
-            <fieldset className="tm-schedule-assignees is-wide"><legend>Użytkownicy</legend>{users.map((user) => <label key={user.id}><input checked={form.assigneeIds.includes(user.id)} onChange={() => toggleAssignee(user.id)} type="checkbox" /><span className="tm-schedule-avatar">{user.initials}</span><span>{userName(user)}<small>{user.role}</small></span></label>)}</fieldset>
+            <fieldset className="tm-schedule-assignees is-wide"><legend>Użytkownicy</legend>{users.map((user) => { const assigned = form.assigneeIds.includes(user.id); const inactive = !isCatalogSelectable(user); return <label className={inactive ? "is-inactive" : ""} key={user.id}><input checked={assigned} disabled={inactive && !assigned} onChange={() => toggleAssignee(user.id)} type="checkbox" /><span className="tm-schedule-avatar">{user.initials}</span><span>{userName(user)}<small>{inactive ? "Nieaktywny" : user.role}</small></span></label>; })}</fieldset>
             <label className="is-wide">Notatka<textarea onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Dodaj informacje dla zespołu" rows="4" value={form.notes} /></label>
             <div className="tm-schedule-shift-facts is-wide"><span><Clock size={17} /> {formatDuration(getShiftMinutes(form))} pracy</span><span><Users size={17} /> {form.assigneeIds.length}/{form.requiredHeadcount} obsady</span><span><Bell size={17} /> {deliveryDisabled ? "Bez wysyłki do pracowników" : "Powiadomienie po publikacji"}</span></div>
           </div>

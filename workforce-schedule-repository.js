@@ -157,7 +157,8 @@ function mapPerson(row = {}) {
   return {
     id: text(row.person_id),
     personId: text(row.person_id),
-    sourceWorkerLogin: text(row.source_worker_login),
+    // Preserve the response key without exposing an authentication identifier.
+    sourceWorkerLogin: '',
     sourceWorkerId: text(row.source_worker_id_normalized),
     displayName: text(row.display_name),
     initials: text(row.initials),
@@ -179,6 +180,15 @@ function mapLocation(row = {}) {
     status: text(row.status),
     version: Number(row.version ?? 0),
   }
+}
+
+function nonNegativeCount(value) {
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0
+}
+
+function uniqueIdentifiers(values) {
+  return [...new Set(values.map(text).filter(Boolean))].sort()
 }
 
 function mapShift(row = {}) {
@@ -788,30 +798,75 @@ function createWorkforceScheduleRepository(client) {
     } : null
   }
 
-  async function listPeople(orgId, { personId = '' } = {}) {
+  async function listPeople(orgId, { personId = '', referencedPersonIds = [] } = {}) {
+    const referenced = uniqueIdentifiers(referencedPersonIds)
     const result = await client.query(
-      `select person_id, source_worker_login, source_worker_id_normalized, display_name,
+      `select person_id, source_worker_id_normalized, display_name,
               initials, role_snapshot, status, version
          from public.workforce_schedule_person
         where org_id = $1::text
-          and status = 'ACTIVE'
+          and (status = 'ACTIVE'
+               or (status = 'INACTIVE' and person_id = any($3::text[])))
           and (nullif($2::text, '') is null or person_id = $2::text)
         order by display_name asc, person_id asc`,
-      [orgId, personId],
+      [orgId, personId, referenced],
     )
     return result.rows.map(mapPerson)
   }
 
-  async function listLocations(orgId) {
+  async function listLocations(orgId, { referencedLocationIds = [] } = {}) {
+    const referenced = uniqueIdentifiers(referencedLocationIds)
     const result = await client.query(
       `select location_id, source_object_id, name, short_name, color, soft_color, status, version
          from public.workforce_schedule_location
         where org_id = $1::text
-          and status = 'ACTIVE'
+          and (status = 'ACTIVE'
+               or (status = 'INACTIVE' and location_id = any($2::text[])))
         order by name asc, location_id asc`,
-      [orgId],
+      [orgId, referenced],
     )
     return result.rows.map(mapLocation)
+  }
+
+  async function readCatalogSync(orgId) {
+    // CATALOGS/SYNCED audit is appended before the command is marked COMPLETED,
+    // in the same transaction. A completed receipt is therefore a safe,
+    // committed projection of that append-only audit without granting runtime
+    // SELECT access to workforce_schedule_audit.
+    const result = await client.query(
+      `select
+         (select (count(*) filter (where status = 'ACTIVE'))::integer
+            from public.workforce_schedule_person where org_id = $1::text) as active_people,
+         (select (count(*) filter (where status = 'INACTIVE'))::integer
+            from public.workforce_schedule_person where org_id = $1::text) as inactive_people,
+         (select (count(*) filter (where status = 'ACTIVE'))::integer
+            from public.workforce_schedule_location where org_id = $1::text) as active_locations,
+         (select (count(*) filter (where status = 'INACTIVE'))::integer
+            from public.workforce_schedule_location where org_id = $1::text) as inactive_locations,
+         (select coalesce(
+                   nullif(command.response_json #>> '{receipt,synchronizedAt}', ''),
+                   command.completed_at::text
+                 )
+            from public.workforce_schedule_command command
+           where command.org_id = $1::text
+             and command.command_type = 'SYNC_CATALOGS'
+             and command.status = 'COMPLETED'
+           order by command.completed_at desc nulls last, command.created_at desc
+           limit 1) as last_synced_at`,
+      [orgId],
+    )
+    const row = result.rows[0] || {}
+    return {
+      lastSyncedAt: iso(row.last_synced_at),
+      people: {
+        active: nonNegativeCount(row.active_people),
+        inactive: nonNegativeCount(row.inactive_people),
+      },
+      locations: {
+        active: nonNegativeCount(row.active_locations),
+        inactive: nonNegativeCount(row.inactive_locations),
+      },
+    }
   }
 
   async function readShiftRows({ orgId, from, to, personId = '', shiftId = '', onlyCurrent = true }) {
@@ -883,11 +938,20 @@ function createWorkforceScheduleRepository(client) {
 
   async function bootstrap({ orgId, from, to, personId = '' }) {
     const settings = await readSettings(orgId)
-    const [people, locations, shiftRows, publications] = await Promise.all([
-      listPeople(orgId, { personId }),
-      listLocations(orgId),
+    const [shiftRows, publications, catalogSync] = await Promise.all([
       readShiftRows({ orgId, from, to, personId }),
       listPublications({ orgId, from, to }),
+      readCatalogSync(orgId),
+    ])
+    const referencedPersonIds = uniqueIdentifiers(
+      shiftRows.flatMap((row) => asJson(row.person_ids, [])),
+    )
+    const referencedLocationIds = uniqueIdentifiers(
+      shiftRows.map((row) => row.location_id),
+    )
+    const [people, locations] = await Promise.all([
+      listPeople(orgId, { personId, referencedPersonIds }),
+      listLocations(orgId, { referencedLocationIds }),
     ])
     return {
       settings,
@@ -896,6 +960,7 @@ function createWorkforceScheduleRepository(client) {
       locations,
       shifts: shiftRows.map(mapShift),
       publications,
+      catalogSync,
       requests: [],
       templates: [],
       integration: { delivery: false, notifications: false, downstream: false },
@@ -915,7 +980,7 @@ function createWorkforceScheduleRepository(client) {
     if (inserted.rows[0]) return { claimed: true, replay: false }
 
     const existing = await client.query(
-      `select request_hash, status, response_json
+      `select request_hash, status, response_json, completed_at
          from public.workforce_schedule_command
         where org_id = $1::text and actor_uid = $2::text and idempotency_key = $3::text
         for update`,
@@ -928,7 +993,12 @@ function createWorkforceScheduleRepository(client) {
     if (text(row.status) !== 'COMPLETED' || !row.response_json) {
       throw error(409, 'WORKFORCE_SCHEDULE_COMMAND_IN_PROGRESS', 'Ta operacja jest już przetwarzana.')
     }
-    return { claimed: false, replay: true, response: asJson(row.response_json, {}) }
+    return {
+      claimed: false,
+      replay: true,
+      response: asJson(row.response_json, {}),
+      completedAt: iso(row.completed_at),
+    }
   }
 
   async function completeCommand({ orgId, actorUid, idempotencyKey, response }) {
@@ -1092,11 +1162,11 @@ function createWorkforceScheduleRepository(client) {
     )
     const sourceWorkerIds = new Set()
     const activePersonIds = []
+    let created = 0
+    let updated = 0
 
     for (const source of sourceRows) {
       const sourceWorkerId = text(source.source_worker_id_normalized)
-      const sourceLogin = text(source.source_worker_login)
-      const sourceAuthUid = text(source.source_auth_uid)
       if (sourceWorkerIds.has(sourceWorkerId)) {
         throw error(
           409,
@@ -1106,8 +1176,36 @@ function createWorkforceScheduleRepository(client) {
         )
       }
       sourceWorkerIds.add(sourceWorkerId)
+    }
+    const activeExisting = existingResult.rows.filter((row) => text(row.status).toUpperCase() === 'ACTIVE')
+    if (!sourceRows.length && activeExisting.length) {
+      throw error(
+        409,
+        'WORKFORCE_SCHEDULE_ROSTER_SOURCE_EMPTY',
+        'Pusty odczyt źródła nie może wyłączyć aktywnego katalogu pracowników.',
+        { activeCount: activeExisting.length },
+      )
+    }
+
+    for (const source of sourceRows) {
+      const sourceWorkerId = text(source.source_worker_id_normalized)
+      const sourceLogin = text(source.source_worker_login)
+      const sourceAuthUid = text(source.source_auth_uid)
       const current = existingByWorkerId.get(sourceWorkerId) || null
       const personId = text(current?.person_id) || createPersonId()
+      const displayName = text(source.display_name)
+      const initials = initialsFromName(source.display_name)
+      const roleSnapshot = text(source.role_snapshot)
+      const changed = current && (
+        text(current.source_worker_login) !== sourceLogin
+        || text(current.source_auth_uid) !== sourceAuthUid
+        || text(current.display_name) !== displayName
+        || text(current.initials) !== initials
+        || text(current.role_snapshot) !== roleSnapshot
+        || text(current.status).toUpperCase() !== 'ACTIVE'
+      )
+      if (!current) created += 1
+      else if (changed) updated += 1
       activePersonIds.push(personId)
       const values = [
         orgId,
@@ -1115,9 +1213,9 @@ function createWorkforceScheduleRepository(client) {
         sourceWorkerId,
         sourceLogin || null,
         sourceAuthUid || null,
-        text(source.display_name),
-        initialsFromName(source.display_name),
-        text(source.role_snapshot) || null,
+        displayName,
+        initials,
+        roleSnapshot || null,
       ]
       if (current) {
         await client.query(
@@ -1158,7 +1256,15 @@ function createWorkforceScheduleRepository(client) {
           and not (person_id = any($2::text[]))`,
       [orgId, activePersonIds],
     )
-    return listPeople(orgId)
+    const deactivated = activeExisting.filter((row) => (
+      !sourceWorkerIds.has(text(row.source_worker_id_normalized))
+    )).length
+    return {
+      active: activePersonIds.length,
+      created,
+      updated,
+      deactivated,
+    }
   }
 
   async function syncLocations({ orgId, actorUid, createLocationId }) {
@@ -1170,6 +1276,8 @@ function createWorkforceScheduleRepository(client) {
     const existingBySource = new Map(existingResult.rows.map((row) => [text(row.source_object_id), row]))
     const activeLocationIds = []
     const seenSourceIds = new Set()
+    let created = 0
+    let updated = 0
 
     for (const source of sourceRows) {
       const sourceObjectId = text(source.source_object_id)
@@ -1177,10 +1285,30 @@ function createWorkforceScheduleRepository(client) {
         throw error(409, 'WORKFORCE_SCHEDULE_OBJECT_SOURCE_CONFLICT', 'Katalog obiektów zawiera powielone ID.', { sourceObjectId })
       }
       seenSourceIds.add(sourceObjectId)
+    }
+    const activeExisting = existingResult.rows.filter((row) => text(row.status).toUpperCase() === 'ACTIVE')
+    if (!sourceRows.length && activeExisting.length) {
+      throw error(
+        409,
+        'WORKFORCE_SCHEDULE_OBJECT_SOURCE_EMPTY',
+        'Pusty odczyt źródła nie może wyłączyć aktywnego katalogu obiektów.',
+        { activeCount: activeExisting.length },
+      )
+    }
+
+    for (const source of sourceRows) {
+      const sourceObjectId = text(source.source_object_id)
       const current = existingBySource.get(sourceObjectId) || null
       const locationId = text(current?.location_id) || createLocationId()
       const name = text(source.display_name)
       const shortName = name.slice(0, 80)
+      const changed = current && (
+        text(current.name) !== name
+        || text(current.short_name) !== shortName
+        || text(current.status).toUpperCase() !== 'ACTIVE'
+      )
+      if (!current) created += 1
+      else if (changed) updated += 1
       const colors = current
         ? { color: text(current.color), softColor: text(current.soft_color) }
         : locationColors(sourceObjectId)
@@ -1214,13 +1342,26 @@ function createWorkforceScheduleRepository(client) {
           and not (location_id = any($2::text[]))`,
       [orgId, activeLocationIds, actorUid],
     )
-    return listLocations(orgId)
+    const deactivated = activeExisting.filter((row) => (
+      !seenSourceIds.has(text(row.source_object_id))
+    )).length
+    return {
+      active: activeLocationIds.length,
+      created,
+      updated,
+      deactivated,
+    }
   }
 
   async function syncCatalogs({ orgId, actorUid, createPersonId, createLocationId }) {
     const people = await syncRoster({ orgId, createPersonId })
     const locations = await syncLocations({ orgId, actorUid, createLocationId })
-    return { people, locations }
+    const timestamp = await client.query('select transaction_timestamp() as synchronized_at')
+    return {
+      synchronizedAt: iso(timestamp.rows[0]?.synchronized_at),
+      people,
+      locations,
+    }
   }
 
   async function lockWorkerSources(orgId, sourceWorkerIds) {

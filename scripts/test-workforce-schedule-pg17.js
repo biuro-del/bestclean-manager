@@ -717,17 +717,25 @@ async function createTenantCatalog(client, { orgId, actorUid, personId, location
       expectedVersion: 0,
       actorUid,
     })
-    const catalogs = await repository.syncCatalogs({
+    const receipt = await repository.syncCatalogs({
       orgId,
       actorUid,
       createPersonId: () => personId,
       createLocationId: () => locationId,
     })
+    const catalogs = await repository.bootstrap({
+      orgId,
+      from: '2030-01-14',
+      to: '2030-01-14',
+    })
     assert.equal(settings.version, 1)
     assert.equal(catalogs.people.length, 1)
     assert.equal(catalogs.locations.length, 1)
     assert.equal(catalogs.locations[0].sourceObjectId, sourceObjectId)
-    return { settings, ...catalogs }
+    assert.deepEqual(receipt.people, { active: 1, created: 1, updated: 0, deactivated: 0 })
+    assert.deepEqual(receipt.locations, { active: 1, created: 1, updated: 0, deactivated: 0 })
+    assert.match(receipt.synchronizedAt, /^\d{4}-\d{2}-\d{2}T/)
+    return { settings, ...catalogs, receipt }
   })
 }
 

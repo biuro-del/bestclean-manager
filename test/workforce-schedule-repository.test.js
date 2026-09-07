@@ -87,7 +87,7 @@ test('repozytorium zna wyłącznie własny schemat rdzenia Grafiku', () => {
   assert.equal(WORKFORCE_SCHEDULE_OWNER_ROLE, 'workforce_schedule_owner')
 })
 
-test('mapowanie katalogów zachowuje stabilne identyfikatory źródłowe', () => {
+test('mapowanie katalogów zachowuje stabilne ID i nie ujawnia loginu', () => {
   const person = mapPerson({
     person_id: 'person-1',
     source_worker_login: 'maria',
@@ -103,7 +103,7 @@ test('mapowanie katalogów zachowuje stabilne identyfikatory źródłowe', () =>
     status: 'ACTIVE',
     version: 3,
   })
-  assert.equal(person.sourceWorkerLogin, 'maria')
+  assert.equal(person.sourceWorkerLogin, '')
   assert.equal(person.sourceWorkerId, 'w066')
   assert.equal(location.sourceObjectId, 'object-012')
 })
@@ -625,6 +625,208 @@ test('komendy i publikacje zapisują dokładny kontrakt zerowych efektów', () =
   assert.doesNotMatch(repositorySource, /workforce_schedule_outbox|insert into public\.(?:task|event|workday)/i)
 })
 
+test('bootstrap dołącza wyłącznie nieaktywne snapshoty referencjonowane w widocznym zakresie', async () => {
+  const calls = []
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params })
+      if (/from public\.workforce_schedule_settings/i.test(sql)) {
+        return { rows: [{ org_id: 'bestclean', time_zone: 'Europe/Warsaw', weekly_limit_minutes: 2400, version: 1 }] }
+      }
+      if (/from public\.workforce_schedule_shift h/i.test(sql)) {
+        return { rows: [{
+          shift_id: 'shift-1',
+          lifecycle_status: 'DRAFT',
+          current_revision_no: 1,
+          published_revision_no: null,
+          version: 1,
+          revision_no: 1,
+          business_date: '2026-09-07',
+          title: 'Zmiana historyczna',
+          local_start_time: '08:00:00',
+          local_end_time: '16:00:00',
+          starts_at: '2026-09-07T06:00:00.000Z',
+          ends_at: '2026-09-07T14:00:00.000Z',
+          time_zone: 'Europe/Warsaw',
+          break_minutes: 0,
+          required_headcount: 2,
+          location_id: 'location-inactive-ref',
+          person_ids: ['person-active', 'person-inactive-ref'],
+          instructions: [],
+          is_deleted: false,
+        }] }
+      }
+      if (/from public\.workforce_schedule_publication/i.test(sql)) return { rows: [] }
+      if (/select\s+\(select \(count\(\*\) filter/i.test(sql)) {
+        return { rows: [{
+          active_people: 1,
+          inactive_people: 2,
+          active_locations: 1,
+          inactive_locations: 2,
+          last_synced_at: '2026-09-07T07:55:00.000Z',
+        }] }
+      }
+      if (/select person_id, source_worker_id_normalized/i.test(sql)) {
+        return { rows: [
+          { person_id: 'person-active', source_worker_id_normalized: 'w001', display_name: 'Aktywna Osoba', status: 'ACTIVE', version: 1 },
+          { person_id: 'person-inactive-ref', source_worker_id_normalized: 'w002', source_worker_login: 'hidden-login', source_auth_uid: 'hidden-uid', display_name: 'Historyczna Osoba', status: 'INACTIVE', version: 2 },
+        ] }
+      }
+      if (/select location_id, source_object_id/i.test(sql)) {
+        return { rows: [
+          { location_id: 'location-active', source_object_id: 'object-1', name: 'Aktywny obiekt', status: 'ACTIVE', version: 1 },
+          { location_id: 'location-inactive-ref', source_object_id: 'object-2', name: 'Historyczny obiekt', status: 'INACTIVE', version: 2 },
+        ] }
+      }
+      return { rows: [] }
+    },
+  }
+  const repository = createWorkforceScheduleRepository(client)
+
+  const result = await repository.bootstrap({
+    orgId: 'bestclean',
+    from: '2026-09-07',
+    to: '2026-09-07',
+  })
+
+  assert.deepEqual(result.people.map(({ personId, status }) => ({ personId, status })), [
+    { personId: 'person-active', status: 'ACTIVE' },
+    { personId: 'person-inactive-ref', status: 'INACTIVE' },
+  ])
+  assert.deepEqual(result.locations.map(({ locationId, status }) => ({ locationId, status })), [
+    { locationId: 'location-active', status: 'ACTIVE' },
+    { locationId: 'location-inactive-ref', status: 'INACTIVE' },
+  ])
+  assert.deepEqual(result.catalogSync, {
+    lastSyncedAt: '2026-09-07T07:55:00.000Z',
+    people: { active: 1, inactive: 2 },
+    locations: { active: 1, inactive: 2 },
+  })
+  const peopleRead = calls.find(({ sql }) => /select person_id, source_worker_id_normalized/i.test(sql))
+  const locationRead = calls.find(({ sql }) => /select location_id, source_object_id/i.test(sql))
+  assert.deepEqual(peopleRead.params, ['bestclean', '', ['person-active', 'person-inactive-ref']])
+  assert.deepEqual(locationRead.params, ['bestclean', ['location-inactive-ref']])
+  assert.match(peopleRead.sql, /status = 'INACTIVE' and person_id = any\(\$3::text\[\]\)/i)
+  assert.match(locationRead.sql, /status = 'INACTIVE' and location_id = any\(\$2::text\[\]\)/i)
+  assert.doesNotMatch(peopleRead.sql, /source_worker_login|source_auth_uid/i)
+  assert.doesNotMatch(JSON.stringify(result), /hidden-login|hidden-uid/)
+  const catalogStateRead = calls.find(({ sql }) => /select\s+\(select \(count\(\*\) filter/i.test(sql))
+  assert.match(catalogStateRead.sql, /command_type = 'SYNC_CATALOGS'/i)
+  assert.match(catalogStateRead.sql, /command\.status = 'COMPLETED'/i)
+  assert.match(catalogStateRead.sql, /response_json #>> '\{receipt,synchronizedAt\}'/i)
+})
+
+test('synchronizacja zwraca wyłącznie licznikowy diff bez danych katalogowych', async () => {
+  const client = {
+    async query(sql) {
+      if (/from public\.workforce_schedule_read_active_workers/i.test(sql)) {
+        return { rows: [
+          { source_worker_id_normalized: 'w001', source_worker_login: 'new-login', source_auth_uid: 'new-uid', display_name: 'Nowa nazwa', role_snapshot: 'WORKER' },
+          { source_worker_id_normalized: 'w002', source_worker_login: 'second-login', source_auth_uid: 'second-uid', display_name: 'Druga osoba', role_snapshot: 'WORKER' },
+        ] }
+      }
+      if (/select \* from public\.workforce_schedule_person/i.test(sql)) {
+        return { rows: [
+          { person_id: 'person-1', source_worker_id_normalized: 'w001', source_worker_login: 'old-login', source_auth_uid: 'old-uid', display_name: 'Stara nazwa', initials: 'SN', role_snapshot: 'WORKER', status: 'ACTIVE' },
+          { person_id: 'person-3', source_worker_id_normalized: 'w003', display_name: 'Do wyłączenia', status: 'ACTIVE' },
+        ] }
+      }
+      if (/select distinct p\.person_id, h\.shift_id/i.test(sql)) return { rows: [] }
+      if (/from public\.workforce_schedule_read_active_objects/i.test(sql)) {
+        return { rows: [
+          { source_object_id: 'object-1', display_name: 'Nowa nazwa obiektu' },
+          { source_object_id: 'object-2', display_name: 'Nowy obiekt' },
+        ] }
+      }
+      if (/select \* from public\.workforce_schedule_location/i.test(sql)) {
+        return { rows: [
+          { location_id: 'location-1', source_object_id: 'object-1', name: 'Stara nazwa obiektu', short_name: 'Stara nazwa obiektu', color: '#2563eb', soft_color: '#dbeafe', status: 'ACTIVE' },
+          { location_id: 'location-3', source_object_id: 'object-3', name: 'Do wyłączenia', short_name: 'Do wyłączenia', color: '#0f766e', soft_color: '#ccfbf1', status: 'ACTIVE' },
+        ] }
+      }
+      if (/select distinct l\.location_id, h\.shift_id/i.test(sql)) return { rows: [] }
+      if (/select transaction_timestamp\(\) as synchronized_at/i.test(sql)) {
+        return { rows: [{ synchronized_at: '2026-09-07T09:30:00.000Z' }] }
+      }
+      return { rows: [] }
+    },
+  }
+  let nextPerson = 1
+  let nextLocation = 1
+  const result = await createWorkforceScheduleRepository(client).syncCatalogs({
+    orgId: 'bestclean',
+    actorUid: 'admin-1',
+    createPersonId: () => `person-new-${nextPerson++}`,
+    createLocationId: () => `location-new-${nextLocation++}`,
+  })
+
+  assert.deepEqual(result, {
+    synchronizedAt: '2026-09-07T09:30:00.000Z',
+    people: { active: 2, created: 1, updated: 1, deactivated: 1 },
+    locations: { active: 2, created: 1, updated: 1, deactivated: 1 },
+  })
+  assert.doesNotMatch(JSON.stringify(result), /login|uid|Nowa nazwa|object-|person-/i)
+})
+
+test('pusty odczyt źródłowy nie dezaktywuje niepustego aktywnego katalogu', async () => {
+  const calls = []
+  const peopleRepository = createWorkforceScheduleRepository({
+    async query(sql) {
+      calls.push(sql)
+      if (/from public\.workforce_schedule_read_active_workers/i.test(sql)) return { rows: [] }
+      if (/select \* from public\.workforce_schedule_person/i.test(sql)) {
+        return { rows: [{ person_id: 'person-1', source_worker_id_normalized: 'w001', status: 'ACTIVE' }] }
+      }
+      return { rows: [] }
+    },
+  })
+
+  await assert.rejects(
+    peopleRepository.syncCatalogs({
+      orgId: 'bestclean',
+      actorUid: 'admin-1',
+      createPersonId: () => 'unused-person',
+      createLocationId: () => 'unused-location',
+    }),
+    (caught) => caught.code === 'WORKFORCE_SCHEDULE_ROSTER_SOURCE_EMPTY'
+      && caught.details?.activeCount === 1,
+  )
+  assert.equal(calls.some((sql) => /set status = 'INACTIVE'/i.test(sql)), false)
+
+  const locationCalls = []
+  const locationRepository = createWorkforceScheduleRepository({
+    async query(sql) {
+      locationCalls.push(sql)
+      if (/from public\.workforce_schedule_read_active_workers/i.test(sql)) return { rows: [] }
+      if (/select \* from public\.workforce_schedule_person/i.test(sql)) return { rows: [] }
+      if (/select distinct p\.person_id, h\.shift_id/i.test(sql)) return { rows: [] }
+      if (/from public\.workforce_schedule_read_active_objects/i.test(sql)) return { rows: [] }
+      if (/select \* from public\.workforce_schedule_location/i.test(sql)) {
+        return { rows: [{ location_id: 'location-1', source_object_id: 'object-1', status: 'ACTIVE' }] }
+      }
+      return { rows: [] }
+    },
+  })
+
+  await assert.rejects(
+    locationRepository.syncCatalogs({
+      orgId: 'bestclean',
+      actorUid: 'admin-1',
+      createPersonId: () => 'unused-person',
+      createLocationId: () => 'unused-location',
+    }),
+    (caught) => caught.code === 'WORKFORCE_SCHEDULE_OBJECT_SOURCE_EMPTY'
+      && caught.details?.activeCount === 1,
+  )
+  assert.equal(locationCalls.some((sql) => /update public\.workforce_schedule_location[\s\S]*set status = 'INACTIVE'/i.test(sql)), false)
+})
+
+test('nieaktywne snapshoty pozostają niedostępne dla nowych przypisań', () => {
+  assert.match(repositorySource, /assertActiveLocation[\s\S]*status = 'ACTIVE'[\s\S]*for share of l/i)
+  assert.match(repositorySource, /assertActivePeople[\s\S]*p\.status = 'ACTIVE'[\s\S]*for share of p/i)
+  assert.match(repositorySource, /saveShift[\s\S]*assertActiveLocation[\s\S]*assertActivePeople/i)
+})
+
 test('synchronizacja używa stabilnych ID źródłowych, nie nazwy ani adresu', async () => {
   const calls = []
   const client = {
@@ -652,6 +854,9 @@ test('synchronizacja używa stabilnych ID źródłowych, nie nazwy ani adresu', 
       if (/select location_id, source_object_id/i.test(sql)) {
         return { rows: [{ location_id: 'location-1', source_object_id: 'client-012', name: 'Edukatorium', short_name: 'Edukatorium', color: '#2563eb', soft_color: '#dbeafe', status: 'ACTIVE', version: 1 }] }
       }
+      if (/select transaction_timestamp\(\) as synchronized_at/i.test(sql)) {
+        return { rows: [{ synchronized_at: '2026-09-07T08:15:30.000Z' }] }
+      }
       return { rows: [] }
     },
   }
@@ -663,9 +868,11 @@ test('synchronizacja używa stabilnych ID źródłowych, nie nazwy ani adresu', 
     createLocationId: () => 'location-1',
   })
 
-  assert.equal(result.people[0].sourceWorkerLogin, 'maria')
-  assert.equal(result.people[0].sourceWorkerId, 'w066')
-  assert.equal(result.locations[0].sourceObjectId, 'client-012')
+  assert.deepEqual(result, {
+    synchronizedAt: '2026-09-07T08:15:30.000Z',
+    people: { active: 1, created: 1, updated: 0, deactivated: 0 },
+    locations: { active: 1, created: 1, updated: 0, deactivated: 0 },
+  })
   const personInsert = calls.find(({ sql }) => /insert into public\.workforce_schedule_person/i.test(sql))
   const locationInsert = calls.find(({ sql }) => /insert into public\.workforce_schedule_location/i.test(sql))
   assert.equal(personInsert.params[2], 'w066')

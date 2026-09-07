@@ -10,15 +10,20 @@ import {
   WORKFORCE_SCHEDULE_BOUNDARY,
 } from './scheduleContract.js'
 import {
+  assertWorkforceScheduleSelectableReferences,
   buildWorkforceScheduleShiftPayload,
   formatWorkforceScheduleWarning,
   isConfirmedWorkforceScheduleShift,
   normalizeWorkforceScheduleBootstrap,
   normalizeWorkforceScheduleShift,
+  workforceScheduleCatalogConflictsFromError,
   workforceSchedulePublicationCandidates,
 } from './workforceScheduleClientModel.js'
 import { createWorkforceScheduleAsyncGuard } from './workforceScheduleAsyncGuard.js'
-import { createWorkforceScheduleCatalogSyncGate } from './workforceScheduleCatalogSync.js'
+import {
+  createWorkforceScheduleCatalogSyncGate,
+  summarizeWorkforceScheduleCatalogSync,
+} from './workforceScheduleCatalogSync.js'
 import * as defaultWorkforceScheduleService from '../../services/workforceScheduleService.js'
 import { createWorkforceScheduleOperationRegistry } from '../../services/workforceScheduleTransport.js'
 
@@ -125,10 +130,19 @@ export function createWorkforceScheduleFeature(ctx = {}) {
     setupTimeZone: 'Europe/Warsaw',
     settings: null,
     busy: false,
+    catalogSync: {
+      busy: false,
+      conflicts: [],
+      error: '',
+      hasMoreConflicts: false,
+      stale: false,
+      summary: null,
+    },
   }
   let reactRoot = null
   let activeController = null
   let requestSequence = 0
+  let catalogSyncAttempt = 0
 
   const currentOrgId = () => text(ctx.appState?.session?.activeOrgId || ctx.appState?.session?.orgId)
   const asyncGuard = createWorkforceScheduleAsyncGuard(currentOrgId)
@@ -136,6 +150,34 @@ export function createWorkforceScheduleFeature(ctx = {}) {
   const canEdit = () => ['ADMIN', 'OWNER', 'MANAGER'].includes(text(ctx.appState?.session?.roleCode || ctx.appState?.session?.role).toUpperCase())
   const hasCapability = () => ctx.appState?.session?.capabilities?.workforceScheduling === true
   const notify = (message, tone = 'success') => ctx.showTransientNotice?.(text(message), tone)
+
+  function recordCatalogSync(orgId, result) {
+    const summary = summarizeWorkforceScheduleCatalogSync(orgId, result, {
+      completedAt: new Date().toISOString(),
+    })
+    if (!summary) return false
+    state.catalogSync = {
+      busy: state.catalogSync.busy,
+      conflicts: [],
+      error: '',
+      hasMoreConflicts: false,
+      stale: false,
+      summary: preferCatalogSyncSummary(state.catalogSync.summary, summary),
+    }
+    return true
+  }
+
+  function preferCatalogSyncSummary(current, incoming) {
+    if (!incoming) return current
+    if (!current) return incoming
+    const currentTime = Date.parse(text(current.lastSyncedAt))
+    const incomingTime = Date.parse(text(incoming.lastSyncedAt))
+    if (Number.isFinite(currentTime) && Number.isFinite(incomingTime)) {
+      if (currentTime > incomingTime) return current
+      if (currentTime === incomingTime && current.source === 'receipt') return current
+    }
+    return incoming
+  }
 
   async function runIdempotent(action, payload, request) {
     const operation = operationRegistry.begin(action, payload)
@@ -191,9 +233,17 @@ export function createWorkforceScheduleFeature(ctx = {}) {
 
     reactRoot.render(createElement(ScheduleContent, {
       adapter,
+      catalogRefreshBusy: state.catalogSync.busy,
+      catalogSyncConflicts: state.catalogSync.conflicts,
+      catalogRefreshEnabled: canConfigure(),
+      catalogSyncError: state.catalogSync.error,
+      catalogSyncHasMoreConflicts: state.catalogSync.hasMoreConflicts,
+      catalogSyncStale: state.catalogSync.stale,
+      catalogSyncSummary: state.catalogSync.summary,
       deliveryDisabled: true,
       editingEnabled: canEdit(),
       mode: 'internal',
+      onCatalogRefresh: () => refreshCatalogsManually(),
       onNotify: notify,
       requestsEnabled: false,
       settingsEnabled: false,
@@ -224,6 +274,7 @@ export function createWorkforceScheduleFeature(ctx = {}) {
 
     try {
       let schedule = await fetchSchedule(range, controller?.signal, orgId)
+      let catalogBootstrapStale = false
       if (sequence !== requestSequence || !asyncGuard.isCurrent(sessionAtStart)) return false
 
       state.setupRequired = schedule.setupRequired === true
@@ -239,23 +290,53 @@ export function createWorkforceScheduleFeature(ctx = {}) {
         && !catalogSyncGate.isComplete(orgId)
         && canConfigure()
       if (shouldSyncCatalogs) {
+        let syncResult = null
         try {
-          await catalogSyncGate.run(orgId, () => (
+          syncResult = await catalogSyncGate.run(orgId, () => (
             runIdempotent('sync-catalogs', { orgId }, (idempotencyKey) => (
               service.syncWorkforceScheduleCatalogs(orgId, {}, { idempotencyKey })
             ))
           ))
           if (sequence !== requestSequence || !asyncGuard.isCurrent(sessionAtStart)) return false
           schedule = await fetchSchedule(range, controller?.signal, orgId)
+          if (sequence !== requestSequence || !asyncGuard.isCurrent(sessionAtStart)) return false
+          recordCatalogSync(orgId, syncResult)
         } catch (error) {
           if (sequence !== requestSequence || !asyncGuard.isCurrent(sessionAtStart)) return false
-          notify(error?.message || 'Nie udało się odświeżyć katalogu pracowników i obiektów.', 'error')
+          catalogBootstrapStale = Boolean(syncResult)
+          const message = catalogBootstrapStale
+            ? 'Synchronizacja zakończyła się, ale nie udało się pobrać zaktualizowanego katalogu. Wyświetlane dane mogą być nieaktualne.'
+            : text(error?.message) || 'Nie udało się odświeżyć katalogu pracowników i obiektów.'
+          const catalogConflicts = workforceScheduleCatalogConflictsFromError(error)
+          state.catalogSync = {
+            ...state.catalogSync,
+            conflicts: catalogConflicts.conflicts,
+            error: message,
+            hasMoreConflicts: catalogConflicts.hasMore,
+            stale: catalogBootstrapStale,
+          }
+          notify(message, 'error')
         }
       }
       if (sequence !== requestSequence || !asyncGuard.isCurrent(sessionAtStart)) return false
 
       const normalized = normalizeWorkforceScheduleBootstrap(schedule)
       state.settings = normalized.settings
+      if (normalized.catalogSync) {
+        state.catalogSync = {
+          busy: state.catalogSync.busy,
+          conflicts: state.catalogSync.conflicts,
+          error: state.catalogSync.error,
+          hasMoreConflicts: state.catalogSync.hasMoreConflicts,
+          stale: catalogBootstrapStale,
+          summary: preferCatalogSyncSummary(state.catalogSync.summary, normalized.catalogSync),
+        }
+      } else {
+        state.catalogSync = {
+          ...state.catalogSync,
+          stale: catalogBootstrapStale,
+        }
+      }
       state.snapshot = {
         ...normalized,
         todayIso: todayIso(),
@@ -275,6 +356,70 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       return false
     } finally {
       if (activeController === controller) activeController = null
+    }
+  }
+
+  async function refreshCatalogsManually() {
+    if (!reactRoot || !hasCapability() || !canConfigure() || state.busy || state.catalogSync.busy) return false
+    const operationContext = asyncGuard.beginBusy()
+    if (!operationContext) return false
+    state.busy = true
+    state.catalogSync = {
+      ...state.catalogSync,
+      busy: true,
+      conflicts: [],
+      error: '',
+      hasMoreConflicts: false,
+    }
+    render()
+    try {
+      const orgId = operationContext.orgId
+      const attempt = ++catalogSyncAttempt
+      const result = await catalogSyncGate.run(orgId, () => (
+        runIdempotent('sync-catalogs-manual', { attempt, orgId }, (idempotencyKey) => (
+          service.syncWorkforceScheduleCatalogs(orgId, {}, { idempotencyKey })
+        ))
+      ), { force: true })
+      if (!asyncGuard.isCurrent(operationContext)) return false
+      const refreshed = await refresh({ forceRefresh: true, syncCatalogs: false })
+      if (!asyncGuard.isCurrent(operationContext)) return false
+      if (!refreshed) {
+        const message = 'Synchronizacja zakończyła się, ale nie udało się pobrać zaktualizowanego katalogu. Wyświetlane dane mogą być nieaktualne.'
+        state.catalogSync = {
+          ...state.catalogSync,
+          error: message,
+          stale: true,
+        }
+        notify(message, 'error')
+        render()
+        return false
+      }
+      if (!recordCatalogSync(orgId, result)) return false
+      render()
+      notify('Odświeżono pracowników i obiekty Grafiku.')
+      return true
+    } catch (error) {
+      if (!asyncGuard.isCurrent(operationContext)) return false
+      const message = text(error?.message) || 'Nie udało się odświeżyć pracowników i obiektów Grafiku.'
+      const catalogConflicts = workforceScheduleCatalogConflictsFromError(error)
+      state.catalogSync = {
+        ...state.catalogSync,
+        conflicts: catalogConflicts.conflicts,
+        error: message,
+        hasMoreConflicts: catalogConflicts.hasMore,
+      }
+      notify(message, 'error')
+      render()
+      return false
+    } finally {
+      if (asyncGuard.releaseBusy(operationContext)) {
+        state.busy = false
+        state.catalogSync = {
+          ...state.catalogSync,
+          busy: false,
+        }
+        render()
+      }
     }
   }
 
@@ -341,7 +486,10 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       return result
     } catch (error) {
       if (!asyncGuard.isCurrent(operationContext)) return false
-      shouldRefresh = true
+      shouldRefresh = ![
+        'WORKFORCE_SCHEDULE_INACTIVE_CATALOG_SELECTION',
+        'WORKFORCE_SCHEDULE_PUBLICATION_BLOCKED',
+      ].includes(text(error?.code).toUpperCase())
       throw error
     } finally {
       if (shouldRefresh && asyncGuard.isCurrent(operationContext)) {
@@ -356,6 +504,7 @@ export function createWorkforceScheduleFeature(ctx = {}) {
 
   async function saveShift({ shift }) {
     const orgId = currentOrgId()
+    assertWorkforceScheduleSelectableReferences(shift, state.snapshot)
     const payload = buildWorkforceScheduleShiftPayload(shift)
     const response = await runIdempotent('upsert-shift', { orgId, payload }, (idempotencyKey) => (
       service.upsertWorkforceScheduleShift(orgId, payload, { idempotencyKey })
@@ -468,6 +617,7 @@ export function createWorkforceScheduleFeature(ctx = {}) {
     activeController = null
     operationRegistry.clear()
     catalogSyncGate.reset()
+    catalogSyncAttempt = 0
     Object.assign(state, {
       range: currentWeekRange(),
       snapshot: null,
@@ -478,6 +628,14 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       setupTimeZone: 'Europe/Warsaw',
       settings: null,
       busy: false,
+      catalogSync: {
+        busy: false,
+        conflicts: [],
+        error: '',
+        hasMoreConflicts: false,
+        stale: false,
+        summary: null,
+      },
     })
     render()
   }

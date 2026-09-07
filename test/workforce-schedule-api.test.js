@@ -23,7 +23,14 @@ function fixture(options = {}) {
     async appendAudit(input) { calls.push(['audit', input]) },
     async readSettings() { return options.settings === undefined ? { timeZone: 'Europe/Warsaw', version: 1 } : options.settings },
     async saveSettings(input) { calls.push(['saveSettings', input]); return { timeZone: input.timeZone, version: 1 } },
-    async syncCatalogs(input) { calls.push(['syncCatalogs', input]); return { people: [{ personId: 'person-1' }], locations: [{ locationId: 'location-1' }] } },
+    async syncCatalogs(input) {
+      calls.push(['syncCatalogs', input])
+      return {
+        synchronizedAt: '2026-09-07T08:15:30.000Z',
+        people: { active: 12, created: 2, updated: 1, deactivated: 0 },
+        locations: { active: 4, created: 1, updated: 0, deactivated: 1 },
+      }
+    },
     async saveShift(input) { calls.push(['saveShift', input]); return { before: null, shift: { shiftId: 'shift-1', version: 1 } } },
     async archiveShift(input) { calls.push(['archiveShift', input]); return { before: { shiftId: input.shiftId }, shift: { shiftId: input.shiftId, pendingDeletion: true } } },
     async lockPublicationScope(input) { calls.push(['lockPublicationScope', input]); return options.shifts || [{ shiftId: 'shift-1', version: 2, revision: 2, isDeleted: false }] },
@@ -320,11 +327,105 @@ test('SYNC_CATALOGS pobiera ludzi i obiekty atomowo jako jedną komendę', async
       ok: true,
       idempotent: false,
       effects: noEffects(),
-      people: [{ personId: 'person-1' }],
-      locations: [{ locationId: 'location-1' }],
       orgId: 'bestclean',
+      people: [],
+      locations: [],
+      receipt: {
+        version: 1,
+        orgId: 'bestclean',
+        synchronizedAt: '2026-09-07T08:15:30.000Z',
+        people: { active: 12, created: 2, updated: 1, deactivated: 0 },
+        locations: { active: 4, created: 1, updated: 0, deactivated: 1 },
+        effects: noEffects(),
+      },
     },
   })
+  const audit = f.calls.find(([name]) => name === 'audit')[1]
+  const completed = f.calls.find(([name]) => name === 'complete')[1]
+  assert.equal(audit.entityType, 'CATALOGS')
+  assert.equal(audit.action, 'SYNCED')
+  assert.deepEqual(audit.after, f.responses[0].payload)
+  assert.deepEqual(completed.response, f.responses[0].payload)
+  assert.ok(f.calls.findIndex(([name]) => name === 'audit') < f.calls.findIndex(([name]) => name === 'complete'))
+  assert.ok(f.calls.findIndex(([name]) => name === 'complete') < f.calls.findIndex(([name, sql]) => name === 'sql' && sql === 'commit'))
+})
+
+test('SYNC_CATALOGS zachowuje bezpieczne szczegóły konfliktu używanego snapshotu', async () => {
+  const affected = [{ personId: 'person-1', shiftId: 'shift-7', date: '2026-09-08' }]
+  const conflict = Object.assign(new Error('catalog conflict'), {
+    statusCode: 409,
+    publicCode: 'WORKFORCE_SCHEDULE_ROSTER_IN_USE',
+    publicMessage: 'Nie można wyłączyć osoby używanej w Grafiku.',
+    publicDetails: { affected, hasMore: false },
+  })
+  const f = fixture({
+    body: { type: 'SYNC_CATALOGS', orgId: 'bestclean', idempotencyKey: 'sync-conflict', effects: noEffects(), payload: {} },
+    repository: {
+      async syncCatalogs() { throw conflict },
+    },
+  })
+
+  await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
+
+  assert.equal(f.responses.length, 0)
+  assert.deepEqual(f.errors[0], {
+    status: 409,
+    code: 'WORKFORCE_SCHEDULE_ROSTER_IN_USE',
+    message: 'Nie można wyłączyć osoby używanej w Grafiku.',
+    details: { affected, hasMore: false },
+  })
+  assert.doesNotMatch(JSON.stringify(f.errors[0]), /login|authUid|displayName/i)
+})
+
+test('receipt synchronizacji normalizuje wszystkie liczniki do nieujemnych integerów', async () => {
+  const f = fixture({
+    body: { type: 'SYNC_CATALOGS', orgId: 'bestclean', idempotencyKey: 'sync-counts', effects: noEffects(), payload: {} },
+    repository: {
+      async syncCatalogs() {
+        return {
+          synchronizedAt: '2026-09-07T08:15:30Z',
+          people: { active: -1, created: '2', updated: 1.5, deactivated: Number.NaN },
+          locations: { active: 3, created: 0, updated: -4, deactivated: '1' },
+        }
+      },
+    },
+  })
+
+  await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
+
+  assert.equal(f.errors.length, 0)
+  assert.deepEqual(f.responses[0].payload.receipt.people, {
+    active: 0,
+    created: 2,
+    updated: 0,
+    deactivated: 0,
+  })
+  assert.deepEqual(f.responses[0].payload.receipt.locations, {
+    active: 3,
+    created: 0,
+    updated: 0,
+    deactivated: 1,
+  })
+  assert.equal(f.responses[0].payload.receipt.synchronizedAt, '2026-09-07T08:15:30.000Z')
+})
+
+test('błąd zapisu audytu wycofuje synchronizację i nie utrwala receipt', async () => {
+  const f = fixture({
+    body: { type: 'SYNC_CATALOGS', orgId: 'bestclean', idempotencyKey: 'sync-audit-failure', effects: noEffects(), payload: {} },
+    repository: {
+      async appendAudit() {
+        throw new Error('audit write failed')
+      },
+    },
+  })
+
+  await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
+
+  assert.equal(f.responses.length, 0)
+  assert.equal(f.errors[0].status, 500)
+  assert.equal(f.calls.some(([name]) => name === 'complete'), false)
+  assert.equal(f.calls.some(([name, sql]) => name === 'sql' && sql === 'commit'), false)
+  assert.equal(f.calls.some(([name, sql]) => name === 'sql' && sql === 'rollback'), true)
 })
 
 test('timeout blokady lub zapytania kończy transakcję rollbackiem i bezpiecznym błędem do ponowienia', async () => {
@@ -363,23 +464,35 @@ test('idempotentny replay zwraca zapisany wynik bez ponownej mutacji', async () 
     ok: true,
     idempotent: false,
     effects: noEffects(),
-    people: [{ personId: 'existing' }],
-    locations: [{ locationId: 'existing-location' }],
+    people: [{ personId: 'existing', sourceWorkerLogin: 'sensitive-login', sourceAuthUid: 'sensitive-uid' }],
+    locations: [{ locationId: 'existing-location', name: 'Sensitive location name' }],
   }
   const f = fixture({
     body: { type: 'SYNC_CATALOGS', orgId: 'bestclean', idempotencyKey: 'sync-1', effects: noEffects(), payload: {} },
-    claim: { replay: true, response: storedResponse },
+    claim: { replay: true, response: storedResponse, completedAt: '2026-09-07T08:15:30.000Z' },
   })
   await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
   assert.equal(f.errors.length, 0)
   assert.deepEqual(f.responses[0], {
     status: 200,
     payload: {
-      ...storedResponse,
-      orgId: 'bestclean',
+      ok: true,
       idempotent: true,
+      effects: noEffects(),
+      orgId: 'bestclean',
+      people: [],
+      locations: [],
+      receipt: {
+        version: 1,
+        orgId: 'bestclean',
+        synchronizedAt: '2026-09-07T08:15:30.000Z',
+        people: { active: 1, created: 0, updated: 0, deactivated: 0 },
+        locations: { active: 1, created: 0, updated: 0, deactivated: 0 },
+        effects: noEffects(),
+      },
     },
   })
+  assert.doesNotMatch(JSON.stringify(f.responses[0].payload), /sensitive-login|sensitive-uid|Sensitive location name/)
   assert.equal(f.calls.some(([name]) => name === 'syncCatalogs'), false)
   assert.equal(f.calls.some(([name]) => name === 'audit'), false)
 })

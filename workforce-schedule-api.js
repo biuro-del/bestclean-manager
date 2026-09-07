@@ -106,6 +106,43 @@ function compareExpectedVersions(expected, actual) {
   return { valid: !missing.length && !extra.length && !stale.length, missing, extra, stale }
 }
 
+function receiptCount(value, fallback = 0) {
+  const parsed = Number(value)
+  if (Number.isSafeInteger(parsed) && parsed >= 0) return parsed
+  const safeFallback = Number(fallback)
+  return Number.isSafeInteger(safeFallback) && safeFallback >= 0 ? safeFallback : 0
+}
+
+function receiptTimestamp(value) {
+  const parsed = new Date(text(value))
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : ''
+}
+
+function compactCatalogSyncReceipt({ orgId, effects, source = {}, completedAt = '', legacyPeople = [], legacyLocations = [] }) {
+  const synchronizedAt = receiptTimestamp(source.synchronizedAt || completedAt)
+  if (!synchronizedAt) {
+    throw apiError(
+      500,
+      'WORKFORCE_SCHEDULE_SYNC_RECEIPT_INVALID',
+      'Nie udało się potwierdzić czasu synchronizacji katalogów.',
+    )
+  }
+  const compactCounts = (counts, legacyItems) => ({
+    active: receiptCount(counts?.active, Array.isArray(legacyItems) ? legacyItems.length : 0),
+    created: receiptCount(counts?.created),
+    updated: receiptCount(counts?.updated),
+    deactivated: receiptCount(counts?.deactivated),
+  })
+  return {
+    version: 1,
+    orgId,
+    synchronizedAt,
+    people: compactCounts(source.people, legacyPeople),
+    locations: compactCounts(source.locations, legacyLocations),
+    effects: { ...effects },
+  }
+}
+
 function createWorkforceScheduleApi(dependencies = {}) {
   ensureDependencies(dependencies)
   const {
@@ -302,11 +339,21 @@ function createWorkforceScheduleApi(dependencies = {}) {
         createPersonId: () => `wsp_${createId()}`,
         createLocationId: () => `wsl_${createId()}`,
       })
+      const receipt = compactCatalogSyncReceipt({
+        orgId: command.orgId,
+        effects: command.effects,
+        source: catalogs,
+      })
       return {
         entityType: 'CATALOGS',
         entityId: command.orgId,
         action: 'SYNCED',
-        response: { ...catalogs, orgId: command.orgId },
+        response: {
+          orgId: command.orgId,
+          people: [],
+          locations: [],
+          receipt,
+        },
       }
     }
     if (command.type === 'UPSERT_SHIFT') {
@@ -357,7 +404,22 @@ function createWorkforceScheduleApi(dependencies = {}) {
       if (claim.replay) {
         await finishScheduleTransaction(client, transaction, 'commit')
         const response = command.type === 'SYNC_CATALOGS'
-          ? { ...claim.response, orgId: command.orgId, idempotent: true }
+          ? {
+              ok: true,
+              idempotent: true,
+              effects: command.effects,
+              orgId: command.orgId,
+              people: [],
+              locations: [],
+              receipt: compactCatalogSyncReceipt({
+                orgId: command.orgId,
+                effects: command.effects,
+                source: claim.response?.receipt || {},
+                completedAt: claim.completedAt,
+                legacyPeople: claim.response?.people,
+                legacyLocations: claim.response?.locations,
+              }),
+            }
           : { ...claim.response, idempotent: true }
         sendJson(res, 200, response)
         return

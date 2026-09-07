@@ -12,6 +12,22 @@ async function createGate() {
   return createWorkforceScheduleCatalogSyncGate()
 }
 
+function receipt(orgId = 'bestclean', overrides = {}) {
+  return {
+    version: 1,
+    orgId,
+    synchronizedAt: '2026-09-07T10:15:30.000Z',
+    people: { active: 12, created: 2, updated: 3, deactivated: 1 },
+    locations: { active: 7, created: 1, updated: 2, deactivated: 0 },
+    effects: {
+      delivery: false,
+      notifications: false,
+      downstream: false,
+    },
+    ...overrides,
+  }
+}
+
 function syncResponse(orgId = 'bestclean', overrides = {}) {
   return {
     ok: true,
@@ -160,4 +176,80 @@ test('reset sesji izoluje stare i nowe żądanie tej samej organizacji', async (
   await Promise.all([newRequest, joinedNewRequest])
 
   assert.equal(gate.isComplete('bestclean'), true)
+})
+
+test('ręczne wymuszenie naprawdę omija ukończony gate, ale nadal współdzieli żądanie w toku', async () => {
+  const gate = await createGate()
+  let calls = 0
+  await gate.run('bestclean', async () => {
+    calls += 1
+    return syncResponse()
+  })
+
+  let resolveForced
+  const operation = () => {
+    calls += 1
+    return new Promise((resolve) => { resolveForced = resolve })
+  }
+  const firstForced = gate.run('bestclean', operation, { force: true })
+  const joinedForced = gate.run('bestclean', operation, { force: true })
+  await Promise.resolve()
+
+  assert.equal(calls, 2)
+  resolveForced(syncResponse('bestclean', { receipt: receipt() }))
+  await Promise.all([firstForced, joinedForced])
+  assert.equal(calls, 2)
+  assert.equal(gate.isComplete('bestclean'), true)
+})
+
+test('nowy receipt jest walidowany dokładnie, a stara odpowiedź pozostaje przejściowo zgodna', async () => {
+  const {
+    isConfirmedWorkforceScheduleCatalogSyncResponse,
+    isConfirmedWorkforceScheduleCatalogSyncReceipt,
+  } = await import(moduleUrl)
+
+  assert.equal(isConfirmedWorkforceScheduleCatalogSyncResponse('bestclean', syncResponse()), true)
+  assert.equal(isConfirmedWorkforceScheduleCatalogSyncReceipt('bestclean', receipt()), true)
+  assert.equal(isConfirmedWorkforceScheduleCatalogSyncResponse(
+    'bestclean',
+    syncResponse('bestclean', { receipt: receipt() }),
+  ), true)
+
+  const invalid = [
+    receipt('other-org'),
+    receipt('bestclean', { version: 2 }),
+    receipt('bestclean', { synchronizedAt: 'wczoraj' }),
+    receipt('bestclean', { people: { active: -1, created: 0, updated: 0, deactivated: 0 } }),
+    receipt('bestclean', { locations: { active: 1, created: 0, updated: 0, deactivated: 0.5 } }),
+    receipt('bestclean', { effects: { delivery: false, notifications: false, downstream: true } }),
+    { ...receipt(), unexpected: true },
+  ]
+  invalid.forEach((candidate) => {
+    assert.equal(isConfirmedWorkforceScheduleCatalogSyncReceipt('bestclean', candidate), false)
+    assert.equal(isConfirmedWorkforceScheduleCatalogSyncResponse(
+      'bestclean',
+      syncResponse('bestclean', { receipt: candidate }),
+    ), false)
+  })
+})
+
+test('podsumowanie synchronizacji korzysta z serwerowego czasu i wyłącznie liczników receipt', async () => {
+  const { summarizeWorkforceScheduleCatalogSync } = await import(moduleUrl)
+  const summary = summarizeWorkforceScheduleCatalogSync(
+    'bestclean',
+    syncResponse('bestclean', {
+      people: [{ personId: 'sekretny-pracownik' }],
+      locations: [{ locationId: 'sekretny-obiekt' }],
+      receipt: receipt(),
+    }),
+    { completedAt: '2020-01-01T00:00:00.000Z' },
+  )
+
+  assert.deepEqual(summary, {
+    lastSyncedAt: '2026-09-07T10:15:30.000Z',
+    source: 'receipt',
+    people: { active: 12, created: 2, updated: 3, deactivated: 1 },
+    locations: { active: 7, created: 1, updated: 2, deactivated: 0 },
+  })
+  assert.doesNotMatch(JSON.stringify(summary), /sekretny/)
 })

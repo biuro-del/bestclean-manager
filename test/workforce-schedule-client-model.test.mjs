@@ -47,6 +47,183 @@ test('bootstrap mapuje backend na widok bez danych demonstracyjnych', async () =
   assert.deepEqual(result.templates, [])
 })
 
+test('bootstrap zachowuje nieaktywne snapshoty historyczne, ale oznacza je jako niewybieralne', async () => {
+  const { normalizeWorkforceScheduleBootstrap } = await modelModule
+  const result = normalizeWorkforceScheduleBootstrap({
+    catalogSync: {
+      lastSyncedAt: '2026-09-07T10:15:30.000Z',
+      people: { active: 1, inactive: 1 },
+      locations: { active: 1, inactive: 1 },
+    },
+    people: [
+      { personId: 'active-person', displayName: 'Aktywna Osoba', status: 'ACTIVE' },
+      { personId: 'inactive-person', displayName: 'Była Osoba', status: 'INACTIVE' },
+    ],
+    locations: [
+      { locationId: 'active-location', name: 'Aktywny obiekt', status: 'ACTIVE' },
+      { locationId: 'inactive-location', name: 'Historyczny obiekt', status: 'INACTIVE' },
+    ],
+  })
+
+  assert.equal(result.users[0].selectable, true)
+  assert.equal(result.users[1].selectable, false)
+  assert.equal(result.locations[0].selectable, true)
+  assert.equal(result.locations[1].selectable, false)
+  assert.deepEqual(result.catalogSync, {
+    lastSyncedAt: '2026-09-07T10:15:30.000Z',
+    source: 'bootstrap',
+    people: { active: 1, inactive: 1 },
+    locations: { active: 1, inactive: 1 },
+  })
+})
+
+test('zapis blokuje nieaktywne lub brakujące referencje katalogowe i zwraca tylko allowlistę affected', async () => {
+  const { assertWorkforceScheduleSelectableReferences } = await modelModule
+  const catalog = {
+    users: [
+      { id: 'active-person', selectable: true },
+      { id: 'inactive-person', selectable: false },
+    ],
+    locations: [
+      { id: 'active-location', selectable: true },
+      { id: 'inactive-location', selectable: false },
+    ],
+  }
+  assert.equal(assertWorkforceScheduleSelectableReferences({
+    assigneeIds: ['active-person'],
+    date: '2026-09-07',
+    locationId: 'active-location',
+  }, catalog), true)
+
+  assert.throws(
+    () => assertWorkforceScheduleSelectableReferences({
+      assigneeIds: ['inactive-person', 'missing-person'],
+      date: '2026-09-07',
+      id: 'shift-1',
+      locationId: 'inactive-location',
+    }, catalog),
+    (error) => {
+      assert.equal(error?.code, 'WORKFORCE_SCHEDULE_INACTIVE_CATALOG_SELECTION')
+      assert.deepEqual(error.details.blocking, [
+        { type: 'MISSING_LOCATION', affected: { shiftId: 'shift-1', date: '2026-09-07', locationId: 'inactive-location' } },
+        { type: 'INACTIVE_PERSON', affected: { shiftId: 'shift-1', date: '2026-09-07', personId: 'inactive-person' } },
+        { type: 'MISSING_PERSON', affected: { shiftId: 'shift-1', date: '2026-09-07', personId: 'missing-person' } },
+      ])
+      return true
+    },
+  )
+})
+
+test('konflikty strukturalne mają lokalny opis i nigdy nie renderują dowolnego JSON z details', async () => {
+  const { workforceScheduleStructuralConflictsFromError } = await modelModule
+  const conflicts = workforceScheduleStructuralConflictsFromError({
+    code: 'WORKFORCE_SCHEDULE_PUBLICATION_BLOCKED',
+    details: {
+      blocking: [{
+        type: 'INACTIVE_PERSON',
+        affected: { personId: 'person-1', shiftId: 'shift-1', date: '2026-09-07', secret: 'nie pokazuj' },
+        details: { databaseRow: 'ściśle tajne' },
+        message: 'niezaufany komunikat serwera',
+      }],
+    },
+  })
+
+  assert.deepEqual(conflicts, [{
+    id: 'INACTIVE_PERSON-0',
+    type: 'INACTIVE_PERSON',
+    label: 'Nieaktywny pracownik',
+    message: 'Zmiana odwołuje się do pracownika, którego nie można już przypisywać.',
+    affected: { personId: 'person-1', shiftId: 'shift-1', date: '2026-09-07' },
+  }])
+  assert.doesNotMatch(JSON.stringify(conflicts), /tajne|niezaufany|secret/)
+})
+
+test('kontekst konfliktu odrzuca datę spoza kontraktu YYYY-MM-DD', async () => {
+  const { workforceScheduleStructuralConflictsFromError } = await modelModule
+  const conflicts = workforceScheduleStructuralConflictsFromError({
+    code: 'WORKFORCE_SCHEDULE_PUBLICATION_BLOCKED',
+    details: {
+      blocking: [{
+        type: 'OVERLAP',
+        affected: { shiftId: 'shift-1', date: 'dane spoza kontraktu' },
+      }],
+    },
+  })
+
+  assert.deepEqual(conflicts[0].affected, { shiftId: 'shift-1' })
+})
+
+test('konflikt ręcznej synchronizacji pokazuje wyłącznie dozwolone pola affected', async () => {
+  const { workforceScheduleCatalogConflictsFromError } = await modelModule
+  const result = workforceScheduleCatalogConflictsFromError({
+    code: 'WORKFORCE_SCHEDULE_OBJECT_IN_USE',
+    details: {
+      affected: [{
+        locationId: 'location-1',
+        shiftId: 'shift-1',
+        date: '2026-09-08',
+        sourceObjectId: 'ukryte-id-źródła',
+        displayName: 'ukryta nazwa',
+      }],
+      hasMore: true,
+      debug: { sql: 'nie pokazuj' },
+    },
+  })
+
+  assert.deepEqual(result, {
+    conflicts: [{
+      id: 'MISSING_LOCATION-0',
+      type: 'MISSING_LOCATION',
+      label: 'Niedostępny obiekt',
+      message: 'Obiekt zapisany w zmianie nie jest dostępny do planowania.',
+      affected: { locationId: 'location-1', shiftId: 'shift-1', date: '2026-09-08' },
+    }],
+    hasMore: true,
+  })
+  assert.doesNotMatch(JSON.stringify(result), /ukry|debug|sql|sourceObjectId|displayName/)
+})
+
+test('konflikt publikacji mapuje stary kształt backendu wyłącznie na bezpieczną allowlistę ID', async () => {
+  const { workforceScheduleStructuralConflictsFromError } = await modelModule
+  const conflicts = workforceScheduleStructuralConflictsFromError({
+    code: 'WORKFORCE_SCHEDULE_PUBLICATION_BLOCKED',
+    details: {
+      blocking: [{
+        type: 'MISSING_LOCATION',
+        shiftId: 'shift-legacy',
+        personId: 'person-legacy',
+        details: {
+          locationId: 'location-legacy',
+          otherShiftId: 'shift-secret',
+          displayName: 'Dane osobowe',
+        },
+      }],
+    },
+  })
+
+  assert.deepEqual(conflicts[0].affected, {
+    personId: 'person-legacy',
+    locationId: 'location-legacy',
+    shiftId: 'shift-legacy',
+  })
+  assert.doesNotMatch(JSON.stringify(conflicts), /shift-secret|Dane osobowe|displayName|otherShiftId/)
+})
+
+test('lokalne obcięcie konfliktów synchronizacji zawsze ustawia hasMore', async () => {
+  const { workforceScheduleCatalogConflictsFromError } = await modelModule
+  const affected = Array.from({ length: 21 }, (_, index) => ({
+    locationId: `location-${index + 1}`,
+    shiftId: `shift-${index + 1}`,
+  }))
+  const result = workforceScheduleCatalogConflictsFromError({
+    code: 'WORKFORCE_SCHEDULE_OBJECT_IN_USE',
+    details: { affected, hasMore: false },
+  })
+
+  assert.equal(result.conflicts.length, 20)
+  assert.equal(result.hasMore, true)
+})
+
 test('payload zapisu zachowuje wersję i mapuje assigneeIds na personIds', async () => {
   const { buildWorkforceScheduleShiftPayload } = await modelModule
   assert.deepEqual(buildWorkforceScheduleShiftPayload({
