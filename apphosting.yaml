@@ -166,10 +166,9 @@ env:
     value: iclean-room-database
     availability:
       - RUNTIME
-  # Grafik stays dormant in the baseline deployment. Dedicated credential
-  # references are intentionally added only in the separately reviewed
-  # activation candidate, so a missing Grafik secret cannot block deployment
-  # of unrelated portal changes.
+  # Dedicated Grafik credentials are isolated from the legacy portal pool.
+  # The feature remains dormant because every rollout and delivery flag below
+  # is fail-closed and the frontend build mode stays disabled.
   - variable: WORKFORCE_SCHEDULE_ENABLED
     value: "false"
     availability:
@@ -200,6 +199,14 @@ env:
       - RUNTIME
   - variable: WORKFORCE_SCHEDULE_DB_NAME
     value: iclean-room-database
+    availability:
+      - RUNTIME
+  - variable: WORKFORCE_SCHEDULE_DB_USER
+    secret: WORKFORCE_SCHEDULE_DB_USER
+    availability:
+      - RUNTIME
+  - variable: WORKFORCE_SCHEDULE_DB_PASS
+    secret: WORKFORCE_SCHEDULE_DB_PASS
     availability:
       - RUNTIME
   - variable: DB_USER

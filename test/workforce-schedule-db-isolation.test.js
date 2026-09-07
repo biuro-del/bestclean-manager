@@ -179,7 +179,7 @@ test('API wiring cannot fall back to the shared portal pool', () => {
   assert.doesNotMatch(wiring, /\n\s*connectDbClient,/)
 })
 
-test('App Hosting keeps Grafik dormant without unresolved secret references', () => {
+test('App Hosting keeps Grafik dormant with isolated runtime secret references', () => {
   assert.match(appHostingVariableBlock('VITE_WORKFORCE_SCHEDULE_MODE'), /value: disabled[\s\S]*- BUILD/)
   for (const name of [
     'WORKFORCE_SCHEDULE_ENABLED',
@@ -190,11 +190,22 @@ test('App Hosting keeps Grafik dormant without unresolved secret references', ()
     assert.match(appHostingVariableBlock(name), /value: "false"[\s\S]*- RUNTIME/)
   }
   assert.match(
+    appHostingVariableBlock('WORKFORCE_SCHEDULE_ROLLOUT_MODE'),
+    /value: "OFF"[\s\S]*- RUNTIME/,
+  )
+  assert.match(
     appHostingVariableBlock('WORKFORCE_SCHEDULE_DB_AUTH_TYPE'),
     /value: PASSWORD[\s\S]*- RUNTIME/,
   )
-  assert.doesNotMatch(appHosting, /variable: WORKFORCE_SCHEDULE_DB_(?:USER|PASS)/)
-  assert.doesNotMatch(appHosting, /secret: WORKFORCE_SCHEDULE_DB_(?:USER|PASS)/)
+  for (const name of ['WORKFORCE_SCHEDULE_DB_USER', 'WORKFORCE_SCHEDULE_DB_PASS']) {
+    const block = appHostingVariableBlock(name)
+    assert.match(block, new RegExp(`secret: ${name}`))
+    assert.match(block, /availability:[\s\S]*- RUNTIME/)
+    assert.doesNotMatch(block, /\n\s+value:/)
+    assert.doesNotMatch(block, /PORTAL_DB_(?:USER|PASS)/)
+  }
+  assert.match(appHostingVariableBlock('DB_USER'), /secret: PORTAL_DB_USER[\s\S]*- RUNTIME/)
+  assert.match(appHostingVariableBlock('DB_PASS'), /secret: PORTAL_DB_PASS[\s\S]*- RUNTIME/)
 })
 
 test('env examples and runtime documentation require the dedicated PASSWORD auth mode', () => {
