@@ -11,7 +11,6 @@ import {
   FloppyDisk,
   GearSix,
   Info,
-  MapPin,
   PaperPlaneTilt,
   Plus,
   Trash,
@@ -84,8 +83,8 @@ function PortalDialog({ children, className = "", labelledBy, onClose, side = fa
   );
 }
 
-function IconButton({ children, label, onClick, className = "" }) {
-  return <button aria-label={label} className={`tm-schedule-icon-button ${className}`} onClick={onClick} type="button">{children}</button>;
+function IconButton({ children, label, onClick, className = "", disabled = false }) {
+  return <button aria-label={label} className={`tm-schedule-icon-button ${className}`} disabled={disabled} onClick={onClick} type="button">{children}</button>;
 }
 
 function userName(user) {
@@ -215,21 +214,109 @@ export function RequestsDialog({ onClose, onResolve, requests, users }) {
   );
 }
 
-export function SettingsDialog({ deliveryDisabled = true, onClose, onSave }) {
+export function SettingsDialog({ busy = false, deliveryDisabled = true, initialSettings, onClose, onSave }) {
   const titleId = useId();
-  const [section, setSection] = useState("details");
-  const [settings, setSettings] = useState({ location: true, address: true, users: true, note: true, tags: false, warnings: true, confirmation: false });
-  const toggle = (key) => setSettings((current) => ({ ...current, [key]: !current[key] }));
+  const timeZoneId = useId();
+  const hoursId = useId();
+  const minutesId = useId();
+  const initialLimit = Number(initialSettings?.weeklyLimitMinutes);
+  const safeLimit = Number.isSafeInteger(initialLimit) && initialLimit > 0 && initialLimit <= 10080 ? initialLimit : 2400;
+  const initialTimeZone = String(initialSettings?.timeZone || "Europe/Warsaw");
+  const initialVersion = Number(initialSettings?.version);
+  const [form, setForm] = useState(() => ({
+    hours: String(Math.floor(safeLimit / 60)),
+    minutes: String(safeLimit % 60),
+    timeZone: initialTimeZone,
+  }));
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const locked = busy || submitting;
+  const timeZones = useMemo(() => Array.from(new Set([
+    initialTimeZone,
+    "Europe/Warsaw",
+    "Europe/Berlin",
+    "Europe/Prague",
+  ])), [initialTimeZone]);
+  const close = () => { if (!locked) onClose(); };
+
+  const save = async () => {
+    if (locked) return;
+    const hours = Number(form.hours);
+    const minutes = Number(form.minutes);
+    const weeklyLimitMinutes = hours * 60 + minutes;
+    if (
+      !form.timeZone
+      || !Number.isSafeInteger(hours)
+      || hours < 0
+      || hours > 168
+      || !Number.isSafeInteger(minutes)
+      || minutes < 0
+      || minutes > 59
+      || weeklyLimitMinutes < 1
+      || weeklyLimitMinutes > 10080
+    ) {
+      setError("Podaj prawidłowy limit: od 1 minuty do 168 godzin tygodniowo.");
+      return;
+    }
+
+    setError("");
+    setSubmitting(true);
+    try {
+      const saved = await onSave({ expectedVersion: initialVersion, timeZone: form.timeZone, weeklyLimitMinutes });
+      setSubmitting(false);
+      if (!saved) {
+        setError("Ustawienia nie zostały zapisane. Sprawdź komunikat systemu i spróbuj ponownie.");
+        return;
+      }
+      onClose();
+    } catch {
+      setSubmitting(false);
+      setError("Ustawienia nie zostały zapisane. Spróbuj ponownie.");
+    }
+  };
+
   return (
-    <PortalDialog className="tm-schedule-settings-dialog" labelledBy={titleId} onClose={onClose}>
-      <header className="tm-schedule-modal-header"><div><p>Konfiguracja grafiku</p><h2 id={titleId}>Ustawienia</h2></div><IconButton label="Zamknij ustawienia" onClick={onClose}><X size={21} /></IconButton></header>
-      <div className="tm-schedule-settings-layout">
-        <nav aria-label="Sekcje ustawień"><button className={section === "details" ? "is-active" : ""} onClick={() => setSection("details")} type="button"><GearSix size={18} /> Szczegóły zmian</button><button className={section === "rules" ? "is-active" : ""} onClick={() => setSection("rules")} type="button"><WarningCircle size={18} /> Reguły i konflikty</button></nav>
-        <div className="tm-schedule-settings-content">
-          {section === "details" ? <><h3>Domyślne pola zmiany</h3><p>Wybierz informacje, które koordynator zobaczy podczas planowania.</p>{[["location", "Lokalizacja", <MapPin key="location-icon" size={19} />], ["address", "Adres", <MapPin key="address-icon" size={19} />], ["users", "Użytkownicy", <Users key="users-icon" size={19} />], ["note", "Notatka", <ClipboardText key="note-icon" size={19} />], ["tags", "Tagi zmiany", <Info key="tags-icon" size={19} />]].map(([key, label, icon]) => <label className="tm-schedule-setting-row" key={key}><span>{icon}<strong>{label}</strong></span><input checked={settings[key]} onChange={() => toggle(key)} role="switch" type="checkbox" /></label>)}</> : <><h3>Kontrola jakości grafiku</h3><p>Ostrzeżenia pojawią się przed zatwierdzeniem zmian.</p><label className="tm-schedule-setting-row"><span><WarningCircle size={19} /><span><strong>Wykrywaj konflikty</strong><small>Nakładające się zmiany i braki obsady</small></span></span><input checked={settings.warnings} onChange={() => toggle("warnings")} role="switch" type="checkbox" /></label><label className={`tm-schedule-setting-row ${deliveryDisabled ? "is-disabled" : ""}`}><span><Check size={19} /><span><strong>Wymagaj potwierdzenia</strong><small>{deliveryDisabled ? "Niedostępne — pracownicy nie widzą Grafiku" : "Pracownik potwierdza każdą opublikowaną zmianę"}</small></span></span><input checked={deliveryDisabled ? false : settings.confirmation} disabled={deliveryDisabled} onChange={() => toggle("confirmation")} role="switch" type="checkbox" /></label></>}
+    <PortalDialog className="tm-schedule-settings-dialog" labelledBy={titleId} onClose={close}>
+      <header className="tm-schedule-modal-header">
+        <div><p>Konfiguracja Grafiku</p><h2 id={titleId}>Ustawienia operacyjne</h2></div>
+        <IconButton disabled={locked} label="Zamknij ustawienia" onClick={close}><X size={21} /></IconButton>
+      </header>
+      <div className="tm-schedule-settings-content">
+        <div className="tm-schedule-settings-intro">
+          <span><GearSix size={22} weight="duotone" /></span>
+          <div><h3>Zasady planowania</h3><p>Te wartości są zapisywane w ustawieniach organizacji i wpływają na kontrolę Grafiku.</p></div>
         </div>
+
+        <div className="tm-schedule-settings-fields">
+          <label className="tm-schedule-settings-field" htmlFor={timeZoneId}>
+            <span><Clock size={19} /><strong>Strefa czasowa</strong></span>
+            <select disabled={locked} id={timeZoneId} onChange={(event) => setForm({ ...form, timeZone: event.target.value })} value={form.timeZone}>
+              {timeZones.map((timeZone) => <option key={timeZone} value={timeZone}>{timeZone}</option>)}
+            </select>
+            <small>Po utworzeniu pierwszej zmiany strefa czasu jest chroniona przed zmianą.</small>
+          </label>
+
+          <fieldset className="tm-schedule-settings-field">
+            <legend><WarningCircle size={19} /><strong>Tygodniowy limit pracy</strong></legend>
+            <div className="tm-schedule-duration-fields">
+              <label htmlFor={hoursId}><span>Godziny</span><input disabled={locked} id={hoursId} inputMode="numeric" max="168" min="0" onChange={(event) => setForm({ ...form, hours: event.target.value })} step="1" type="number" value={form.hours} /></label>
+              <label htmlFor={minutesId}><span>Minuty</span><input disabled={locked} id={minutesId} inputMode="numeric" max="59" min="0" onChange={(event) => setForm({ ...form, minutes: event.target.value })} step="1" type="number" value={form.minutes} /></label>
+            </div>
+            <small>Po przekroczeniu tego czasu Grafik pokaże ostrzeżenie przed zatwierdzeniem.</small>
+          </fieldset>
+        </div>
+
+        <div className="tm-schedule-settings-boundary" role="note">
+          <Info size={20} />
+          <span><strong>{deliveryDisabled ? "Nadal tylko wewnętrznie" : "Zakres tego ustawienia"}</strong>{deliveryDisabled ? " Zapis nie wysyła zmian do pracowników, Zleceń ani Kalendarza." : " To okno nie zmienia zasad dostarczania Grafiku."}</span>
+        </div>
+        {error && <p className="tm-schedule-settings-error" role="alert">{error}</p>}
+        <small className="tm-schedule-settings-version">Wersja ustawień: {Number.isSafeInteger(initialVersion) && initialVersion > 0 ? initialVersion : "—"}</small>
       </div>
-      <footer className="tm-schedule-settings-footer"><button className="tm-schedule-secondary-button" onClick={onClose} type="button">Anuluj</button><button className="tm-schedule-primary-button" onClick={() => onSave(settings)} type="button">Zapisz ustawienia</button></footer>
+      <footer className="tm-schedule-settings-footer">
+        <button className="tm-schedule-secondary-button" disabled={locked} onClick={close} type="button">Anuluj</button>
+        <button className="tm-schedule-primary-button" disabled={locked} onClick={() => void save()} type="button">{locked ? "Zapisuję…" : "Zapisz ustawienia"}</button>
+      </footer>
     </PortalDialog>
   );
 }

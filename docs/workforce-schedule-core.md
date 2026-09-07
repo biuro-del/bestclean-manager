@@ -42,6 +42,25 @@ kontraktu albo próbuje włączyć którykolwiek efekt. Wewnętrzna publikacja o
 zatwierdzenie wersji w Grafiku; nie oznacza SMS, e-maila, push, widoczności w
 aplikacji pracownika ani zmiany ewidencji pracy.
 
+## Ustawienia operacyjne
+
+Administrator lub właściciel organizacji może zmienić wyłącznie ustawienia,
+które mają rzeczywisty kontrakt backendowy:
+
+- strefę czasową IANA używaną do interpretacji zmian;
+- tygodniowy limit pracy od 1 minuty do 168 godzin, używany przez ostrzeżenia
+  przed zatwierdzeniem Grafiku.
+
+Zapis korzysta z wersji optymistycznej `expectedVersion`, osobnego klucza
+idempotencji i jest uznawany w UI dopiero po zwróceniu przez backend dokładnego
+`orgId`, nowych wartości oraz wersji większej o jeden. Wynik ze starej sesji lub
+innej organizacji nie może zmienić bieżącego widoku. Strefa czasowa jest
+niezmienna po utworzeniu pierwszej zmiany; tę regułę wymusza backend.
+
+Okno ustawień nie zawiera atrap opcji prezentacyjnych i nie steruje
+dostarczaniem do aplikacji pracownika, powiadomieniami, Zleceniami ani
+Kalendarzem.
+
 ## Niedozwolone zależności
 
 Kod Grafiku nie może importować ani wywoływać:

@@ -72,6 +72,38 @@ export function isConfirmedWorkforceScheduleShift(shift = {}) {
   return Boolean(normalized.id && normalized.revision > 0 && normalized.version > 0)
 }
 
+export function normalizeWorkforceScheduleSettings(settings) {
+  if (!plainObject(settings)) return null
+  const weeklyLimitMinutes = Number(settings.weeklyLimitMinutes)
+  return {
+    ...settings,
+    orgId: text(settings.orgId),
+    timeZone: text(settings.timeZone),
+    weeklyLimitMinutes: Number.isSafeInteger(weeklyLimitMinutes) && weeklyLimitMinutes >= 1 && weeklyLimitMinutes <= 10080
+      ? weeklyLimitMinutes
+      : 0,
+    version: positiveInteger(settings.version),
+  }
+}
+
+export function isConfirmedWorkforceScheduleSettings(settings, expected = {}) {
+  const normalized = normalizeWorkforceScheduleSettings(settings)
+  const expectedVersion = Number(expected.expectedVersion)
+  const weeklyLimitMinutes = Number(expected.weeklyLimitMinutes)
+  return Boolean(
+    normalized
+    && normalized.orgId
+    && normalized.orgId === text(expected.orgId)
+    && normalized.timeZone
+    && normalized.timeZone === text(expected.timeZone)
+    && Number.isSafeInteger(weeklyLimitMinutes)
+    && normalized.weeklyLimitMinutes === weeklyLimitMinutes
+    && Number.isSafeInteger(expectedVersion)
+    && expectedVersion >= 0
+    && normalized.version === expectedVersion + 1
+  )
+}
+
 export function normalizeWorkforceScheduleBootstrap(schedule = {}) {
   const users = (Array.isArray(schedule.people) ? schedule.people : []).map((person) => {
     const displayName = text(person.displayName)
@@ -117,9 +149,7 @@ export function normalizeWorkforceScheduleBootstrap(schedule = {}) {
     shifts,
     requests,
     templates: Array.isArray(schedule.templates) ? schedule.templates : [],
-    settings: schedule.settings && typeof schedule.settings === 'object' && !Array.isArray(schedule.settings)
-      ? schedule.settings
-      : null,
+    settings: normalizeWorkforceScheduleSettings(schedule.settings),
     setupRequired: schedule.setupRequired === true,
     publications: Array.isArray(schedule.publications) ? schedule.publications : [],
     catalogSync: normalizeBootstrapCatalogSync(schedule.catalogSync),

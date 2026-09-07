@@ -47,6 +47,37 @@ test('bootstrap mapuje backend na widok bez danych demonstracyjnych', async () =
   assert.deepEqual(result.templates, [])
 })
 
+test('ustawienia są normalizowane, a zapis wymaga dokładnego potwierdzenia organizacji i wersji', async () => {
+  const {
+    isConfirmedWorkforceScheduleSettings,
+    normalizeWorkforceScheduleSettings,
+  } = await modelModule
+  const expected = {
+    expectedVersion: 4,
+    orgId: 'bestclean',
+    timeZone: 'Europe/Warsaw',
+    weeklyLimitMinutes: 2250,
+  }
+  const receipt = {
+    orgId: 'bestclean',
+    timeZone: 'Europe/Warsaw',
+    version: 5,
+    weeklyLimitMinutes: 2250,
+  }
+
+  assert.deepEqual(normalizeWorkforceScheduleSettings({
+    ...receipt,
+    version: '5',
+    weeklyLimitMinutes: '2250',
+  }), receipt)
+  assert.equal(isConfirmedWorkforceScheduleSettings(receipt, expected), true)
+  assert.equal(isConfirmedWorkforceScheduleSettings({ ...receipt, orgId: 'inna-firma' }, expected), false)
+  assert.equal(isConfirmedWorkforceScheduleSettings({ ...receipt, version: 4 }, expected), false)
+  assert.equal(isConfirmedWorkforceScheduleSettings({ ...receipt, weeklyLimitMinutes: 2400 }, expected), false)
+  assert.equal(normalizeWorkforceScheduleSettings({ ...receipt, weeklyLimitMinutes: -1 }).weeklyLimitMinutes, 0)
+  assert.equal(normalizeWorkforceScheduleSettings({ ...receipt, weeklyLimitMinutes: 10081 }).weeklyLimitMinutes, 0)
+})
+
 test('bootstrap zachowuje nieaktywne snapshoty historyczne, ale oznacza je jako niewybieralne', async () => {
   const { normalizeWorkforceScheduleBootstrap } = await modelModule
   const result = normalizeWorkforceScheduleBootstrap({

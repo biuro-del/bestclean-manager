@@ -61,8 +61,10 @@ async function loadFeatureFactory() {
       createWorkforceScheduleOperationRegistry: transport.createWorkforceScheduleOperationRegistry,
       defaultWorkforceScheduleService: {},
       formatWorkforceScheduleWarning: clientModel.formatWorkforceScheduleWarning,
+      isConfirmedWorkforceScheduleSettings: clientModel.isConfirmedWorkforceScheduleSettings,
       isConfirmedWorkforceScheduleShift: clientModel.isConfirmedWorkforceScheduleShift,
       normalizeWorkforceScheduleBootstrap: clientModel.normalizeWorkforceScheduleBootstrap,
+      normalizeWorkforceScheduleSettings: clientModel.normalizeWorkforceScheduleSettings,
       normalizeWorkforceScheduleShift: clientModel.normalizeWorkforceScheduleShift,
       summarizeWorkforceScheduleCatalogSync: catalogSync.summarizeWorkforceScheduleCatalogSync,
       workforceScheduleCatalogConflictsFromError: clientModel.workforceScheduleCatalogConflictsFromError,
@@ -154,6 +156,7 @@ async function createFixture(t) {
       return bootstrap({
         locations: [{ locationId: `location-${orgId.replace(/^org-/, '')}`, name: `Location ${orgId}`, status: 'ACTIVE' }],
         people: [{ displayName: `User ${orgId}`, personId: `person-${orgId}`, status: 'ACTIVE' }],
+        settings: { orgId, timeZone: 'Europe/Warsaw', version: 1, weeklyLimitMinutes: 2400 },
         setupRequired,
       })
     },
@@ -168,9 +171,9 @@ async function createFixture(t) {
         people: [],
       }
     },
-    setWorkforceScheduleConfiguration(orgId, configuration) {
+    setWorkforceScheduleConfiguration(orgId, configuration, options) {
       const pending = deferred()
-      configureCalls.push({ configuration, orgId, pending })
+      configureCalls.push({ configuration, options, orgId, pending })
       return pending.promise
     },
     upsertWorkforceScheduleShift(orgId, payload) {
@@ -253,7 +256,7 @@ test('reset sesji podczas configure ignoruje stary wynik i nie zwalnia blokady n
 
   f.setSetupRequired(false)
   f.configureCalls[1].pending.resolve({
-    settings: { timeZone: 'Europe/Warsaw', version: 2, weeklyLimitMinutes: 2400 },
+    settings: { orgId: 'org-a', timeZone: 'Europe/Warsaw', version: 2, weeklyLimitMinutes: 2400 },
   })
   await waitFor(() => f.notices.length === 1, 'current configure completion')
   await waitFor(() => typeof f.lastRender()?.type === 'function', 'schedule content render')
@@ -262,6 +265,22 @@ test('reset sesji podczas configure ignoruje stary wynik i nie zwalnia blokady n
   assert.equal(f.lastRender().props.snapshot.users[0].id, 'person-org-a')
   assert.equal(f.syncCalls.length, 1)
   assert.equal(f.syncCalls[0].orgId, 'org-a')
+})
+
+test('pierwsze uruchomienie nie ogłasza sukcesu bez pełnego potwierdzenia ustawień', async (t) => {
+  const f = await createFixture(t)
+  f.setSetupRequired(true)
+  await f.feature.refresh({ syncCatalogs: false })
+
+  activationButton(f.lastRender()).props.onClick()
+  await waitFor(() => f.configureCalls.length === 1, 'configuration request')
+  f.configureCalls[0].pending.resolve({
+    settings: { orgId: 'org-a', timeZone: 'Europe/Warsaw', version: 1, weeklyLimitMinutes: 2400 },
+  })
+  await waitFor(() => /pełnego potwierdzenia uruchomienia/.test(nodeText(f.lastRender())), 'invalid confirmation error')
+
+  assert.deepEqual(f.notices, [])
+  assert.match(nodeText(f.lastRender()), /Skonfiguruj Grafik/)
 })
 
 test('zmiana organizacji podczas runWrite odrzuca stary wynik i nie zwalnia nowego zapisu', async (t) => {
@@ -326,6 +345,7 @@ test('OWNER może świadomie wymusić kolejne synchronizacje z nowym kluczem, a 
 
   assert.equal(f.lastRender().props.catalogRefreshEnabled, true)
   assert.equal(f.lastRender().props.editingEnabled, true)
+  assert.equal(f.lastRender().props.settingsEnabled, true)
   assert.equal(f.syncCalls.length, 0)
   await f.lastRender().props.onCatalogRefresh()
   await f.lastRender().props.onCatalogRefresh()
@@ -342,6 +362,102 @@ test('OWNER może świadomie wymusić kolejne synchronizacje z nowym kluczem, a 
 
   assert.equal(f.lastRender().props.catalogRefreshEnabled, false)
   assert.equal(f.lastRender().props.editingEnabled, false)
+  assert.equal(f.lastRender().props.settingsEnabled, false)
+})
+
+test('OWNER zapisuje rzeczywiste ustawienia z bieżącą wersją i otrzymuje potwierdzony stan', async (t) => {
+  const f = await createFixture(t)
+  await f.feature.refresh({ syncCatalogs: false })
+
+  const write = f.lastRender().props.adapter.onSettingsSave({
+    settings: { expectedVersion: 1, timeZone: 'Europe/Warsaw', weeklyLimitMinutes: 2250 },
+  })
+  await waitFor(() => f.configureCalls.length === 1, 'settings update request')
+  assert.deepEqual(f.configureCalls[0].configuration, {
+    expectedVersion: 1,
+    timeZone: 'Europe/Warsaw',
+    weeklyLimitMinutes: 2250,
+  })
+  assert.match(f.configureCalls[0].options.idempotencyKey, /^ws-/)
+
+  f.configureCalls[0].pending.resolve({
+    settings: {
+      orgId: 'org-a',
+      timeZone: 'Europe/Warsaw',
+      version: 2,
+      weeklyLimitMinutes: 2250,
+    },
+  })
+  const saved = await write
+
+  assert.equal(saved.orgId, 'org-a')
+  assert.equal(saved.version, 2)
+  assert.equal(saved.weeklyLimitMinutes, 2250)
+  assert.equal(f.lastRender().props.scheduleSettings.version, 2)
+  assert.equal(f.lastRender().props.weeklyLimitMinutes, 2250)
+})
+
+test('zapis ustawień bez wersji okna jest blokowany przed wywołaniem backendu', async (t) => {
+  const f = await createFixture(t)
+  await f.feature.refresh({ syncCatalogs: false })
+  const fetchesBeforeWrite = f.fetchCalls.length
+
+  await assert.rejects(
+    f.lastRender().props.adapter.onSettingsSave({
+      settings: { timeZone: 'Europe/Warsaw', weeklyLimitMinutes: 2250 },
+    }),
+    { code: 'WORKFORCE_SCHEDULE_INVALID_SETTINGS_REQUEST' },
+  )
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(f.configureCalls.length, 0)
+  assert.equal(f.fetchCalls.length, fetchesBeforeWrite)
+})
+
+test('wynik zapisu ustawień ze starej organizacji nie zmienia bieżącego widoku', async (t) => {
+  const f = await createFixture(t)
+  await f.feature.refresh({ syncCatalogs: false })
+  const oldWrite = f.lastRender().props.adapter.onSettingsSave({
+    settings: { expectedVersion: 1, timeZone: 'Europe/Warsaw', weeklyLimitMinutes: 2100 },
+  })
+  await waitFor(() => f.configureCalls.length === 1, 'old settings request')
+
+  f.session.activeOrgId = 'org-b'
+  f.feature.resetSession()
+  await f.feature.refresh({ syncCatalogs: false })
+  f.configureCalls[0].pending.resolve({
+    settings: {
+      orgId: 'org-a',
+      timeZone: 'Europe/Warsaw',
+      version: 2,
+      weeklyLimitMinutes: 2100,
+    },
+  })
+
+  assert.equal(await oldWrite, false)
+  assert.equal(f.lastRender().props.scheduleSettings.orgId, 'org-b')
+  assert.equal(f.lastRender().props.scheduleSettings.weeklyLimitMinutes, 2400)
+})
+
+test('niepełne potwierdzenie ustawień jest odrzucane i nie nadpisuje stanu', async (t) => {
+  const f = await createFixture(t)
+  await f.feature.refresh({ syncCatalogs: false })
+  const write = f.lastRender().props.adapter.onSettingsSave({
+    settings: { expectedVersion: 1, timeZone: 'Europe/Warsaw', weeklyLimitMinutes: 2250 },
+  })
+  await waitFor(() => f.configureCalls.length === 1, 'invalid settings receipt request')
+  f.configureCalls[0].pending.resolve({
+    settings: {
+      orgId: 'org-a',
+      timeZone: 'Europe/Warsaw',
+      version: 1,
+      weeklyLimitMinutes: 2250,
+    },
+  })
+
+  await assert.rejects(write, { code: 'WORKFORCE_SCHEDULE_INVALID_SETTINGS_RESPONSE' })
+  assert.equal(f.lastRender().props.scheduleSettings.version, 1)
+  assert.equal(f.lastRender().props.scheduleSettings.weeklyLimitMinutes, 2400)
 })
 
 test('błąd ręcznej synchronizacji nie nadpisuje ostatniego sukcesu i przekazuje tylko bezpieczne konflikty', async (t) => {

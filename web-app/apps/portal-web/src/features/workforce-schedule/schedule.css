@@ -561,8 +561,7 @@
 }
 
 .tm-schedule-menu input[role="switch"],
-.tm-schedule-notify-row input,
-.tm-schedule-setting-row input {
+.tm-schedule-notify-row input {
   width: 34px;
   height: 19px;
   accent-color: #2a96f7;
@@ -2059,90 +2058,151 @@
 .tm-schedule-request-status.is-rejected { color: #a43d4d; background: #fff0f2; }
 
 .tm-schedule-settings-dialog {
-  width: min(820px, 100%);
-  min-height: min(620px, calc(100vh - 48px));
-}
-
-.tm-schedule-settings-layout {
-  min-height: 0;
-  flex: 1;
-  display: grid;
-  grid-template-columns: 205px 1fr;
-}
-
-.tm-schedule-settings-layout > nav {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 14px 10px;
-  background: #f6f8f9;
-  border-right: 1px solid #e0e6e9;
-}
-
-.tm-schedule-settings-layout > nav button {
-  min-height: 42px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  background: transparent;
-  border-radius: 7px;
-  text-align: left;
-  font-weight: 800;
-}
-
-.tm-schedule-settings-layout > nav button.is-active {
-  color: #1d7fce;
-  background: #e9f5ff;
+  width: min(660px, 100%);
 }
 
 .tm-schedule-settings-content {
   padding: 22px;
 }
 
-.tm-schedule-settings-content h3,
-.tm-schedule-settings-content > p {
+.tm-schedule-settings-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.tm-schedule-settings-intro > span {
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: #1672c4;
+  background: #eaf5ff;
+  border-radius: 10px;
+}
+
+.tm-schedule-settings-intro h3,
+.tm-schedule-settings-intro p {
   margin: 0;
 }
 
-.tm-schedule-settings-content > p {
-  margin: 5px 0 18px;
-  color: #7d8997;
+.tm-schedule-settings-intro p {
+  margin-top: 4px;
+  color: #6f7f91;
+  line-height: 1.45;
 }
 
-.tm-schedule-setting-row {
-  min-height: 54px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.tm-schedule-settings-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
-  padding: 9px 11px;
-  margin-bottom: 8px;
-  border: 1px solid #e0e6e9;
-  border-radius: 8px;
 }
 
-.tm-schedule-setting-row > span,
-.tm-schedule-setting-row > span > span {
+.tm-schedule-settings-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 15px;
+  margin: 0;
+  border: 1px solid #dce4eb;
+  border-radius: 11px;
+  background: #fff;
+}
+
+.tm-schedule-settings-field > span,
+.tm-schedule-settings-field > legend {
   display: flex;
   align-items: center;
+  gap: 7px;
+  padding: 0;
+  color: #26384a;
+  font-size: 13px;
+}
+
+.tm-schedule-settings-field > select,
+.tm-schedule-duration-fields input {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  color: #172b4d;
+  background: #fff;
+  border: 1px solid #cfd9e3;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.tm-schedule-settings-field > select:focus,
+.tm-schedule-duration-fields input:focus {
+  border-color: #2b98f5;
+  box-shadow: 0 0 0 3px rgba(43, 152, 245, 0.14);
+  outline: 0;
+}
+
+.tm-schedule-settings-field small {
+  color: #758699;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.tm-schedule-duration-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 9px;
 }
 
-.tm-schedule-setting-row > span > span {
-  align-items: flex-start;
+.tm-schedule-duration-fields label {
+  min-width: 0;
+  display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 5px;
+  color: #68798c;
+  font-size: 10px;
+  font-weight: 800;
 }
 
-.tm-schedule-setting-row small {
-  color: #8793a0;
+.tm-schedule-settings-boundary {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 12px 13px;
+  margin-top: 14px;
+  color: #285d46;
+  background: #eef9f3;
+  border: 1px solid #ccebd9;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tm-schedule-settings-boundary svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.tm-schedule-settings-error {
+  padding: 10px 12px;
+  margin: 12px 0 0;
+  color: #9f2635;
+  background: #fff2f3;
+  border: 1px solid #ffc9cf;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tm-schedule-settings-version {
+  display: block;
+  margin-top: 12px;
+  color: #8795a4;
   font-size: 10px;
 }
 
-.tm-schedule-setting-row.is-disabled {
-  color: #8a96a3;
-  background: #f7f9fa;
+.tm-schedule-settings-footer {
+  justify-content: flex-end;
 }
 
 @media (max-width: 1180px) {
@@ -2269,9 +2329,8 @@
   .tm-schedule-publish-dialog footer { margin-top: auto; }
   .tm-schedule-request-card { grid-template-columns: 36px 1fr; }
   .tm-schedule-request-actions { grid-column: 1 / -1; justify-content: flex-end; }
-  .tm-schedule-settings-layout { display: flex; flex-direction: column; }
-  .tm-schedule-settings-layout > nav { flex-direction: row; border-right: 0; border-bottom: 1px solid #e0e6e9; }
-  .tm-schedule-settings-layout > nav button { flex: 1; justify-content: center; }
+  .tm-schedule-settings-content { padding: 16px; }
+  .tm-schedule-settings-fields { grid-template-columns: 1fr; }
   .tm-schedule-settings-footer { margin-top: auto; }
 }
 

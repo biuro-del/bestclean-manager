@@ -162,3 +162,22 @@ test("ręczna synchronizacja katalogów i nieaktywne snapshoty pozostają w bezp
   assert.doesNotMatch(componentSource, /features\/(orders|calendar)|services\/(orders|calendar)/);
   assert.doesNotMatch(hostSource, /features\/(orders|calendar)|services\/(orders|calendar)/);
 });
+
+test("ustawienia operacyjne zapisują wyłącznie strefę i limit po potwierdzeniu backendu", async () => {
+  const hostSource = await readFile(path.join(moduleRoot, "index.js"), "utf8");
+  const componentSource = await readFile(path.join(moduleRoot, "ScheduleContent.jsx"), "utf8");
+  const overlaysSource = await readFile(path.join(moduleRoot, "ScheduleOverlays.jsx"), "utf8");
+
+  assert.match(hostSource, /settingsEnabled: canConfigure\(\) && Boolean\(state\.settings\)/);
+  assert.match(hostSource, /onSettingsSave: \(payload\) => updateSettings\(payload\)/);
+  assert.match(hostSource, /isConfirmedWorkforceScheduleSettings\(response\?\.settings/);
+  assert.match(hostSource, /set-configuration-update/);
+  assert.match(componentSource, /const saved = await runMutation\("onSettingsSave", \{ settings \}\)/);
+  assert.match(componentSource, /initialSettings=\{scheduleSettings\}/);
+  assert.doesNotMatch(componentSource, /emit\("onSettingsSave", \{ settings \}\); onNotify/);
+  assert.match(overlaysSource, /Tygodniowy limit pracy/);
+  assert.match(overlaysSource, /Strefa czasowa/);
+  assert.match(overlaysSource, /expectedVersion: initialVersion/);
+  assert.match(overlaysSource, /weeklyLimitMinutes/);
+  assert.doesNotMatch(overlaysSource, /Domyślne pola zmiany|Wymagaj potwierdzenia|Tagi zmiany/);
+});

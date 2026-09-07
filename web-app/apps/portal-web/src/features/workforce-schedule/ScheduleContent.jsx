@@ -369,6 +369,7 @@ export function ScheduleContent({
   onShiftUpdate,
   onSnapshotChange,
   requestsEnabled = false,
+  scheduleSettings = null,
   settingsEnabled = false,
   requests: providedRequests,
   shifts: providedShifts,
@@ -704,6 +705,13 @@ export function ScheduleContent({
     onNotify(deliveryDisabled ? "Grafik został zatwierdzony wewnętrznie. Pracownicy go nie widzą." : "Grafik został opublikowany.");
   };
 
+  const saveScheduleSettings = async (settings) => {
+    const saved = await runMutation("onSettingsSave", { settings });
+    if (!saved) return null;
+    onNotify("Ustawienia Grafiku zostały zapisane.");
+    return saved;
+  };
+
   const navigate = (amount) => {
     const step = viewMode === "month" ? 28 : viewMode === "day" ? 1 : 7;
     setWeekStart((current) => addDays(current, amount * step));
@@ -769,7 +777,7 @@ export function ScheduleContent({
       {editorShift && <ShiftDrawer busy={mutationBusy} deliveryDisabled={deliveryDisabled} initialShift={editorShift} locations={locations} onClose={() => setEditorShift(null)} onDelete={deleteShift} onSave={saveShift} templates={templates} templatesEnabled={templatesEnabled} todayIso={todayIso} users={users} />}
       {overlay === "publish" && <PublishDialog busy={mutationBusy} deliveryDisabled={deliveryDisabled} onClose={() => setOverlay(null)} onPublish={publishSchedule} periodLabel={rangeLabel(weekStart)} shifts={changes} users={users} />}
       {requestsEnabled && overlay === "requests" && <RequestsDialog onClose={() => setOverlay(null)} onResolve={resolveRequest} requests={requests} users={users} />}
-      {settingsEnabled && overlay === "settings" && <SettingsDialog deliveryDisabled={deliveryDisabled} onClose={() => setOverlay(null)} onSave={(settings) => { setOverlay(null); emit("onSettingsSave", { settings }); onNotify("Ustawienia grafiku zostały zapisane."); }} />}
+      {settingsEnabled && overlay === "settings" && <SettingsDialog busy={mutationBusy} deliveryDisabled={deliveryDisabled} initialSettings={scheduleSettings} onClose={() => setOverlay(null)} onSave={saveScheduleSettings} />}
     </section>
   );
 }

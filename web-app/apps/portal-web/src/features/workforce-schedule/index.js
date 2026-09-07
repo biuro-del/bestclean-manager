@@ -13,8 +13,10 @@ import {
   assertWorkforceScheduleSelectableReferences,
   buildWorkforceScheduleShiftPayload,
   formatWorkforceScheduleWarning,
+  isConfirmedWorkforceScheduleSettings,
   isConfirmedWorkforceScheduleShift,
   normalizeWorkforceScheduleBootstrap,
+  normalizeWorkforceScheduleSettings,
   normalizeWorkforceScheduleShift,
   workforceScheduleCatalogConflictsFromError,
   workforceSchedulePublicationCandidates,
@@ -229,6 +231,9 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       onShiftDelete: (payload) => runWrite(() => archiveShift(payload)),
       onShiftMove: (payload) => runWrite(() => saveShift(payload)),
       onShiftUpdate: (payload) => runWrite(() => saveShift(payload)),
+      ...(canConfigure() ? {
+        onSettingsSave: (payload) => updateSettings(payload),
+      } : {}),
     })
 
     reactRoot.render(createElement(ScheduleContent, {
@@ -246,7 +251,8 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       onCatalogRefresh: () => refreshCatalogsManually(),
       onNotify: notify,
       requestsEnabled: false,
-      settingsEnabled: false,
+      scheduleSettings: state.settings,
+      settingsEnabled: canConfigure() && Boolean(state.settings),
       snapshot: state.snapshot,
       snapshotVersion: state.snapshotVersion,
       weeklyLimitMinutes: Number(state.settings?.weeklyLimitMinutes) || 40 * 60,
@@ -278,7 +284,7 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       if (sequence !== requestSequence || !asyncGuard.isCurrent(sessionAtStart)) return false
 
       state.setupRequired = schedule.setupRequired === true
-      state.settings = schedule.settings || null
+      state.settings = normalizeWorkforceScheduleSettings(schedule.settings)
       if (state.setupRequired) {
         state.snapshot = null
         state.status = 'ready'
@@ -444,8 +450,13 @@ export function createWorkforceScheduleFeature(ctx = {}) {
         service.setWorkforceScheduleConfiguration(orgId, configuration, { idempotencyKey })
       ))
       if (!asyncGuard.isCurrent(operationContext)) return false
+      if (!isConfirmedWorkforceScheduleSettings(response?.settings, { orgId, ...configuration })) {
+        const error = new Error('Serwer nie zwrócił pełnego potwierdzenia uruchomienia Grafiku. Odśwież widok i spróbuj ponownie.')
+        error.code = 'WORKFORCE_SCHEDULE_INVALID_SETTINGS_RESPONSE'
+        throw error
+      }
       state.setupRequired = false
-      state.settings = response?.settings || state.settings
+      state.settings = normalizeWorkforceScheduleSettings(response.settings)
       notify('Grafik został uruchomiony.')
       const refreshed = await refresh({ forceRefresh: true, syncCatalogs: true })
       if (!asyncGuard.isCurrent(operationContext)) return false
@@ -491,6 +502,7 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       if (!asyncGuard.isCurrent(operationContext)) return false
       shouldRefresh = ![
         'WORKFORCE_SCHEDULE_INACTIVE_CATALOG_SELECTION',
+        'WORKFORCE_SCHEDULE_INVALID_SETTINGS_REQUEST',
         'WORKFORCE_SCHEDULE_PUBLICATION_BLOCKED',
       ].includes(text(error?.code).toUpperCase())
       throw error
@@ -503,6 +515,62 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       }
       if (asyncGuard.releaseBusy(operationContext)) state.busy = false
     }
+  }
+
+  async function updateSettings(payload) {
+    const confirmed = await runWrite(() => saveSettings(payload))
+    if (!confirmed) return confirmed
+    state.settings = confirmed
+    if (state.snapshot) state.snapshot = { ...state.snapshot, settings: confirmed }
+    render()
+    return confirmed
+  }
+
+  async function saveSettings({ settings } = {}) {
+    const current = normalizeWorkforceScheduleSettings(state.settings)
+    const orgId = currentOrgId()
+    const expectedVersion = Number(settings?.expectedVersion)
+    const timeZone = text(settings?.timeZone)
+    const weeklyLimitMinutes = Number(settings?.weeklyLimitMinutes)
+    if (
+      !current
+      || current.version < 1
+      || !orgId
+      || current.orgId !== orgId
+      || !Number.isSafeInteger(expectedVersion)
+      || expectedVersion < 1
+      || !timeZone
+      || !Number.isSafeInteger(weeklyLimitMinutes)
+      || weeklyLimitMinutes < 1
+      || weeklyLimitMinutes > 10080
+    ) {
+      const error = new Error('Ustawienia Grafiku są nieprawidłowe. Sprawdź strefę czasu i tygodniowy limit pracy.')
+      error.code = 'WORKFORCE_SCHEDULE_INVALID_SETTINGS_REQUEST'
+      throw error
+    }
+
+    try {
+      new Intl.DateTimeFormat('en', { timeZone }).format(new Date())
+    } catch {
+      const error = new Error('Wybierz prawidłową strefę czasu Grafiku.')
+      error.code = 'WORKFORCE_SCHEDULE_INVALID_SETTINGS_REQUEST'
+      throw error
+    }
+
+    const configuration = {
+      expectedVersion,
+      timeZone,
+      weeklyLimitMinutes,
+    }
+    const response = await runIdempotent('set-configuration-update', { orgId, configuration }, (idempotencyKey) => (
+      service.setWorkforceScheduleConfiguration(orgId, configuration, { idempotencyKey })
+    ))
+    if (!isConfirmedWorkforceScheduleSettings(response?.settings, { orgId, ...configuration })) {
+      const error = new Error('Serwer nie zwrócił pełnego potwierdzenia zapisanych ustawień. Odśwież Grafik przed kolejną zmianą.')
+      error.code = 'WORKFORCE_SCHEDULE_INVALID_SETTINGS_RESPONSE'
+      throw error
+    }
+    return normalizeWorkforceScheduleSettings(response.settings)
   }
 
   async function saveShift({ shift }) {
