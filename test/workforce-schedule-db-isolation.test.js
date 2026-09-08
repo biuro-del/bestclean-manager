@@ -179,8 +179,8 @@ test('API wiring cannot fall back to the shared portal pool', () => {
   assert.doesNotMatch(wiring, /\n\s*connectDbClient,/)
 })
 
-test('App Hosting enables only the isolated backend canary with runtime secret references', () => {
-  assert.match(appHostingVariableBlock('VITE_WORKFORCE_SCHEDULE_MODE'), /value: disabled[\s\S]*- BUILD/)
+test('App Hosting enables the capability-gated frontend and isolated backend canary', () => {
+  assert.match(appHostingVariableBlock('VITE_WORKFORCE_SCHEDULE_MODE'), /value: live[\s\S]*- BUILD/)
   assert.match(
     appHostingVariableBlock('WORKFORCE_SCHEDULE_ENABLED'),
     /value: "true"[\s\S]*- RUNTIME/,

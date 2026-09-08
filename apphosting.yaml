@@ -114,10 +114,10 @@ env:
     value: "example"
     availability:
       - BUILD
-  # Independent Grafik stays hidden in the client until its isolated database
-  # role, schema and runtime flag pass a separate production gate.
+  # Independent Grafik is present in the canary build, but the portal still
+  # requires the session capability masked by the backend organization allowlist.
   - variable: VITE_WORKFORCE_SCHEDULE_MODE
-    value: disabled
+    value: live
     availability:
       - BUILD
   - variable: FIREBASE_DATACONNECT_LOCATION
@@ -167,8 +167,8 @@ env:
     availability:
       - RUNTIME
   # Dedicated Grafik credentials are isolated from the legacy portal pool.
-  # The backend canary is limited to one organization. Delivery remains
-  # internal-only and the frontend build mode stays disabled.
+  # Both the backend and frontend canary remain limited to one organization.
+  # Delivery stays internal-only; notifications and downstream effects stay off.
   - variable: WORKFORCE_SCHEDULE_ENABLED
     value: "true"
     availability:

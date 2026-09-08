@@ -144,9 +144,10 @@ projektem i wymaga nowego kontraktu oraz jawnego włączenia efektu.
   przez `WORKFORCE_SCHEDULE_DB_USER` oraz `WORKFORCE_SCHEDULE_DB_PASS`. Nie
   korzysta z `DB_USER`, `DB_PASS` ani członkostwa `portal_app`.
 - `apphosting.yaml` wskazuje dedykowane sekrety loginu Grafiku wyłącznie jako
-  referencje runtime. Backendowy canary jest ograniczony dokładną allowlistą
-  organizacji, a frontend, dostarczanie, powiadomienia i integracje downstream
-  pozostają wyłączone.
+  referencje runtime. Frontendowy build canary jest włączony, ale widoczność
+  menu i trasy wymaga capability sesji maskowanej backendową allowlistą
+  organizacji. Dostarczanie, powiadomienia i integracje downstream pozostają
+  wyłączone.
 - Tryb logowania do bazy jest wymagany osobno jako
   `WORKFORCE_SCHEDULE_DB_AUTH_TYPE=PASSWORD`. Nie dziedziczy
   `CLOUD_SQL_AUTH_TYPE` ani `DB_AUTH_TYPE`; brak, `IAM` lub inna wartość
