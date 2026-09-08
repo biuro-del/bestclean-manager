@@ -1667,7 +1667,7 @@
   font-weight: 800;
 }
 
-#portalRoot .tm-schedule-form-grid .tm-schedule-assignee-filter-row input[type="checkbox"] {
+.tm-schedule-shift-drawer .tm-schedule-form-grid .tm-schedule-assignee-filter-row input[type="checkbox"] {
   width: 18px !important;
   min-width: 18px !important;
   max-width: 18px !important;
@@ -1680,8 +1680,8 @@
   accent-color: #2b98f5;
 }
 
-#portalRoot .tm-schedule-form-grid .tm-schedule-assignee-filter-row input[type="checkbox"]:focus-visible,
-#portalRoot .tm-schedule-form-grid .tm-schedule-assignees > label > input[type="checkbox"]:focus-visible {
+.tm-schedule-shift-drawer .tm-schedule-form-grid .tm-schedule-assignee-filter-row input[type="checkbox"]:focus-visible,
+.tm-schedule-shift-drawer .tm-schedule-form-grid .tm-schedule-assignees > label > input[type="checkbox"]:focus-visible {
   outline: 2px solid #1e7ee8;
   outline-offset: 2px;
 }
@@ -1718,7 +1718,7 @@
   background: #fafbfb;
 }
 
-#portalRoot .tm-schedule-form-grid .tm-schedule-assignees > label > input[type="checkbox"] {
+.tm-schedule-shift-drawer .tm-schedule-form-grid .tm-schedule-assignees > label > input[type="checkbox"] {
   width: 18px !important;
   min-width: 18px !important;
   max-width: 18px !important;

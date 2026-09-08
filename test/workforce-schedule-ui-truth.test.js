@@ -50,9 +50,12 @@ test("formularz zmiany może ograniczyć listę obsady do zespołu mobilnego", a
   assert.match(overlays, /<small aria-atomic="true" aria-live="polite" id=\{mobileFilterStatusId\} role="status">[\s\S]{0,360}selectedOutsideMobileCount/);
   assert.match(overlays, /restoreFilterFocus[\s\S]{0,520}mobileFilterRef\.current\?\.focus\(\)/);
   assert.match(overlays, /Brak osób w zespole mobilnym/);
-  assert.match(styles, /#portalRoot \.tm-schedule-form-grid \.tm-schedule-assignee-filter-row input\[type="checkbox"\]\s*\{[\s\S]{0,220}width:\s*18px !important;[\s\S]{0,180}height:\s*18px !important;/);
-  assert.match(styles, /#portalRoot \.tm-schedule-form-grid \.tm-schedule-assignees > label > input\[type="checkbox"\]\s*\{[\s\S]{0,220}width:\s*18px !important;[\s\S]{0,180}height:\s*18px !important;/);
-  assert.match(styles, /#portalRoot \.tm-schedule-form-grid \.tm-schedule-assignee-filter-row input\[type="checkbox"\]:focus-visible,[\s\S]{0,220}outline:\s*2px solid/);
+  assert.match(overlays, /return createPortal\([\s\S]{0,900}document\.body,/);
+  assert.match(styles, /\.tm-schedule-shift-drawer \.tm-schedule-form-grid \.tm-schedule-assignee-filter-row input\[type="checkbox"\]\s*\{[\s\S]{0,220}width:\s*18px !important;[\s\S]{0,180}height:\s*18px !important;/);
+  assert.match(styles, /\.tm-schedule-shift-drawer \.tm-schedule-form-grid \.tm-schedule-assignees > label > input\[type="checkbox"\]\s*\{[\s\S]{0,220}width:\s*18px !important;[\s\S]{0,180}height:\s*18px !important;/);
+  assert.match(styles, /\.tm-schedule-shift-drawer \.tm-schedule-form-grid \.tm-schedule-assignee-filter-row input\[type="checkbox"\]:focus-visible,[\s\S]{0,300}outline:\s*2px solid/);
+  assert.doesNotMatch(styles, /#portalRoot \.tm-schedule-form-grid \.tm-schedule-assignee-filter-row input\[type="checkbox"\]/);
+  assert.doesNotMatch(styles, /#portalRoot \.tm-schedule-form-grid \.tm-schedule-assignees > label > input\[type="checkbox"\]/);
 });
 
 test("Filtry pozostają dostępne i opisane na ekranach do 680 px", async () => {
