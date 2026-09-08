@@ -13,7 +13,11 @@ const {
   parseWarsawLocalDateTime,
   text,
 } = require('./workday-stop-proposal-policy')
-const { createWorkdayStopProposalRepository, mapProposal } = require('./workday-stop-proposal-repository')
+const {
+  createWorkdayStopProposalRepository,
+  mapProposal,
+  WORKDAY_STOP_PROPOSAL_EVENT_END_REASON,
+} = require('./workday-stop-proposal-repository')
 
 function apiError(statusCode, code, message, details = undefined) {
   return new WorkdayStopProposalError(statusCode, code, message, details)
@@ -43,6 +47,15 @@ function statusWorkdayIds(value) {
   return ids
 }
 
+function mobileOperation(body) {
+  const operation = text(body?.operation).toUpperCase()
+  // Keep the deployed WEB caller compatible while APK moves to the explicit
+  // operation contract. New clients must send SUBMIT; unknown values fail closed.
+  if (!operation) return 'LEGACY_SUBMIT'
+  if (['SUBMIT', 'STATUS', 'STATUS_ACTION'].includes(operation)) return operation
+  throw apiError(400, 'WORKDAY_STOP_PROPOSAL_OPERATION_INVALID', 'Dozwolone operacje to SUBMIT, STATUS i STATUS_ACTION.')
+}
+
 function dateFilter(value, field) {
   const normalized = text(value)
   if (!normalized) return ''
@@ -59,6 +72,9 @@ function responseError(error, fallbackCode, fallbackMessage) {
     return apiError(Number(error.statusCode), text(error.publicCode), text(error.publicMessage) || fallbackMessage, error?.publicDetails)
   }
   if (error?.code === '23505') {
+    if (text(error?.constraint) === 'workday_stop_proposal_worker_client_action_uidx') {
+      return apiError(409, 'WORKDAY_STOP_PROPOSAL_IDEMPOTENCY_SCOPE_CONFLICT', 'Klucz idempotencji został użyty dla innego dnia pracy.')
+    }
     return apiError(409, 'WORKDAY_STOP_PROPOSAL_DUPLICATE_PENDING', 'Dla tego dnia istnieje ju? oczekuj?ca propozycja.')
   }
   if (error?.code === '23503') {
@@ -77,6 +93,8 @@ function proposalPayload(row) {
 function mobileProposalPayload(proposal) {
   return {
     proposalId: text(proposal?.proposalId),
+    workdayId: text(proposal?.workdayId),
+    clientActionId: text(proposal?.clientActionId),
     status: text(proposal?.status),
     proposedStopAt: text(proposal?.proposedStopAt),
     proposedStopLocal: text(proposal?.proposedStopLocal),
@@ -90,9 +108,71 @@ function mobileProposalPayload(proposal) {
 }
 
 function mobileStatusProposalPayload(proposal) {
+  return mobileProposalPayload(proposal)
+}
+
+function mobileProposalReceipt(proposal, idempotent) {
+  if (!proposal) return null
   return {
-    workdayId: text(proposal?.workdayId),
-    ...mobileProposalPayload(proposal),
+    operation: 'SUBMIT',
+    proposalId: text(proposal.proposalId),
+    workdayId: text(proposal.workdayId),
+    clientActionId: text(proposal.clientActionId),
+    status: text(proposal.status),
+    idempotent: idempotent === true,
+  }
+}
+
+function normalizeMobileSubmitIntent(body) {
+  const localProposal = parseWarsawLocalDateTime(body?.proposedStopLocal, body?.timeZone)
+  return {
+    workdayId: identifier(body?.workdayId, 'workdayId', 64),
+    clientActionId: clientActionId(body?.clientActionId),
+    employeeNote: optionalText(body?.employeeNote),
+    ...localProposal,
+  }
+}
+
+function assertSubmitIntentMatchesProposal(existingRow, intent) {
+  const existing = proposalPayload(existingRow)
+  if (text(existing?.workdayId) !== intent.workdayId) {
+    throw apiError(409, 'WORKDAY_STOP_PROPOSAL_IDEMPOTENCY_SCOPE_CONFLICT', 'Klucz idempotencji został użyty dla innego dnia pracy.')
+  }
+  const samePayload =
+    text(existing?.proposedStopAt) === intent.proposedStopAt &&
+    text(existing?.proposedStopLocal) === intent.proposedStopLocal &&
+    text(existing?.timeZone) === intent.timeZone &&
+    text(existing?.employeeNote) === intent.employeeNote
+  if (!samePayload) {
+    throw apiError(
+      409,
+      'WORKDAY_STOP_PROPOSAL_IDEMPOTENCY_PAYLOAD_CONFLICT',
+      'Ten clientActionId został już użyty z inną godziną lub treścią zgłoszenia.',
+    )
+  }
+  return existing
+}
+
+function normalizedInstantText(value) {
+  if (!text(value)) return ''
+  const parsed = value instanceof Date ? value : new Date(value)
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : text(value)
+}
+
+function assertDecisionReplayMatchesAudit(existingAudit, decision, uid) {
+  const expectedAction = decision.action === 'REJECT' ? 'REJECTED' : decision.status
+  const sameIntent =
+    text(existingAudit?.action).toUpperCase() === expectedAction &&
+    text(existingAudit?.actor_uid ?? existingAudit?.actorUid) === text(uid) &&
+    normalizedInstantText(existingAudit?.official_stop_at ?? existingAudit?.officialStopAt) ===
+      normalizedInstantText(decision.officialStopAt) &&
+    text(existingAudit?.note) === text(decision.decisionNote)
+  if (!sameIntent) {
+    throw apiError(
+      409,
+      'WORKDAY_STOP_PROPOSAL_DECISION_IDEMPOTENCY_CONFLICT',
+      'Ten clientActionId został już użyty dla innej decyzji.',
+    )
   }
 }
 
@@ -181,26 +261,42 @@ function createWorkdayStopProposalApi(dependencies = {}) {
   }
 
   async function submitMobileProposal(repository, { orgId, worker, uid, body }) {
-    const workdayId = identifier(body?.workdayId, 'workdayId', 64)
-    const actionId = clientActionId(body?.clientActionId)
+    const intent = normalizeMobileSubmitIntent(body)
+    const workdayId = intent.workdayId
+    const actionId = intent.clientActionId
+    // Resolve an acknowledged retry before locking or validating mutable
+    // Workday state. A lost response remains recoverable after later approval.
+    const existingByKey = await repository.findProposalByClientAction({
+      orgId,
+      workerId: worker.workerId,
+      clientActionId: actionId,
+    })
+    if (existingByKey) {
+      return { idempotent: true, proposal: assertSubmitIntentMatchesProposal(existingByKey, intent) }
+    }
+
     const workday = await repository.lockWorkday({ orgId, workdayId })
     if (!workday) {
       throw apiError(404, 'WORKDAY_NOT_FOUND', 'Nie znaleziono dnia pracy.')
     }
     assertWorkerOwnsOpenWorkday({ workday, worker })
     assertHistoricalWorkday({ startAt: workday.start_at })
-    const localProposal = parseWarsawLocalDateTime(body?.proposedStopLocal, body?.timeZone)
     const validProposal = {
-      ...assertProposedStop({ startAt: workday.start_at, proposedStopAt: localProposal.proposedStopAt }),
-      ...localProposal,
+      ...assertProposedStop({ startAt: workday.start_at, proposedStopAt: intent.proposedStopAt }),
+      proposedStopAt: intent.proposedStopAt,
+      proposedStopLocal: intent.proposedStopLocal,
+      timeZone: intent.timeZone,
     }
 
-    const existingByKey = await repository.findProposalByClientAction({ orgId, workerId: worker.workerId, clientActionId: actionId })
-    if (existingByKey) {
-      if (text(existingByKey.workday_id) !== workdayId) {
-        throw apiError(409, 'WORKDAY_STOP_PROPOSAL_IDEMPOTENCY_SCOPE_CONFLICT', 'Klucz idempotencji zosta? u?yty dla innego dnia pracy.')
-      }
-      return { idempotent: true, proposal: proposalPayload(existingByKey) }
+    // A concurrent first SUBMIT may have committed while this transaction
+    // waited on the Workday row lock. Re-read before the one-PENDING guard.
+    const existingAfterLock = await repository.findProposalByClientAction({
+      orgId,
+      workerId: worker.workerId,
+      clientActionId: actionId,
+    })
+    if (existingAfterLock) {
+      return { idempotent: true, proposal: assertSubmitIntentMatchesProposal(existingAfterLock, intent) }
     }
     const pending = await repository.findPendingForWorkday({ orgId, workdayId })
     if (pending) {
@@ -216,7 +312,7 @@ function createWorkdayStopProposalApi(dependencies = {}) {
       proposedStopLocal: validProposal.proposedStopLocal,
       timeZone: validProposal.timeZone,
       submittedBy: uid,
-      employeeNote: optionalText(body?.employeeNote),
+      employeeNote: intent.employeeNote,
       clientActionId: actionId,
     })
     await repository.appendAudit({
@@ -225,7 +321,7 @@ function createWorkdayStopProposalApi(dependencies = {}) {
       action: 'SUBMITTED',
       actorUid: uid,
       toStatus: 'PENDING',
-      note: optionalText(body?.employeeNote),
+      note: intent.employeeNote,
       proposedStopAt: validProposal.proposedStopAt,
       clientActionId: actionId,
     })
@@ -240,6 +336,15 @@ function createWorkdayStopProposalApi(dependencies = {}) {
       workdayIds,
     })
     return rows.map((row) => mobileStatusProposalPayload(proposalPayload(row)))
+  }
+
+  async function readMobileProposalStatusByAction(repository, { orgId, worker, actionId }) {
+    const row = await repository.findProposalByClientAction({
+      orgId,
+      workerId: identifier(worker?.workerId, 'workerId', 128),
+      clientActionId: actionId,
+    })
+    return row ? proposalPayload(row) : null
   }
 
   async function handleMobile(req, res, requestUrl) {
@@ -259,21 +364,42 @@ function createWorkdayStopProposalApi(dependencies = {}) {
       // Authenticate before reading a payload or opening a database transaction.
       // An unauthenticated request must not reach any proposal write path.
       const body = await readJsonBody(req)
-      const isStatusRead = text(body?.operation).toUpperCase() === 'STATUS'
+      const operation = mobileOperation(body)
+      const isStatusRead = operation === 'STATUS'
+      const isActionStatusRead = operation === 'STATUS_ACTION'
+      const isRead = isStatusRead || isActionStatusRead
       // Validate bounded STATUS input before any DB connection, auth-scope
       // lookup, schema check, lock, or mutation path.
       const statusIds = isStatusRead ? statusWorkdayIds(body?.workdayIds) : null
+      const statusActionId = isActionStatusRead ? clientActionId(body?.clientActionId) : ''
       client = await connectDbClient()
-      // STATUS is intentionally scoped only from the verified Firebase token.
+      // Read operations are scoped only from the verified Firebase token.
       // Client-provided organization and worker identifiers never expand it.
-      const { orgId, membership } = await resolveMobileOrganization(client, decoded, isStatusRead ? '' : body?.orgId)
-      const worker = await resolveMobileWorker(client, orgId, isStatusRead ? {} : body, decoded, membership)
+      const { orgId, membership } = await resolveMobileOrganization(client, decoded, isRead ? '' : body?.orgId)
+      const worker = await resolveMobileWorker(client, orgId, isRead ? {} : body, decoded, membership)
       const repository = createRepository(client)
       await assertSchema(repository)
 
       if (isStatusRead) {
         const proposals = await readMobileProposalStatuses(repository, { orgId, worker, workdayIds: statusIds })
-        sendMobileJson(res, 200, { ok: true, proposals })
+        sendMobileJson(res, 200, { ok: true, operation, proposals })
+        return
+      }
+      if (isActionStatusRead) {
+        const proposal = await readMobileProposalStatusByAction(repository, {
+          orgId,
+          worker,
+          actionId: statusActionId,
+        })
+        const found = Boolean(proposal)
+        sendMobileJson(res, 200, {
+          ok: true,
+          operation,
+          found,
+          idempotent: found,
+          receipt: mobileProposalReceipt(proposal, found),
+          proposal: proposal ? mobileProposalPayload(proposal) : null,
+        })
         return
       }
 
@@ -282,7 +408,13 @@ function createWorkdayStopProposalApi(dependencies = {}) {
       const payload = await submitMobileProposal(repository, { orgId, worker, uid, body })
       await client.query('commit')
       transactionOpen = false
-      sendMobileJson(res, 200, { ok: true, proposal: mobileProposalPayload(payload.proposal) })
+      sendMobileJson(res, 200, {
+        ok: true,
+        operation: 'SUBMIT',
+        idempotent: payload.idempotent === true,
+        receipt: mobileProposalReceipt(payload.proposal, payload.idempotent),
+        proposal: mobileProposalPayload(payload.proposal),
+      })
     } catch (error) {
       if (transactionOpen) {
         try { await client?.query('rollback') } catch {}
@@ -325,8 +457,22 @@ function createWorkdayStopProposalApi(dependencies = {}) {
       throw apiError(403, 'WORKDAY_TIME_APPROVER_REQUIRED', 'Wymagane jest osobne uprawnienie workday_time_approver.')
     }
     const decisionActionId = clientActionId(body?.clientActionId || body?.idempotencyKey)
+    const decisionNote = testSelfApproval
+      ? `${TEST_SELF_APPROVAL_AUDIT_NOTE}${text(body?.decisionNote) ? ` ${text(body.decisionNote)}` : ''}`
+      : body?.decisionNote
+    const requestedDecision = () => assertDecision({
+      action: body?.action,
+      // A completed proposal is cloned as PENDING only to validate and
+      // fingerprint an idempotent retry. No persistence uses this clone.
+      proposal: { ...locked, status: 'PENDING', start_at: locked.start_at },
+      actorUid: uid,
+      officialStopAt: body?.officialStopAt,
+      decisionNote,
+      allowSelfReview: testSelfApproval,
+    })
     const existingDecision = await repository.findDecisionAudit({ orgId, proposalId, clientActionId: decisionActionId })
     if (existingDecision) {
+      assertDecisionReplayMatchesAudit(existingDecision, requestedDecision(), uid)
       return { idempotent: true, proposal: proposalPayload(locked) }
     }
     if (text(locked.status).toUpperCase() !== 'PENDING') {
@@ -347,14 +493,7 @@ function createWorkdayStopProposalApi(dependencies = {}) {
       return { conflict: true, proposal: proposalPayload(superseded) }
     }
 
-    const decision = assertDecision({
-      action: body?.action,
-      proposal: { ...locked, start_at: locked.start_at },
-      actorUid: uid,
-      officialStopAt: body?.officialStopAt,
-      decisionNote: testSelfApproval ? `${TEST_SELF_APPROVAL_AUDIT_NOTE}${text(body?.decisionNote) ? ` ${text(body.decisionNote)}` : ''}` : body?.decisionNote,
-      allowSelfReview: testSelfApproval,
-    })
+    const decision = requestedDecision()
     if (decision.action === 'REJECT') {
       const rejected = await repository.updateProposalDecision({
         orgId, proposalId, status: 'REJECTED', reviewedBy: uid, decisionNote: decision.decisionNote, officialStopAt: null,
@@ -366,7 +505,15 @@ function createWorkdayStopProposalApi(dependencies = {}) {
       return { proposal: proposalPayload(rejected) }
     }
 
-    // One transaction holds both rows: final decision then the existing canonical Workday STOP field.
+    // The outer portal transaction holds the proposal, canonical Workday and
+    // every linked Event. Validate/close activities first so an impossible STOP
+    // fails before any proposal or Workday row is changed.
+    const closedEvents = await repository.closeOpenEventsForWorkday({
+      orgId,
+      workdayId: locked.workday_id,
+      officialStopAt: decision.officialStopAt,
+      endReason: WORKDAY_STOP_PROPOSAL_EVENT_END_REASON,
+    })
     const updatedProposal = await repository.updateProposalDecision({
       orgId, proposalId, status: decision.status, reviewedBy: uid,
       decisionNote: decision.decisionNote, officialStopAt: decision.officialStopAt,
@@ -383,7 +530,11 @@ function createWorkdayStopProposalApi(dependencies = {}) {
       note: decision.decisionNote, proposedStopAt: locked.proposed_stop_at,
       officialStopAt: decision.officialStopAt, clientActionId: decisionActionId,
     })
-    return { proposal: proposalPayload(updatedProposal), officialWorkday }
+    return {
+      proposal: proposalPayload(updatedProposal),
+      officialWorkday,
+      closedEventCount: Number(closedEvents?.closedCount || 0),
+    }
   }
 
   async function handlePortal(req, res, requestUrl) {
@@ -457,6 +608,8 @@ module.exports = {
   createTestSelfApprovalGuard,
   createWorkdayStopProposalApi,
   dateFilter,
+  mobileOperation,
   portalMembershipCanApprove,
   mobileProposalPayload,
+  mobileProposalReceipt,
 }

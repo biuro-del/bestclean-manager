@@ -2,6 +2,8 @@
 
 const { WorkdayStopProposalError, text } = require('./workday-stop-proposal-policy')
 
+const WORKDAY_STOP_PROPOSAL_EVENT_END_REASON = 'WORKDAY_STOP_PROPOSAL'
+
 const REQUIRED_RELATIONS = Object.freeze([
   'public.workday_stop_proposal',
   'public.workday_stop_proposal_audit',
@@ -71,10 +73,38 @@ function createWorkdayStopProposalRepository(client) {
       const result = await client.query(
         `select to_regclass('public.workday_stop_proposal') is not null as proposals_ready,
                 to_regclass('public.workday_stop_proposal_audit') is not null as audit_ready,
-                to_regclass('public.workday_time_permission') is not null as permission_ready`,
+                to_regclass('public.workday_time_permission') is not null as permission_ready,
+                exists (
+                  select 1
+                    from pg_index i
+                    join pg_class index_class on index_class.oid = i.indexrelid
+                    join pg_class table_class on table_class.oid = i.indrelid
+                    join pg_namespace table_namespace on table_namespace.oid = table_class.relnamespace
+                   where table_namespace.nspname = 'public'
+                     and table_class.relname = 'workday_stop_proposal'
+                     and index_class.relname = 'workday_stop_proposal_worker_client_action_uidx'
+                     and i.indisunique
+                     and i.indisvalid
+                     and i.indisready
+                     and i.indpred is null
+                     and i.indnkeyatts = 3
+                     and (
+                       select array_agg(attribute.attname order by key_column.ordinality)
+                         from unnest(i.indkey::smallint[]) with ordinality as key_column(attnum, ordinality)
+                         join pg_attribute attribute
+                           on attribute.attrelid = i.indrelid
+                          and attribute.attnum = key_column.attnum
+                        where key_column.ordinality <= i.indnkeyatts
+                     ) = array['org_id', 'worker_id', 'client_action_id']::name[]
+                ) as receipt_action_unique_ready`,
       )
       const row = result.rows?.[0] ?? {}
-      return Boolean(row.proposals_ready && row.audit_ready && row.permission_ready)
+      return Boolean(
+        row.proposals_ready &&
+        row.audit_ready &&
+        row.permission_ready &&
+        row.receipt_action_unique_ready
+      )
     },
 
     async lockWorkday({ orgId, workdayId }) {
@@ -254,6 +284,89 @@ function createWorkdayStopProposalRepository(client) {
       return result.rows?.[0] ?? null
     },
 
+    async closeOpenEventsForWorkday({
+      orgId,
+      workdayId,
+      officialStopAt,
+      endReason = WORKDAY_STOP_PROPOSAL_EVENT_END_REASON,
+    }) {
+      const officialStopMs = new Date(officialStopAt).getTime()
+      if (!Number.isFinite(officialStopMs)) {
+        throw new WorkdayStopProposalError(
+          400,
+          'WORKDAY_STOP_PROPOSAL_INVALID_TIME',
+          'Niepoprawna oficjalna godzina końca dnia.',
+        )
+      }
+
+      // The Workday row is already locked by lockProposalWithWorkday. Lock and
+      // validate every linked Event before the first logical write. This keeps
+      // Workday.endAt from preceding an existing closed or open activity.
+      const locked = await client.query(
+        `select event_id, start_at, end_at
+           from public.event
+          where org_id = $1::text
+            and workday_id = $2::text
+          order by start_at asc nulls last, event_id asc
+          for update`,
+        [orgId, workdayId],
+      )
+      const linkedEvents = locked.rows ?? []
+      if (!linkedEvents.length) return { closedCount: 0, events: [] }
+
+      const invalidEvents = linkedEvents.filter((event) => {
+        if (event.start_at === null || event.start_at === undefined || !text(event.start_at)) return true
+        const startMs = new Date(event.start_at).getTime()
+        if (!Number.isFinite(startMs)) return true
+        if (startMs >= officialStopMs) return true
+        if (event.end_at === null || event.end_at === undefined || !text(event.end_at)) {
+          return false
+        }
+        const endMs = new Date(event.end_at).getTime()
+        return !Number.isFinite(endMs) || endMs < startMs || endMs > officialStopMs
+      })
+      if (invalidEvents.length) {
+        throw new WorkdayStopProposalError(
+          409,
+          'WORKDAY_STOP_PROPOSAL_EVENT_TIME_CONFLICT',
+          'Godzina końca dnia musi obejmować wszystkie powiązane aktywności.',
+          { invalidEventCount: invalidEvents.length },
+        )
+      }
+
+      const openEvents = linkedEvents.filter(
+        (event) => event.end_at === null || event.end_at === undefined || !text(event.end_at),
+      )
+      if (!openEvents.length) return { closedCount: 0, events: [] }
+
+      const eventIds = openEvents.map((event) => text(event.event_id))
+      const result = await client.query(
+        `update public.event
+            set end_at = $3::timestamptz,
+                duration_sec = floor(extract(epoch from ($3::timestamptz - start_at)))::integer,
+                status = 'CLOSED',
+                close_marked_at = $3::timestamptz,
+                end_reason = $4::text,
+                updated_at = now()
+          where org_id = $1::text
+            and workday_id = $2::text
+            and event_id = any($5::varchar[])
+            and end_at is null
+          returning event_id, start_at, end_at, duration_sec, status, close_marked_at, end_reason`,
+        [orgId, workdayId, officialStopAt, endReason, eventIds],
+      )
+      const events = result.rows ?? []
+      const closedCount = Number(result.rowCount ?? events.length)
+      if (closedCount !== openEvents.length) {
+        throw new WorkdayStopProposalError(
+          409,
+          'WORKDAY_STOP_PROPOSAL_EVENT_CLOSE_CONFLICT',
+          'Aktywność zmieniła się równolegle. Decyzja nie została zapisana.',
+        )
+      }
+      return { closedCount, events }
+    },
+
     async updateProposalDecision({ orgId, proposalId, status, reviewedBy, decisionNote, officialStopAt }) {
       const result = await client.query(
         `update public.workday_stop_proposal
@@ -325,4 +438,9 @@ function createWorkdayStopProposalRepository(client) {
   }
 }
 
-module.exports = { REQUIRED_RELATIONS, createWorkdayStopProposalRepository, mapProposal }
+module.exports = {
+  REQUIRED_RELATIONS,
+  WORKDAY_STOP_PROPOSAL_EVENT_END_REASON,
+  createWorkdayStopProposalRepository,
+  mapProposal,
+}

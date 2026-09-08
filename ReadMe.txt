@@ -5255,3 +5255,41 @@ Niezmienniki:
 Granice:
 - Nie wykonano migracji, zapisu do bazy, commita, pusha ani wdrożenia.
 - Szerokie `ENFORCE` wymaga zalogowanego E2E i decyzji o awaryjnym pominięciu.
+
+Data: 2026-09-08 CEST
+Autor: AI Codex
+Temat: Lokalny kandydat Historia STOP P0 na aktualnej bazie produkcyjnej
+Powód:
+- Rollout oparty na SHA `560bec7951a1a9ff7ff4fe5ba9c1c243f0f2157f` zachował Grafik,
+  ale nie zawierał kontraktu Receipt V2 oczekiwanego przez klienta Production Test.
+  Historia pozostawała czytelna, lecz poprawnie blokowała formularz komunikatem o
+  błędzie sprawdzenia zgłoszeń STOP.
+- Decyzja `APPROVE` lub `CORRECT` zapisywała oficjalny STOP w Workday bez
+  domknięcia powiązanych otwartych Eventów, co mogło pozostawić aktywną strefę
+  CLEAN pod zamkniętym dniem.
+Dodano lokalnie:
+- Selektywny port Receipt V2 na bazę `560bec`: jawne operacje `SUBMIT`, `STATUS`
+  i `STATUS_ACTION`, trwały receipt, ścisły fingerprint retry oraz schema gate
+  dokładnego indeksu `(org_id, worker_id, client_action_id)`.
+- Pełną macierz statusów `PENDING`, `APPROVED`, `CORRECTED`, `REJECTED` i
+  `SUPERSEDED`; poprawna pusta tablica STATUS oznacza zweryfikowany brak zgłoszeń.
+- Przy `APPROVE` i `CORRECT` backend blokuje i waliduje wszystkie Eventy Workday,
+  a następnie w tej samej transakcji domyka Eventy z pustym `end_at` dokładnie o
+  `officialStopAt`, zapisując `end_reason=WORKDAY_STOP_PROPOSAL`.
+- `Workday.utility_room_id`, `Event.zone_id` i komentarz Eventu nie są zmieniane.
+  `REJECT`, `SUPERSEDED` i identyczny retry decyzji nie uruchamiają kaskady.
+- Ten sam `clientActionId` z innym zgłoszeniem albo decyzją kończy się konfliktem,
+  a częściowy zapis Eventów lub Workday powoduje rollback całej decyzji.
+Weryfikacja lokalna:
+- Kontrola składni `workday-stop-proposal-api.js` i repozytorium: PASS.
+- Celowane testy backendu STOP: 60/60 PASS.
+- Testy klienta mobilnego Historia/STOP na istniejącym kodzie Production Test:
+  66/66 PASS; klient nie wymaga zmiany, aby obsłużyć przywrócony Receipt V2.
+- `git diff --check`: PASS.
+Granice:
+- Nie wykonano migracji, zapisu do bazy, naprawy rekordu z 04.09.2026, commita,
+  pusha ani wdrożenia. Kod nie zmienia polityki automatycznego zamknięcia po 12 h.
+- Przed produkcją wymagane są: read-only schema preflight trzech relacji i indeksu,
+  test dwóch rzeczywistych transakcji PostgreSQL oraz uwierzytelniony canary E2E.
+- Historyczny Event z 04.09.2026 nie jest naprawiany automatycznie; wymaga osobnej,
+  warunkowej korekty po audycie read-only i jawnej zgodzie na zmianę danych.
