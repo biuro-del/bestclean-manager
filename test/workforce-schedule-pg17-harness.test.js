@@ -15,6 +15,7 @@ const {
   FIXTURE_SQL,
   ACL_SENTINEL_ROLE,
   MIGRATION_PATH,
+  WORKER_TYPE_MIGRATION_PATH,
   MIGRATION_OWNER_ROLE,
   MIGRATION_RUNNER_ROLE,
   POSTFLIGHT_ACL_BARRIER,
@@ -25,6 +26,7 @@ const {
   parseLaunchConfiguration,
 } = require(harnessPath)
 const migrationSource = fs.readFileSync(MIGRATION_PATH, 'utf8')
+const workerTypeMigrationSource = fs.readFileSync(WORKER_TYPE_MIGRATION_PATH, 'utf8')
 
 function validLaunch(overrides = {}) {
   return {
@@ -119,6 +121,7 @@ test('fixture ma dwa poprawne tenanty, przypadki UID fail-closed i rozdziela ses
     'worker_id_normalized',
     'login_normalized',
     'auth_uid',
+    'worker_type',
     'client_id',
   ]) {
     assert.match(FIXTURE_SQL, new RegExp(`\\b${column}\\b`, 'i'))
@@ -136,8 +139,8 @@ test('fixture ma dwa poprawne tenanty, przypadki UID fail-closed i rozdziela ses
   )?.[0] || ''
   assert.match(membershipFixture, /worker_id varchar\(128\),/i)
   assert.doesNotMatch(membershipFixture, /worker_id varchar\(128\) not null/i)
-  assert.match(FIXTURE_SQL, /'Alpha Worker', 'uid-alpha-admin', 'WORKER', true, 'ACTIVE'/i)
-  assert.match(FIXTURE_SQL, /'Beta Worker', 'uid-beta-admin', 'WORKER', true, 'ACTIVE'/i)
+  assert.match(FIXTURE_SQL, /'Alpha Worker', 'uid-alpha-admin', 'WORKER', 'Zespół Mobilny', true, 'ACTIVE'/i)
+  assert.match(FIXTURE_SQL, /'Beta Worker', 'uid-beta-admin', 'WORKER', 'Stały personel na obiekcie', true, 'ACTIVE'/i)
   assert.match(FIXTURE_SQL, /'uid-mismatch-member'[\s\S]*?'uid-different-worker'/i)
   assert.match(FIXTURE_SQL, /'CLEANING_PROVIDER'/)
   assert.doesNotMatch(FIXTURE_SQL, /'CLEANING_COMPANY'/)
@@ -167,6 +170,7 @@ test('fixture ma dwa poprawne tenanty, przypadki UID fail-closed i rozdziela ses
 test('runner nie sprząta zewnętrznej bazy i pokrywa pełny kontrakt integracyjny', () => {
   assert.doesNotMatch(harnessSource, /\bdrop\b/i)
   assert.doesNotMatch(FIXTURE_SQL, /\bdrop\b/i)
+  assert.doesNotMatch(workerTypeMigrationSource, /\bdrop\b/i)
   assert.match(harnessSource, /createWorkforceScheduleRepository/)
   assert.match(harnessSource, /repository\.schemaReady\(\)/)
   assert.match(harnessSource, /repository\.saveSettings/)
@@ -193,6 +197,10 @@ test('runner nie sprząta zewnętrznej bazy i pokrywa pełny kontrakt integracyj
   assert.match(harnessSource, /assertRawMigrationRequiresGuard/)
   assert.match(harnessSource, /WORKFORCE_SCHEDULE_GUARDED_ENTRYPOINT_REQUIRED/)
   assert.match(harnessSource, /raw-migration-entrypoint-guard/)
+  assert.match(harnessSource, /assertRawWorkerTypeMigrationRequiresGuard/)
+  assert.match(harnessSource, /runGuardedHarnessWorkerTypeMigration/)
+  assert.match(harnessSource, /WORKFORCE_SCHEDULE_WORKER_TYPE_GUARDED_ENTRYPOINT_REQUIRED/)
+  assert.match(harnessSource, /worker-type-snapshot-migration-entrypoint-guard/)
   assert.deepEqual(EFFECTS, { delivery: false, notifications: false, downstream: false })
   assert.match(harnessSource, /session_user: SCHEDULE_SESSION_ROLE[\s\S]*current_user: SCHEDULE_SESSION_ROLE/)
   assert.match(harnessSource, /async function assertWorkerUidBindingBoundary\(client\)/)

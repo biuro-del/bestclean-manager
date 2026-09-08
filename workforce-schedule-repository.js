@@ -43,6 +43,7 @@ const SESSION_FUNCTIONS = Object.freeze([
 const RUNTIME_FUNCTIONS = Object.freeze([
   'public.workforce_schedule_actor_is_active(text)',
   'public.workforce_schedule_read_active_workers(text)',
+  'public.workforce_roster_read_active_workers_v2(text)',
   'public.workforce_schedule_read_active_objects(text)',
   'public.workforce_schedule_lock_worker_sources(text,text[])',
   'public.workforce_schedule_lock_object_sources(text,text[])',
@@ -57,6 +58,7 @@ const REQUIRED_FUNCTION_BODY_HASHES = Object.freeze({
   'public.workforce_schedule_authorize_session(text,text)': '3bba22c35e0482a74db7247fe6e03600',
   'public.workforce_schedule_actor_is_active(text)': '7f09b196e5d582cc5f16acf95f027ceb',
   'public.workforce_schedule_read_active_workers(text)': '77cfb9e6db18ec091c45460373018376',
+  'public.workforce_roster_read_active_workers_v2(text)': '6e208c81309d838ca4cb70c44999c13b',
   'public.workforce_schedule_read_active_objects(text)': 'f951f3d9209c0b51145c22ae67fbcc05',
   'public.workforce_schedule_lock_worker_sources(text,text[])': '3c8cc5501edefbb451b8efc5993af6f7',
   'public.workforce_schedule_lock_object_sources(text,text[])': '95cbccda4e8620a3c9f0161ebd39fca7',
@@ -66,6 +68,7 @@ const REQUIRED_FUNCTION_RESULTS = Object.freeze({
   'public.workforce_schedule_authorize_session(text,text)': 'TABLE(role text, status text, worker_id text, organization_kind text, organization_status text, onboarding_status text, organization_deleted_at text, plan_code text, subscription_status text, trial_ends_at text, current_period_ends_at text, active_worker_id text)',
   'public.workforce_schedule_actor_is_active(text)': 'boolean',
   'public.workforce_schedule_read_active_workers(text)': 'TABLE(source_worker_id_normalized text, source_worker_login text, source_auth_uid text, display_name text, role_snapshot text)',
+  'public.workforce_roster_read_active_workers_v2(text)': 'TABLE(source_worker_id_normalized text, source_worker_login text, source_auth_uid text, display_name text, role_snapshot text, worker_type_snapshot text)',
   'public.workforce_schedule_read_active_objects(text)': 'TABLE(source_object_id text, display_name text)',
   'public.workforce_schedule_lock_worker_sources(text,text[])': 'TABLE(source_worker_id_normalized text, active boolean, status text)',
   'public.workforce_schedule_lock_object_sources(text,text[])': 'TABLE(source_object_id text, active boolean, status text)',
@@ -80,7 +83,7 @@ const WORKFORCE_SCHEDULE_SCHEMA_MARKER = 'cleanzi.workforce_schedule.core.v1'
 const REQUIRED_COLUMNS = Object.freeze({
   'public.workforce_schedule_settings': ['org_id', 'time_zone', 'weekly_limit_minutes', 'version'],
   'public.workforce_schedule_location': ['org_id', 'location_id', 'source_object_id', 'name', 'status', 'version'],
-  'public.workforce_schedule_person': ['org_id', 'person_id', 'source_worker_login', 'source_worker_id_normalized', 'source_auth_uid', 'display_name', 'status', 'version'],
+  'public.workforce_schedule_person': ['org_id', 'person_id', 'source_worker_login', 'source_worker_id_normalized', 'source_auth_uid', 'display_name', 'worker_type_snapshot', 'status', 'version'],
   'public.workforce_schedule_shift': ['org_id', 'shift_id', 'lifecycle_status', 'current_revision_no', 'published_revision_no', 'version'],
   'public.workforce_schedule_shift_revision': ['org_id', 'shift_id', 'revision_no', 'business_date', 'starts_at', 'ends_at', 'time_zone', 'location_id', 'is_deleted'],
   'public.workforce_schedule_shift_revision_assignee': ['org_id', 'shift_id', 'revision_no', 'person_id'],
@@ -184,6 +187,7 @@ function mapPerson(row = {}) {
     displayName: text(row.display_name),
     initials: text(row.initials),
     role: text(row.role_snapshot),
+    workerType: text(row.worker_type_snapshot),
     status: text(row.status),
     version: Number(row.version ?? 0),
   }
@@ -501,7 +505,10 @@ function createWorkforceScheduleRepository(client) {
          from pg_proc function_row
          join pg_namespace namespace on namespace.oid = function_row.pronamespace
         where namespace.nspname = 'public'
-          and function_row.proname like 'workforce\\_schedule\\_%' escape '\\'`,
+          and (
+            function_row.proname like 'workforce\\_schedule\\_%' escape '\\'
+            or function_row.proname like 'workforce\\_roster\\_%' escape '\\'
+          )`,
       [REQUIRED_FUNCTIONS],
     )
     const functionAllowlist = functionAllowlistResult.rows[0]
@@ -527,6 +534,7 @@ function createWorkforceScheduleRepository(client) {
                    'public.workforce_schedule_authorize_session(text,text)',
                    'public.workforce_schedule_actor_is_active(text)',
                    'public.workforce_schedule_read_active_workers(text)',
+                    'public.workforce_roster_read_active_workers_v2(text)',
                    'public.workforce_schedule_read_active_objects(text)'
                  ]::text[]) then target.provolatile = 's'
                  else target.provolatile = 'v'
@@ -554,7 +562,10 @@ function createWorkforceScheduleRepository(client) {
                 when required.function_signature = 'public.workforce_schedule_actor_is_active(text)'
                   then has_table_privilege(target.proowner, 'public.organization_member', 'SELECT')
                    and has_table_privilege(target.proowner, 'public.worker', 'SELECT')
-                when required.function_signature = 'public.workforce_schedule_read_active_workers(text)'
+                when required.function_signature = any(array[
+                  'public.workforce_schedule_read_active_workers(text)',
+                  'public.workforce_roster_read_active_workers_v2(text)'
+                ]::text[])
                   then has_table_privilege(target.proowner, 'public.worker', 'SELECT')
                 when required.function_signature = 'public.workforce_schedule_read_active_objects(text)'
                   then has_table_privilege(target.proowner, 'public.client', 'SELECT')
@@ -836,7 +847,7 @@ function createWorkforceScheduleRepository(client) {
     const referenced = uniqueIdentifiers(referencedPersonIds)
     const result = await client.query(
       `select person_id, source_worker_id_normalized, display_name,
-              initials, role_snapshot, status, version
+              initials, role_snapshot, worker_type_snapshot, status, version
          from public.workforce_schedule_person
         where org_id = $1::text
           and (status = 'ACTIVE'
@@ -1107,8 +1118,8 @@ function createWorkforceScheduleRepository(client) {
   async function readActiveRoster(orgId) {
     const result = await client.query(
       `select source_worker_id_normalized, source_worker_login, source_auth_uid,
-              display_name, role_snapshot
-         from public.workforce_schedule_read_active_workers($1::text)`,
+              display_name, role_snapshot, worker_type_snapshot
+         from public.workforce_roster_read_active_workers_v2($1::text)`,
       [orgId],
     )
     return result.rows
@@ -1177,12 +1188,14 @@ function createWorkforceScheduleRepository(client) {
       const displayName = text(source.display_name)
       const initials = initialsFromName(source.display_name)
       const roleSnapshot = text(source.role_snapshot)
+      const workerTypeSnapshot = text(source.worker_type_snapshot)
       const changed = current && (
         text(current.source_worker_login) !== sourceLogin
         || text(current.source_auth_uid) !== sourceAuthUid
         || text(current.display_name) !== displayName
         || text(current.initials) !== initials
         || text(current.role_snapshot) !== roleSnapshot
+        || text(current.worker_type_snapshot) !== workerTypeSnapshot
         || text(current.status).toUpperCase() !== 'ACTIVE'
       )
       if (!current) created += 1
@@ -1197,6 +1210,7 @@ function createWorkforceScheduleRepository(client) {
         displayName,
         initials,
         roleSnapshot || null,
+        workerTypeSnapshot || null,
       ]
       if (current) {
         await client.query(
@@ -1207,22 +1221,23 @@ function createWorkforceScheduleRepository(client) {
                   display_name = $6::text,
                   initials = $7::text,
                   role_snapshot = $8::text,
+                  worker_type_snapshot = $9::text,
                   status = 'ACTIVE',
                   version = version + 1,
                   synced_at = now(), updated_at = now()
             where org_id = $1::text and person_id = $2::text
               and (source_worker_id_normalized, source_worker_login, source_auth_uid,
-                   display_name, initials, role_snapshot, status)
-                  is distinct from ($3::text, $4::text, $5::text, $6::text, $7::text, $8::text, 'ACTIVE'::text)`,
+                   display_name, initials, role_snapshot, worker_type_snapshot, status)
+                  is distinct from ($3::text, $4::text, $5::text, $6::text, $7::text, $8::text, $9::text, 'ACTIVE'::text)`,
           values,
         )
       } else {
         await client.query(
           `insert into public.workforce_schedule_person (
              org_id, person_id, source_worker_id_normalized, source_worker_login, source_auth_uid,
-             display_name, initials, role_snapshot, status, version, synced_at
+             display_name, initials, role_snapshot, worker_type_snapshot, status, version, synced_at
            ) values ($1::text, $2::text, $3::text, $4::text, $5::text,
-                     $6::text, $7::text, $8::text, 'ACTIVE', 1, now())`,
+                     $6::text, $7::text, $8::text, $9::text, 'ACTIVE', 1, now())`,
           values,
         )
       }

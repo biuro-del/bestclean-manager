@@ -20,6 +20,12 @@ const MIGRATION_PATH = path.join(
   'migrations',
   '20260906_workforce_schedule_core_additive.sql',
 )
+const WORKER_TYPE_MIGRATION_PATH = path.join(
+  ROOT_DIR,
+  'dataconnect',
+  'migrations',
+  '20260908_workforce_schedule_worker_type_snapshot_additive.sql',
+)
 const RUN_ARGUMENT = '--run-pg17-harness'
 const CONFIRMATION_ENV = 'TEST_WORKFORCE_SCHEDULE_EPHEMERAL_CONFIRMATION'
 const EXACT_CONFIRMATION = 'I_CONFIRM_THIS_IS_A_DISPOSABLE_LOCAL_POSTGRESQL_17_DATABASE'
@@ -35,6 +41,8 @@ const ROLE_GRAPH_SENTINEL_ROLE = 'workforce_schedule_source_reader'
 const POSTFLIGHT_ACL_BARRIER = '-- WORKFORCE_SCHEDULE_POSTFLIGHT_ACL_BARRIER'
 const MIGRATION_ENTRYPOINT_GUC = 'cleanzi.workforce_schedule_core_entrypoint'
 const MIGRATION_ENTRYPOINT_MARKER = 'GUARDED_WORKFORCE_SCHEDULE_CORE_20260906'
+const WORKER_TYPE_MIGRATION_ENTRYPOINT_GUC = 'cleanzi.workforce_schedule_worker_type_snapshot_entrypoint'
+const WORKER_TYPE_MIGRATION_ENTRYPOINT_MARKER = 'GUARDED_WORKFORCE_SCHEDULE_WORKER_TYPE_SNAPSHOT_20260908'
 const SOURCE_TABLES = Object.freeze([
   'organizations',
   'organization_member',
@@ -102,6 +110,7 @@ create table public.worker (
   full_name varchar(240),
   auth_uid varchar(128),
   role varchar(64),
+  worker_type varchar(40),
   active boolean not null,
   status varchar(16) not null,
   primary key (org_id, worker_id_normalized)
@@ -155,23 +164,23 @@ values
 
 insert into public.worker (
   org_id, login, login_normalized, worker_id, worker_id_normalized,
-  full_name, auth_uid, role, active, status
+  full_name, auth_uid, role, worker_type, active, status
 )
 values
   ('harness-alpha', 'alpha.worker', 'alpha.worker', 'W001', 'w001',
-   'Alpha Worker', 'uid-alpha-admin', 'WORKER', true, 'ACTIVE'),
+   'Alpha Worker', 'uid-alpha-admin', 'WORKER', 'Zespół Mobilny', true, 'ACTIVE'),
   ('harness-beta', 'beta.worker', 'beta.worker', 'W002', 'w002',
-   'Beta Worker', 'uid-beta-admin', 'WORKER', true, 'ACTIVE'),
+   'Beta Worker', 'uid-beta-admin', 'WORKER', 'Stały personel na obiekcie', true, 'ACTIVE'),
   ('harness-uid-mismatch', 'mismatch.worker', 'mismatch.worker', 'W003', 'w003',
-   'Mismatch Worker', 'uid-different-worker', 'WORKER', true, 'ACTIVE'),
+   'Mismatch Worker', 'uid-different-worker', 'WORKER', 'Stały personel na obiekcie', true, 'ACTIVE'),
   ('harness-null-auth', 'null.auth', 'null.auth', 'W004', 'w004',
-   'Null Auth Worker', null, 'WORKER', true, 'ACTIVE'),
+   'Null Auth Worker', null, 'WORKER', 'Stały personel na obiekcie', true, 'ACTIVE'),
   ('harness-inactive-worker', 'inactive.worker', 'inactive.worker', 'W005', 'w005',
-   'Inactive Worker', 'uid-inactive-worker', 'WORKER', false, 'ACTIVE'),
+   'Inactive Worker', 'uid-inactive-worker', 'WORKER', 'Stały personel na obiekcie', false, 'ACTIVE'),
   ('harness-worker-status', 'status.worker', 'status.worker', 'W006', 'w006',
-   'Bad Status Worker', 'uid-worker-status', 'WORKER', true, 'SUSPENDED'),
+   'Bad Status Worker', 'uid-worker-status', 'WORKER', 'Stały personel na obiekcie', true, 'SUSPENDED'),
   ('harness-cross-worker-source', 'cross.worker', 'cross.worker', 'W007', 'w007',
-   'Cross-tenant Worker', 'uid-cross-worker', 'WORKER', true, 'ACTIVE');
+   'Cross-tenant Worker', 'uid-cross-worker', 'WORKER', 'Zespół Mobilny', true, 'ACTIVE');
 
 insert into public.client (org_id, client_id, name, status)
 values
@@ -608,7 +617,7 @@ async function readCanonicalSources(client) {
   )
   const workers = await client.query(
     `select org_id, login, login_normalized, worker_id, worker_id_normalized,
-            full_name, auth_uid, role, active, status
+            full_name, auth_uid, role, worker_type, active, status
        from public.worker order by org_id, worker_id_normalized`,
   )
   const objects = await client.query(
@@ -685,6 +694,7 @@ async function assertRestrictedMigrationOwner(client) {
              to_regprocedure('public.workforce_schedule_authorize_session(text,text)'),
              to_regprocedure('public.workforce_schedule_actor_is_active(text)'),
              to_regprocedure('public.workforce_schedule_read_active_workers(text)'),
+             to_regprocedure('public.workforce_roster_read_active_workers_v2(text)'),
              to_regprocedure('public.workforce_schedule_read_active_objects(text)'),
              to_regprocedure('public.workforce_schedule_lock_worker_sources(text,text[])'),
             to_regprocedure('public.workforce_schedule_lock_object_sources(text,text[])')
@@ -694,7 +704,7 @@ async function assertRestrictedMigrationOwner(client) {
     [MIGRATION_OWNER_ROLE, MIGRATION_RUNNER_ROLE],
   )
   assert.deepEqual(result.rows[0], {
-    function_count: 6,
+    function_count: 7,
     all_owned_by_expected: true,
     restricted_owner: true,
     owner_no_login: true,
@@ -734,6 +744,10 @@ async function createTenantCatalog(client, { orgId, actorUid, personId, location
     })
     assert.equal(settings.version, 1)
     assert.equal(catalogs.people.length, 1)
+    assert.equal(
+      catalogs.people[0].workerType,
+      orgId === 'harness-alpha' ? 'Zespół Mobilny' : 'Stały personel na obiekcie',
+    )
     assert.equal(catalogs.locations.length, 1)
     assert.equal(catalogs.locations[0].sourceObjectId, sourceObjectId)
     assert.deepEqual(receipt.people, { active: 1, created: 1, updated: 0, deactivated: 0 })
@@ -1507,6 +1521,14 @@ async function runGuardedHarnessMigration(client, migrationSql) {
   return client.query(migrationSql)
 }
 
+async function runGuardedHarnessWorkerTypeMigration(client, workerTypeMigrationSql) {
+  await client.query(
+    'select set_config($1::text, $2::text, false)',
+    [WORKER_TYPE_MIGRATION_ENTRYPOINT_GUC, WORKER_TYPE_MIGRATION_ENTRYPOINT_MARKER],
+  )
+  return client.query(workerTypeMigrationSql)
+}
+
 async function assertRawMigrationRequiresGuard(client, migrationSql) {
   let failure = null
   try {
@@ -1520,6 +1542,36 @@ async function assertRawMigrationRequiresGuard(client, migrationSql) {
   assert.equal(failure.code, 'P0001')
   assert.match(text(failure.message), /WORKFORCE_SCHEDULE_GUARDED_ENTRYPOINT_REQUIRED/)
   await assertNoScheduleObjects(client, 'Raw migration without the guard changed the schema.')
+}
+
+async function assertRawWorkerTypeMigrationRequiresGuard(client, workerTypeMigrationSql) {
+  let failure = null
+  try {
+    await client.query(workerTypeMigrationSql)
+  } catch (error) {
+    failure = error
+  } finally {
+    await client.query('rollback').catch(() => {})
+  }
+  assert.ok(failure, 'Raw worker-type migration unexpectedly ran without the guarded entrypoint marker.')
+  assert.equal(failure.code, 'P0001')
+  assert.match(
+    text(failure.message),
+    /WORKFORCE_SCHEDULE_WORKER_TYPE_GUARDED_ENTRYPOINT_REQUIRED/,
+  )
+  const state = await client.query(
+    `select exists (
+              select 1
+                from pg_attribute attribute
+               where attribute.attrelid = to_regclass('public.workforce_schedule_person')
+                 and attribute.attname = 'worker_type_snapshot'
+                 and attribute.attnum > 0
+                 and not attribute.attisdropped
+            ) as column_exists,
+            to_regprocedure('public.workforce_roster_read_active_workers_v2(text)') is not null
+              as function_exists`,
+  )
+  assert.deepEqual(state.rows[0], { column_exists: false, function_exists: false })
 }
 
 async function assertSecondMigrationIsRejected(client, migrationSql) {
@@ -1797,8 +1849,10 @@ async function runHarness({ args = process.argv.slice(2), env = process.env } = 
     assertSafeUnmodifiedTarget(target, configuration.safeTarget)
 
     const migrationSql = fs.readFileSync(MIGRATION_PATH, 'utf8')
+    const workerTypeMigrationSql = fs.readFileSync(WORKER_TYPE_MIGRATION_PATH, 'utf8')
     assert.doesNotMatch(FIXTURE_SQL, /\bdrop\b/i)
     assert.doesNotMatch(migrationSql, /\bdrop\b/i)
+    assert.doesNotMatch(workerTypeMigrationSql, /\bdrop\b/i)
 
     await adminClient.query(FIXTURE_SQL)
     const sourceBefore = await readCanonicalSources(adminClient)
@@ -1823,6 +1877,8 @@ async function runHarness({ args = process.argv.slice(2), env = process.env } = 
     await assertUnsafeDefaultAclRejected(adminClient, migrationClient, migrationSql)
     await assertAclPostflightRejectsDrift(adminClient, migrationClient, migrationSql)
     await runGuardedHarnessMigration(migrationClient, migrationSql)
+    await assertRawWorkerTypeMigrationRequiresGuard(migrationClient, workerTypeMigrationSql)
+    await runGuardedHarnessWorkerTypeMigration(migrationClient, workerTypeMigrationSql)
     const postMigrationIdentity = await migrationClient.query(
       `select session_user as session_user, current_user as current_user`,
     )
@@ -1878,6 +1934,8 @@ async function runHarness({ args = process.argv.slice(2), env = process.env } = 
         'firebase-uid-worker-binding',
         'table-column-sequence-function-acl-postflight',
         'migration',
+        'worker-type-snapshot-migration-entrypoint-guard',
+        'worker-type-snapshot-migration',
         'schema-ready',
         'crud-and-internal-publication',
         'copy-week-bulk-and-atomic-rollback',
@@ -1932,6 +1990,7 @@ module.exports = {
   FIXTURE_SQL,
   ACL_SENTINEL_ROLE,
   MIGRATION_PATH,
+  WORKER_TYPE_MIGRATION_PATH,
   MIGRATION_OWNER_ROLE,
   MIGRATION_RUNNER_ROLE,
   RUN_ARGUMENT,

@@ -31,10 +31,15 @@ const {
 
 const root = path.join(__dirname, '..')
 const repositorySource = fs.readFileSync(path.join(root, 'workforce-schedule-repository.js'), 'utf8')
-const migrationSource = fs.readFileSync(
+const coreMigrationSource = fs.readFileSync(
   path.join(root, 'dataconnect', 'migrations', '20260906_workforce_schedule_core_additive.sql'),
   'utf8',
 )
+const workerTypeMigrationSource = fs.readFileSync(
+  path.join(root, 'dataconnect', 'migrations', '20260908_workforce_schedule_worker_type_snapshot_additive.sql'),
+  'utf8',
+)
+const migrationSource = `${coreMigrationSource}\n${workerTypeMigrationSource}`
 
 test('repozytorium zna wyłącznie własny schemat rdzenia Grafiku', () => {
   assert.equal(REQUIRED_RELATIONS.length, 11)
@@ -80,6 +85,7 @@ test('repozytorium zna wyłącznie własny schemat rdzenia Grafiku', () => {
   assert.deepEqual(RUNTIME_FUNCTIONS, [
     'public.workforce_schedule_actor_is_active(text)',
     'public.workforce_schedule_read_active_workers(text)',
+    'public.workforce_roster_read_active_workers_v2(text)',
     'public.workforce_schedule_read_active_objects(text)',
     'public.workforce_schedule_lock_worker_sources(text,text[])',
     'public.workforce_schedule_lock_object_sources(text,text[])',
@@ -112,6 +118,7 @@ test('mapowanie katalogów zachowuje stabilne ID i nie ujawnia loginu', () => {
     source_worker_login: 'maria',
     source_worker_id_normalized: 'w066',
     display_name: 'Maria Czarnula',
+    worker_type_snapshot: 'Zespół Mobilny',
     status: 'ACTIVE',
     version: 2,
   })
@@ -124,6 +131,7 @@ test('mapowanie katalogów zachowuje stabilne ID i nie ujawnia loginu', () => {
   })
   assert.equal(person.sourceWorkerLogin, '')
   assert.equal(person.sourceWorkerId, 'w066')
+  assert.equal(person.workerType, 'Zespół Mobilny')
   assert.equal(location.sourceObjectId, 'object-012')
 })
 
@@ -181,7 +189,8 @@ test('kanoniczne źródła są dostępne tylko przez wąskie funkcje SECURITY DE
     repositorySource,
     /\b(?:from|join)\s+public\.(?:organizations|organization_member|organization_subscription|worker|client)\b/i,
   )
-  assert.match(repositorySource, /from public\.workforce_schedule_read_active_workers\(\$1::text\)/i)
+  assert.match(repositorySource, /from public\.workforce_roster_read_active_workers_v2\(\$1::text\)/i)
+  assert.doesNotMatch(repositorySource, /from public\.workforce_schedule_read_active_workers\(\$1::text\)/i)
   assert.match(repositorySource, /from public\.workforce_schedule_read_active_objects\(\$1::text\)/i)
   assert.doesNotMatch(repositorySource, /(?:insert into|update|delete from) public\.(?:worker|client)\b/i)
   assert.doesNotMatch(migrationSource, /references public\.(?:worker|client)\b/i)
@@ -194,6 +203,10 @@ test('kanoniczne źródła są dostępne tylko przez wąskie funkcje SECURITY DE
   assert.match(migrationSource, /create function public\.workforce_schedule_actor_is_active\([\s\S]*?security definer[\s\S]*?from public\.organization_member member_source[\s\S]*?join public\.worker worker_source[\s\S]*?worker_source\.worker_id = member_source\.worker_id[\s\S]*?worker_source\.auth_uid = member_source\.uid[\s\S]*?worker_source\.active is true/i)
   assert.match(repositorySource, /function_signature = 'public\.workforce_schedule_actor_is_active\(text\)'[\s\S]*?organization_member'[\s\S]*?worker'/i)
   assert.match(migrationSource, /create function public\.workforce_schedule_read_active_workers\([\s\S]*?security definer[\s\S]*?from public\.worker worker_source[\s\S]*?worker_source\.active is true[\s\S]*?upper\(btrim\(worker_source\.status\)\) = 'ACTIVE'/i)
+  assert.match(workerTypeMigrationSource, /create function public\.workforce_roster_read_active_workers_v2\([\s\S]*?security definer[\s\S]*?worker_source\.worker_type[\s\S]*?from public\.worker worker_source[\s\S]*?workforce_schedule_actor_is_active\(p_org_id\)/i)
+  assert.match(workerTypeMigrationSource, /revoke all privileges on function[\s\S]*?workforce_roster_read_active_workers_v2\(text\)[\s\S]*?from public, workforce_schedule_session, workforce_schedule_app, migration_runner/i)
+  assert.match(workerTypeMigrationSource, /grant execute on function[\s\S]*?workforce_roster_read_active_workers_v2\(text\)[\s\S]*?to workforce_schedule_app/i)
+  assert.doesNotMatch(workerTypeMigrationSource, /grant\s+select[\s\S]{0,200}public\.worker/i)
   assert.match(migrationSource, /create function public\.workforce_schedule_read_active_objects\([\s\S]*?security definer[\s\S]*?from public\.client object_source[\s\S]*?array\['ACTIVE', 'AKTYWNY'\]::text\[\]/i)
   assert.match(repositorySource, /row\.active === true[\s\S]*?\['ACTIVE', 'AKTYWNY'\]\.includes/i)
   assert.doesNotMatch(`${repositorySource}\n${migrationSource}`, /public\.facility_manager_object/i)
@@ -289,14 +302,17 @@ test('runtime ma minimalne uprawnienia i nie może usuwać historii', () => {
   assert.match(repositorySource, /runtime:APP_ROLE_GRAPH/i)
 })
 
-test('migracja i readiness wymuszaja dokladna allowliste funkcji Grafiku', () => {
-  assert.match(migrationSource, /Refuse every pre-existing schedule function, including unknown overloads/i)
-  assert.match(migrationSource, /from pg_proc function_row[\s\S]*?proname like 'workforce\\_schedule\\_%'/i)
-  assert.doesNotMatch(migrationSource.slice(0, migrationSource.indexOf('set local role workforce_schedule_owner')), /to_regprocedure\(target_function\)/i)
-  assert.match(migrationSource, /count\(\*\) <> 6[\s\S]*?WORKFORCE_SCHEDULE_FUNCTION_ALLOWLIST_POSTFLIGHT_FAILED/i)
+test('migracje i readiness wymuszaja dokladna allowliste funkcji Grafiku', () => {
+  assert.match(coreMigrationSource, /Refuse every pre-existing schedule function, including unknown overloads/i)
+  assert.match(coreMigrationSource, /from pg_proc function_row[\s\S]*?proname like 'workforce\\_schedule\\_%'/i)
+  assert.doesNotMatch(coreMigrationSource.slice(0, coreMigrationSource.indexOf('set local role workforce_schedule_owner')), /to_regprocedure\(target_function\)/i)
+  assert.match(coreMigrationSource, /count\(\*\) <> 6[\s\S]*?WORKFORCE_SCHEDULE_FUNCTION_ALLOWLIST_POSTFLIGHT_FAILED/i)
+  assert.match(workerTypeMigrationSource, /count\(\*\) <> 7[\s\S]*?WORKFORCE_SCHEDULE_WORKER_TYPE_FUNCTION_ALLOWLIST_POSTFLIGHT_FAILED/i)
+  assert.match(workerTypeMigrationSource, /proname like 'workforce\\_schedule\\_%'[\s\S]*?or function_row\.proname like 'workforce\\_roster\\_%'/i)
   assert.match(migrationSource, /function_row\.proconfig = array\['search_path=pg_catalog'\]/i)
   assert.match(migrationSource, /function_row\.prokind = 'f' and not function_row\.proleakproof/i)
   assert.match(repositorySource, /as function_count[\s\S]*?as only_allowed[\s\S]*?runtime:FUNCTION_ALLOWLIST/i)
+  assert.match(repositorySource, /proname like 'workforce\\\\_schedule\\\\_%'[\s\S]*?or function_row\.proname like 'workforce\\\\_roster\\\\_%'/i)
   assert.match(repositorySource, /target\.proconfig = array\['search_path=pg_catalog'\]/i)
   assert.match(repositorySource, /target\.prolang = \(select oid from pg_language where lanname = 'sql'\)/i)
 })
@@ -722,8 +738,8 @@ test('bootstrap dołącza wyłącznie nieaktywne snapshoty referencjonowane w wi
       }
       if (/select person_id, source_worker_id_normalized/i.test(sql)) {
         return { rows: [
-          { person_id: 'person-active', source_worker_id_normalized: 'w001', display_name: 'Aktywna Osoba', status: 'ACTIVE', version: 1 },
-          { person_id: 'person-inactive-ref', source_worker_id_normalized: 'w002', source_worker_login: 'hidden-login', source_auth_uid: 'hidden-uid', display_name: 'Historyczna Osoba', status: 'INACTIVE', version: 2 },
+          { person_id: 'person-active', source_worker_id_normalized: 'w001', display_name: 'Aktywna Osoba', worker_type_snapshot: 'Zespół Mobilny', status: 'ACTIVE', version: 1 },
+          { person_id: 'person-inactive-ref', source_worker_id_normalized: 'w002', source_worker_login: 'hidden-login', source_auth_uid: 'hidden-uid', display_name: 'Historyczna Osoba', worker_type_snapshot: 'Stały personel na obiekcie', status: 'INACTIVE', version: 2 },
         ] }
       }
       if (/select location_id, source_object_id/i.test(sql)) {
@@ -746,6 +762,10 @@ test('bootstrap dołącza wyłącznie nieaktywne snapshoty referencjonowane w wi
   assert.deepEqual(result.people.map(({ personId, status }) => ({ personId, status })), [
     { personId: 'person-active', status: 'ACTIVE' },
     { personId: 'person-inactive-ref', status: 'INACTIVE' },
+  ])
+  assert.deepEqual(result.people.map(({ personId, workerType }) => ({ personId, workerType })), [
+    { personId: 'person-active', workerType: 'Zespół Mobilny' },
+    { personId: 'person-inactive-ref', workerType: 'Stały personel na obiekcie' },
   ])
   assert.deepEqual(result.locations.map(({ locationId, status }) => ({ locationId, status })), [
     { locationId: 'location-active', status: 'ACTIVE' },
@@ -773,17 +793,19 @@ test('bootstrap dołącza wyłącznie nieaktywne snapshoty referencjonowane w wi
 })
 
 test('synchronizacja zwraca wyłącznie licznikowy diff bez danych katalogowych', async () => {
+  const syncCalls = []
   const client = {
-    async query(sql) {
-      if (/from public\.workforce_schedule_read_active_workers/i.test(sql)) {
+    async query(sql, params = []) {
+      syncCalls.push({ sql, params })
+      if (/from public\.workforce_roster_read_active_workers_v2/i.test(sql)) {
         return { rows: [
-          { source_worker_id_normalized: 'w001', source_worker_login: 'new-login', source_auth_uid: 'new-uid', display_name: 'Nowa nazwa', role_snapshot: 'WORKER' },
-          { source_worker_id_normalized: 'w002', source_worker_login: 'second-login', source_auth_uid: 'second-uid', display_name: 'Druga osoba', role_snapshot: 'WORKER' },
+          { source_worker_id_normalized: 'w001', source_worker_login: 'new-login', source_auth_uid: 'new-uid', display_name: 'Nowa nazwa', role_snapshot: 'WORKER', worker_type_snapshot: 'Zespół Mobilny' },
+          { source_worker_id_normalized: 'w002', source_worker_login: 'second-login', source_auth_uid: 'second-uid', display_name: 'Druga osoba', role_snapshot: 'WORKER', worker_type_snapshot: 'Stały personel na obiekcie' },
         ] }
       }
       if (/select \* from public\.workforce_schedule_person/i.test(sql)) {
         return { rows: [
-          { person_id: 'person-1', source_worker_id_normalized: 'w001', source_worker_login: 'old-login', source_auth_uid: 'old-uid', display_name: 'Stara nazwa', initials: 'SN', role_snapshot: 'WORKER', status: 'ACTIVE' },
+          { person_id: 'person-1', source_worker_id_normalized: 'w001', source_worker_login: 'old-login', source_auth_uid: 'old-uid', display_name: 'Stara nazwa', initials: 'SN', role_snapshot: 'WORKER', worker_type_snapshot: 'Stały personel na obiekcie', status: 'ACTIVE' },
         ] }
       }
       if (/from public\.workforce_schedule_read_active_objects/i.test(sql)) {
@@ -817,6 +839,12 @@ test('synchronizacja zwraca wyłącznie licznikowy diff bez danych katalogowych'
     people: { active: 2, created: 1, updated: 1, deactivated: 0 },
     locations: { active: 2, created: 1, updated: 1, deactivated: 0 },
   })
+  const personUpdate = syncCalls.find(({ sql }) => /update public\.workforce_schedule_person/i.test(sql))
+  const personInsert = syncCalls.find(({ sql }) => /insert into public\.workforce_schedule_person/i.test(sql))
+  assert.match(personUpdate.sql, /worker_type_snapshot = \$9::text/i)
+  assert.equal(personUpdate.params[8], 'Zespół Mobilny')
+  assert.match(personInsert.sql, /role_snapshot, worker_type_snapshot, status/i)
+  assert.equal(personInsert.params[8], 'Stały personel na obiekcie')
   assert.doesNotMatch(JSON.stringify(result), /login|uid|Nowa nazwa|object-|person-/i)
 })
 
@@ -825,7 +853,7 @@ test('niepełny odczyt źródłowy nie dezaktywuje aktywnego katalogu ani nie wy
   const peopleRepository = createWorkforceScheduleRepository({
     async query(sql) {
       calls.push(sql)
-      if (/from public\.workforce_schedule_read_active_workers/i.test(sql)) {
+      if (/from public\.workforce_roster_read_active_workers_v2/i.test(sql)) {
         return { rows: [{ source_worker_id_normalized: 'w001', display_name: 'Osoba 1' }] }
       }
       if (/select \* from public\.workforce_schedule_person/i.test(sql)) {
@@ -856,7 +884,7 @@ test('niepełny odczyt źródłowy nie dezaktywuje aktywnego katalogu ani nie wy
   const locationRepository = createWorkforceScheduleRepository({
     async query(sql) {
       locationCalls.push(sql)
-      if (/from public\.workforce_schedule_read_active_workers/i.test(sql)) {
+      if (/from public\.workforce_roster_read_active_workers_v2/i.test(sql)) {
         return { rows: [{ source_worker_id_normalized: 'w003', display_name: 'Nowa osoba' }] }
       }
       if (/select \* from public\.workforce_schedule_person/i.test(sql)) return { rows: [] }
@@ -1045,7 +1073,7 @@ test('synchronizacja używa stabilnych ID źródłowych, nie nazwy ani adresu', 
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params })
-      if (/from public\.workforce_schedule_read_active_workers/i.test(sql)) {
+      if (/from public\.workforce_roster_read_active_workers_v2/i.test(sql)) {
         return { rows: [{
           source_worker_login: 'maria',
           source_worker_id_normalized: 'w066',
@@ -1097,7 +1125,7 @@ test('zmiana loginu lub UID aktualizuje snapshot tej samej osoby wskazanej przez
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params })
-      if (/from public\.workforce_schedule_read_active_workers/i.test(sql)) {
+      if (/from public\.workforce_roster_read_active_workers_v2/i.test(sql)) {
         return { rows: [{
           source_worker_id_normalized: 'w066',
           source_worker_login: 'maria.nowa',
