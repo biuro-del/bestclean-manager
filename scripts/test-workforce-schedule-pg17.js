@@ -1102,6 +1102,17 @@ async function runCrudAndPublication(client) {
   assert.equal(archivePublication.published[0].archived, true)
   assert.deepEqual(archivePublication.effects, EFFECTS)
 
+  const afterArchivePublication = await withRuntimeTransaction(
+    client,
+    { orgId: 'harness-alpha', actorUid: 'uid-alpha-admin' },
+    (repository) => repository.bootstrap({
+      orgId: 'harness-alpha',
+      from: '2030-01-14',
+      to: '2030-01-14',
+    }),
+  )
+  assert.equal(afterArchivePublication.shifts.length, 0)
+
   const storedEffects = await withRuntimeTransaction(
     client,
     { orgId: 'harness-alpha', actorUid: 'uid-alpha-admin' },

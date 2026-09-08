@@ -511,3 +511,26 @@ test('publikacja uwzględnia zmianę przeniesioną poza zakres po publishedDate'
 
   assert.deepEqual(result.map((shift) => shift.id), ['moved-out', 'moved-in'])
 })
+
+test('published archive does not return to the pending changes count', async () => {
+  const { dirtyShifts, isShiftDirty } = await scheduleModelModule
+  const archived = {
+    id: 'shift-archived',
+    shiftId: 'shift-archived',
+    status: 'ARCHIVED',
+    pendingDeletion: true,
+    revision: 3,
+    publishedRevision: 3,
+  }
+  const pendingDeletion = {
+    ...archived,
+    id: 'shift-pending-deletion',
+    shiftId: 'shift-pending-deletion',
+    status: 'CHANGED_AFTER_PUBLISH',
+    revision: 4,
+  }
+
+  assert.equal(isShiftDirty(archived), false)
+  assert.equal(isShiftDirty(pendingDeletion), true)
+  assert.deepEqual(dirtyShifts([archived, pendingDeletion]), [pendingDeletion])
+})

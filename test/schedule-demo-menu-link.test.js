@@ -48,6 +48,7 @@ test('Grafik jest wewnętrzną trasą bezpośrednio pod Pulpitem', () => {
 
 test('portal ładuje Grafik jako samodzielny feature zabezpieczony dwoma flagami', () => {
   const portal = read('web-app', 'apps', 'portal-web', 'src', 'ui', 'portalApp.js')
+  const styles = read('web-app', 'apps', 'portal-web', 'src', 'index.css')
 
   assert.match(portal, /workforceSchedule:\s*\['workforceSchedule'\]/)
   assert.match(portal, /workforceSchedule:\s*'workforceScheduling'/)
@@ -56,6 +57,11 @@ test('portal ładuje Grafik jako samodzielny feature zabezpieczony dwoma flagami
   assert.match(portal, /VITE_WORKFORCE_SCHEDULE_MODE[\s\S]{0,160}===\s*'live'/)
   assert.match(portal, /normalizedRoute === 'workforceSchedule' && !workforceScheduleClientEnabled\(\)/)
   assert.match(portal, /clientEnabled = route !== 'workforceSchedule' \|\| workforceScheduleClientEnabled\(\)/)
+  assert.match(portal, /node\.hidden = !allowed/)
+  assert.match(
+    styles,
+    /#portalRoot :where\(\.menu-item, \.menu-section, \.submenu-item\)\[hidden\]\s*\{\s*display:\s*none\s*!important;/,
+  )
   assert.match(portal, /import\('\.\.\/features\/workforce-schedule\/index\.js'\)/)
   assert.match(portal, /module\.createWorkforceScheduleFeature\(createWorkforceScheduleFeatureContext\(\)\)/)
   assert.match(portal, /bindWorkforceScheduleViewFunctions\(\)/)

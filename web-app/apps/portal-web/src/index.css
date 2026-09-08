@@ -27068,6 +27068,10 @@ body.company-basics-open{
   width:100% !important;
 }
 
+#portalRoot :where(.menu-item, .menu-section, .submenu-item)[hidden] {
+  display: none !important;
+}
+
 #portalRoot .menu-section{
   margin-top:4px !important;
 }

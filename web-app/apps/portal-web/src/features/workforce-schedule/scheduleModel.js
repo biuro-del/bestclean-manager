@@ -45,6 +45,7 @@ export function getShiftMinutes(shift) {
 }
 
 export function isShiftDirty(shift) {
+  if (String(shift?.status ?? '').trim().toUpperCase() === 'ARCHIVED') return false;
   return shift.pendingDeletion || shift.publishedRevision == null || shift.revision > shift.publishedRevision;
 }
 

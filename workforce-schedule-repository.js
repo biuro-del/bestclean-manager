@@ -903,7 +903,15 @@ function createWorkforceScheduleRepository(client) {
     }
   }
 
-  async function readShiftRows({ orgId, from, to, personId = '', shiftId = '', onlyCurrent = true }) {
+  async function readShiftRows({
+    orgId,
+    from,
+    to,
+    personId = '',
+    shiftId = '',
+    onlyCurrent = true,
+    includeArchived = false,
+  }) {
     const revisionJoin = onlyCurrent ? 'r.revision_no = h.current_revision_no' : 'r.revision_no = h.published_revision_no'
     const rangePredicate = onlyCurrent
       ? `(r.business_date between $2::date and $3::date
@@ -939,7 +947,7 @@ function createWorkforceScheduleRepository(client) {
                    and own_assignment.revision_no = r.revision_no and own_assignment.person_id = $4::text
               ))
           and ($5::text = '' or h.shift_id = $5::text)
-          and (${onlyCurrent ? 'true' : "h.lifecycle_status <> 'ARCHIVED'"})
+          and (${includeArchived ? 'true' : "h.lifecycle_status <> 'ARCHIVED'"})
         order by least(r.business_date, coalesce(published.business_date, r.business_date)) asc,
                  r.starts_at asc, h.shift_id asc`,
       [orgId, from, to, personId, shiftId],
@@ -1415,7 +1423,13 @@ function createWorkforceScheduleRepository(client) {
   }
 
   async function readOneShift(orgId, shiftId) {
-    const rows = await readShiftRows({ orgId, from: '1900-01-01', to: '9999-12-31', shiftId })
+    const rows = await readShiftRows({
+      orgId,
+      from: '1900-01-01',
+      to: '9999-12-31',
+      shiftId,
+      includeArchived: true,
+    })
     return rows[0] ? mapShift(rows[0]) : null
   }
 

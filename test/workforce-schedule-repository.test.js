@@ -758,6 +758,8 @@ test('bootstrap dołącza wyłącznie nieaktywne snapshoty referencjonowane w wi
   })
   const peopleRead = calls.find(({ sql }) => /select person_id, source_worker_id_normalized/i.test(sql))
   const locationRead = calls.find(({ sql }) => /select location_id, source_object_id/i.test(sql))
+  const shiftRead = calls.find(({ sql }) => /select h\.shift_id, h\.lifecycle_status/i.test(sql))
+  assert.match(shiftRead.sql, /h\.lifecycle_status <> 'ARCHIVED'/i)
   assert.deepEqual(peopleRead.params, ['bestclean', '', ['person-active', 'person-inactive-ref']])
   assert.deepEqual(locationRead.params, ['bestclean', ['location-inactive-ref']])
   assert.match(peopleRead.sql, /status = 'INACTIVE' and person_id = any\(\$3::text\[\]\)/i)
@@ -1191,4 +1193,48 @@ test('publikacja jest wewnętrzna i nie tworzy kolejki downstream', async () => 
   assert.equal(result.visibility, 'INTERNAL_ONLY')
   assert.deepEqual(result.effects, effects)
   assert.equal(calls.some(({ sql }) => /outbox|notify|delivery/i.test(sql)), false)
+})
+
+test('point read keeps archive idempotent without another revision', async () => {
+  const calls = []
+  const repository = createWorkforceScheduleRepository({
+    async query(sql, params = []) {
+      calls.push({ sql, params })
+      if (/select \* from public\.workforce_schedule_shift[\s\S]*for update/i.test(sql)) {
+        return { rows: [{ shift_id: 'shift-archived', lifecycle_status: 'ARCHIVED', version: 6 }] }
+      }
+      if (/select h\.shift_id, h\.lifecycle_status/i.test(sql)) {
+        return { rows: [{
+          shift_id: 'shift-archived',
+          lifecycle_status: 'ARCHIVED',
+          current_revision_no: 3,
+          published_revision_no: 3,
+          revision_no: 3,
+          version: 6,
+          business_date: '2026-09-07',
+          local_start_time: '08:00:00',
+          local_end_time: '16:00:00',
+          starts_at: '2026-09-07T06:00:00.000Z',
+          ends_at: '2026-09-07T14:00:00.000Z',
+          time_zone: 'Europe/Warsaw',
+          person_ids: [],
+          instructions: [],
+          is_deleted: true,
+        }] }
+      }
+      return { rows: [] }
+    },
+  })
+
+  const result = await repository.archiveShift({
+    orgId: 'bestclean',
+    shiftId: 'shift-archived',
+    expectedVersion: 6,
+    actorUid: 'admin-1',
+  })
+
+  assert.equal(result.shift.pendingDeletion, true)
+  const pointRead = calls.find(({ sql }) => /select h\.shift_id, h\.lifecycle_status/i.test(sql))
+  assert.match(pointRead.sql, /and \(true\)/i)
+  assert.equal(calls.some(({ sql }) => /insert into public\.workforce_schedule_shift_revision/i.test(sql)), false)
 })
