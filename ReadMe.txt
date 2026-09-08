@@ -5293,3 +5293,26 @@ Granice:
   test dwóch rzeczywistych transakcji PostgreSQL oraz uwierzytelniony canary E2E.
 - Historyczny Event z 04.09.2026 nie jest naprawiany automatycznie; wymaga osobnej,
   warunkowej korekty po audycie read-only i jawnej zgodzie na zmianę danych.
+
+Data: 2026-09-08 CEST
+Autor: AI Codex
+Temat: Integracja Historia STOP P0 z aktualnym źródłem produkcyjnym
+Wykonano:
+- Kandydat został zintegrowany bez konfliktów na bazie produkcyjnego SHA
+  `9dbebe25e0207a1c21fd6c3fa75eba15eec7a361` i zapisany jako commit
+  `58d85127d5d4292723a2d9e57c78adf469158107` na branchu
+  `codex/history-stop-p0-prod-aligned-20260908`.
+- Branch został wypchnięty do `biuro-del/Cleanzi-01`; nie utworzono PR i nie wykonano
+  wdrożenia.
+- Celowane testy API, repozytorium, polityki i routingu STOP: 59/59 PASS.
+- Testy klienta mobilnego Historia/STOP: 66/66 PASS.
+- Izolowane testy transakcji PostgreSQL: 3/3 PASS; nie używały produkcyjnej bazy.
+- Oficjalny odczyt App Hosting nadal wskazuje 100% ruchu na
+  `build-2026-09-08-004`, SHA `9dbebe25e0207a1c21fd6c3fa75eba15eec7a361`.
+Granice:
+- Kandydat `58d8512` nie jest wdrożony. Potwierdzonym rollback targetem pozostaje
+  `build-2026-09-08-004` / `9dbebe25e0207a1c21fd6c3fa75eba15eec7a361`.
+- Przed uznaniem funkcji za produkcyjną wymagany jest kontrolowany rollout oraz
+  uwierzytelniony canary E2E na izolowanych danych testowych.
+- Zastany test Grafiku zależy od końców linii SQL (LF/CRLF) i wymaga osobnego
+  hotfixu przenośności. Nie należy mieszać tej poprawki z Historia STOP P0.

@@ -1,6 +1,8 @@
 # Workday STOP Proposal Mobile Receipt V2
 
-Status: lokalny kandydat backendu, niezatwierdzony, niewypchnięty i niewdrożony.
+Status: zatwierdzony i wypchnięty kandydat backendu, nadal niewdrożony.
+Kandydat: commit `58d85127d5d4292723a2d9e57c78adf469158107` na branchu
+`codex/history-stop-p0-prod-aligned-20260908`.
 Ten dokument nie jest dowodem działania produkcyjnego ani testu E2E na rzeczywistej bazie.
 Aktualny klient Production Test oczekuje tego kontraktu i przy jego braku pozostaje
 fail-closed: Historia jest czytelna, ale wysłanie propozycji jest zablokowane.
