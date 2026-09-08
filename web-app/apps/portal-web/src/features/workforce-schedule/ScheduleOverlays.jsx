@@ -18,7 +18,7 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { formatDuration, getShiftMinutes } from "./scheduleModel.js";
+import { filterScheduleAssigneeUsers, formatDuration, getShiftMinutes } from "./scheduleModel.js";
 
 const FOCUSABLE = "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex='-1'])";
 
@@ -98,6 +98,7 @@ function isCatalogSelectable(item) {
 
 export function ShiftDrawer({ busy = false, deliveryDisabled = true, initialShift, locations, onClose, onDelete, onSave, templates, templatesEnabled = false, todayIso, users }) {
   const titleId = useId();
+  const mobileFilterStatusId = useId();
   const isNew = !initialShift?.id;
   const [tab, setTab] = useState("details");
   const [form, setForm] = useState(() => ({
@@ -114,11 +115,27 @@ export function ShiftDrawer({ busy = false, deliveryDisabled = true, initialShif
     tasks: initialShift?.tasks || [],
   }));
   const [taskDraft, setTaskDraft] = useState("");
+  const [mobileAssigneesOnly, setMobileAssigneesOnly] = useState(false);
+  const mobileFilterRef = useRef(null);
+  const mobileUsers = useMemo(() => filterScheduleAssigneeUsers(users, [], true), [users]);
+  const visibleUsers = useMemo(
+    () => filterScheduleAssigneeUsers(users, form.assigneeIds, mobileAssigneesOnly),
+    [form.assigneeIds, mobileAssigneesOnly, users],
+  );
+  const mobileUserIds = useMemo(() => new Set(mobileUsers.map((user) => user.id)), [mobileUsers]);
+  const selectedOutsideMobileCount = useMemo(() => {
+    const catalogUserIds = new Set(users.map((user) => user.id));
+    return form.assigneeIds.filter((id) => catalogUserIds.has(id) && !mobileUserIds.has(id)).length;
+  }, [form.assigneeIds, mobileUserIds, users]);
 
-  const toggleAssignee = (userId) => setForm((current) => ({
-    ...current,
-    assigneeIds: current.assigneeIds.includes(userId) ? current.assigneeIds.filter((id) => id !== userId) : [...current.assigneeIds, userId],
-  }));
+  const toggleAssignee = (userId) => {
+    const restoreFilterFocus = mobileAssigneesOnly && form.assigneeIds.includes(userId) && !mobileUserIds.has(userId);
+    setForm((current) => ({
+      ...current,
+      assigneeIds: current.assigneeIds.includes(userId) ? current.assigneeIds.filter((id) => id !== userId) : [...current.assigneeIds, userId],
+    }));
+    if (restoreFilterFocus) window.requestAnimationFrame(() => mobileFilterRef.current?.focus());
+  };
   const save = (publishNow = false) => onSave({ ...form, publishNow });
 
   return (
@@ -145,7 +162,21 @@ export function ShiftDrawer({ busy = false, deliveryDisabled = true, initialShif
             <label>Do<input onChange={(e) => setForm({ ...form, endTime: e.target.value })} type="time" value={form.endTime} /></label>
             <label>Przerwa<select onChange={(e) => setForm({ ...form, breakMinutes: Number(e.target.value) })} value={form.breakMinutes}><option value="0">Bez przerwy</option><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></label>
             <label>Wymagana obsada<input min="1" onChange={(e) => setForm({ ...form, requiredHeadcount: Number(e.target.value) })} type="number" value={form.requiredHeadcount} /></label>
-            <fieldset className="tm-schedule-assignees is-wide"><legend>Użytkownicy</legend>{users.map((user) => { const assigned = form.assigneeIds.includes(user.id); const inactive = !isCatalogSelectable(user); return <label className={inactive ? "is-inactive" : ""} key={user.id}><input checked={assigned} disabled={inactive && !assigned} onChange={() => toggleAssignee(user.id)} type="checkbox" /><span className="tm-schedule-avatar">{user.initials}</span><span>{userName(user)}<small>{inactive ? "Nieaktywny" : user.role}</small></span></label>; })}</fieldset>
+            <fieldset className="tm-schedule-assignees is-wide">
+              <legend>Użytkownicy</legend>
+              <div className="tm-schedule-assignee-filter-row">
+                <label><input aria-describedby={mobileFilterStatusId} checked={mobileAssigneesOnly} onChange={(event) => setMobileAssigneesOnly(event.target.checked)} ref={mobileFilterRef} type="checkbox" /><span>Tylko zespół mobilny</span></label>
+                <small aria-atomic="true" aria-live="polite" id={mobileFilterStatusId} role="status">{mobileAssigneesOnly ? `Wyświetlono ${mobileUsers.length} z ${users.length}${selectedOutsideMobileCount ? ` · ${selectedOutsideMobileCount} wybr. poza filtrem` : ""}` : `${users.length} osób`}</small>
+              </div>
+              {visibleUsers.map((user) => {
+                const assigned = form.assigneeIds.includes(user.id);
+                const inactive = !isCatalogSelectable(user);
+                const selectedOutsideFilter = mobileAssigneesOnly && assigned && !mobileUserIds.has(user.id);
+                const userMeta = [inactive ? "Nieaktywny" : user.role, selectedOutsideFilter ? "wybrany poza zespołem mobilnym" : ""].filter(Boolean).join(" · ");
+                return <label className={inactive ? "is-inactive" : ""} key={user.id}><input checked={assigned} disabled={inactive && !assigned} onChange={() => toggleAssignee(user.id)} type="checkbox" /><span className="tm-schedule-avatar">{user.initials}</span><span>{userName(user)}<small>{userMeta}</small></span></label>;
+              })}
+              {!visibleUsers.length && <p className="tm-schedule-assignee-empty">Brak osób w zespole mobilnym.</p>}
+            </fieldset>
             <label className="is-wide">Notatka<textarea onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Dodaj informacje dla zespołu" rows="4" value={form.notes} /></label>
             <div className="tm-schedule-shift-facts is-wide"><span><Clock size={17} /> {formatDuration(getShiftMinutes(form))} pracy</span><span><Users size={17} /> {form.assigneeIds.length}/{form.requiredHeadcount} obsady</span><span><Bell size={17} /> {deliveryDisabled ? "Bez wysyłki do pracowników" : "Powiadomienie po publikacji"}</span></div>
           </div>

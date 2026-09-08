@@ -1481,3 +1481,96 @@ final result: passed
 - [x] Verify the rendered glyph, comparison evidence, browser errors, tests, lint, and build.
 
 final result: passed
+
+---
+
+# Design QA - filtr zespołu mobilnego w formularzu zmiany (2026-09-08)
+
+## Materiał porównawczy
+
+- Źródło: `C:\Users\rafal\Documents\Cleanzi www\.worktrees\portal-grafik-core-20260906\web-app\design-qa-assets\source-grafik-shift-mobile-filter-user-20260908.png`.
+- Porównanie źródła i implementacji: `C:\Users\rafal\Documents\Cleanzi www\.worktrees\portal-grafik-core-20260906\web-app\design-qa-assets\implementation-grafik-shift-mobile-filter-fixed-20260908.png`.
+- Widok mobilny z włączonym filtrem: `C:\Users\rafal\Documents\Cleanzi www\.worktrees\portal-grafik-core-20260906\web-app\design-qa-assets\implementation-grafik-shift-mobile-filter-mobile-checked-20260908.png`.
+- Desktop: 1120 x 920 CSS px; mobile: 540 x 920 CSS px; device scale factor 1.
+- Zweryfikowane stany: filtr wyłączony, filtr włączony, zaznaczona osoba spoza zespołu mobilnego oraz jej odznaczenie.
+
+## Wynik i iteracje
+
+1. Pierwsza kontrola wykryła konflikt z ogólnym stylem `#portalRoot`: checkbox filtra miał 18 x 36 px, a checkbox użytkownika rozciągał się nawet do 449 x 36 px.
+2. Reguła została ograniczona do formularza Grafiku, wzmocniona selektorem `#portalRoot` oraz pełnym kontraktem min/max/width/height.
+3. Końcowy pomiar obu rodzajów checkboxów wynosi dokładnie 18 x 18 px. Nie ma poziomego przepełnienia na desktopie ani mobile.
+4. Włączenie filtra ogranicza listę z 7 do 3 osób i aktualizuje status na `Wyświetlono 3 z 7`.
+5. Wcześniej wybrana osoba spoza zespołu pozostaje widoczna i opisana; jej odznaczenie usuwa wiersz oraz bezpiecznie przenosi fokus na checkbox filtra.
+
+## Fidelity i dostępność
+
+- Zachowano istniejącą typografię, kolory, odstępy, pola formularza, listę użytkowników oraz przycisk zapisu.
+- Dodany wiersz filtra korzysta z natywnego checkboxa, 18 x 18 px, większego klikalnego labela i widocznego `:focus-visible`.
+- Licznik jest regionem `role="status"`, ma `aria-live`, `aria-atomic` i powiązanie przez `aria-describedby`.
+- Pusty wynik ma jednoznaczny komunikat `Brak osób w zespole mobilnym.`.
+- Konsola przeglądarki: 0 błędów.
+
+## Granica danych
+
+- Filtr korzysta wyłącznie z kanonicznego `workerType`; nie zgaduje typu po roli, nazwie ani identyfikatorze.
+- Stan filtra nie trafia do payloadu zapisu i nie usuwa ukrytych przypisań.
+- Podgląd jest lokalny. Nie wykonano migracji, synchronizacji katalogu, wdrożenia backendu, wdrożenia frontendu ani zmiany produkcji.
+
+## Kontrole techniczne
+
+- Zintegrowany zestaw Grafiku: 117/117 PASS.
+- Końcowe testy filtra i UI po korekcie kaskady: 17/17 PASS.
+- ESLint: PASS.
+- Build portalu: PASS, 5036 modułów; wyłącznie istniejące ostrzeżenie o rozmiarze chunków.
+- `git diff --check`: PASS.
+
+final result: passed
+
+---
+
+# Design QA - Grafik people filters and checkboxes (2026-09-08)
+
+## Reference and verification state
+
+- Source checkbox reference: `C:\Users\rafal\Documents\Cleanzi www\.worktrees\portal-grafik-core-20260906\web-app\design-qa-assets\source-grafik-checkboxes-user-20260908.png`.
+- Source location-filter reference: `C:\Users\rafal\Documents\Cleanzi www\.worktrees\portal-grafik-core-20260906\web-app\design-qa-assets\source-grafik-location-filter-user-20260908.png`.
+- Browser-rendered implementation: `C:\Users\rafal\Documents\Cleanzi www\.worktrees\portal-grafik-core-20260906\web-app\design-qa-assets\implementation-grafik-people-filters-20260908.png`.
+- Combined source and implementation comparison: `C:\Users\rafal\Documents\Cleanzi www\.worktrees\portal-grafik-core-20260906\web-app\design-qa-assets\comparison-grafik-people-filters-20260908.png`.
+- Mobile control capture: `C:\Users\rafal\Documents\Cleanzi www\.worktrees\portal-grafik-core-20260906\web-app\design-qa-assets\implementation-grafik-people-filters-mobile-20260908.png`.
+- Desktop viewport: 1747 x 912 CSS px at device scale factor 1; mobile viewport: 390 x 844 CSS px.
+- State: focused browser harness using the final compiled portal stylesheet and the production control markup. Production remained unchanged.
+
+## Findings
+
+- The old option controls measured 36 px high and stretched to roughly 111-146 px wide because global input sizing and `role="switch"` styling won the cascade.
+- Every final option is a native checkbox measuring exactly 18 x 18 px, with `min-width` and `min-height` also 18 px and no `switch` role. The surrounding label keeps a 38 px click target.
+- The filter row now exposes separate location, team, and person controls. Location + `Zespół mobilny` + person combine with AND semantics.
+- The browser interaction `Biuro Katowice` + `Zespół mobilny` left exactly one matching row, `Maria Zielińska`.
+- At 390 px the controls remain readable and fit without horizontal clipping. The real Grafik toolbar keeps an accessible 38 x 38 px `Filtry grafiku` trigger at the 680 px breakpoint.
+- No actionable P0, P1, or P2 visual mismatch remains for the requested controls.
+
+## Data and rollout boundary
+
+- Team membership comes from the canonical `worker.worker_type` snapshot, never from a name, role guess, or worker ID.
+- Location means a person assigned to a non-deleted shift at that location in the currently viewed week; the current data model has no permanent person-to-location relation.
+- The local browser harness verifies the UI and interaction contract. It does not claim a production database smoke test: the additive migration, catalog synchronization, backend deployment, and frontend deployment were intentionally not performed.
+- The real disposable PostgreSQL 17 integration harness remains a separate pre-production gate.
+
+## Technical QA
+
+- Integrated targeted suite: 115/115 passed.
+- Independent integrated review: no remaining code-level blocker.
+- ESLint: passed.
+- Portal production build: passed, 5036 modules; only the existing large-chunk advisory remains.
+- `node --check` and `git diff --check`: passed.
+
+## Implementation checklist
+
+- [x] Replace oversized pseudo-switches with standard 18 x 18 px checkboxes.
+- [x] Preserve the larger row as the click target.
+- [x] Filter people by the selected location in the viewed week.
+- [x] Add the canonical `Zespół mobilny` filter and combine all people filters.
+- [x] Keep the filters reachable on mobile.
+- [x] Verify compiled CSS, interactions, responsive rendering, tests, lint, build, and diff.
+
+final result: passed

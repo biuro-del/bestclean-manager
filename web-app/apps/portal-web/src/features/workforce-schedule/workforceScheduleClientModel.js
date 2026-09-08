@@ -216,6 +216,7 @@ export function normalizeWorkforceScheduleBootstrap(schedule = {}) {
       displayName,
       firstName: text(person.firstName || displayName.split(/\s+/)[0]),
       initials: text(person.initials) || '?',
+      workerType: text(person.workerType),
       status,
       selectable: catalogSelectable(person),
     }

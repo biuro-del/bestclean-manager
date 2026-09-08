@@ -7,12 +7,68 @@ const test = require("node:test");
 const moduleRoot = path.resolve(__dirname, "../web-app/apps/portal-web/src/features/workforce-schedule");
 
 async function readScheduleSources() {
-  const [content, overlays] = await Promise.all([
+  const [content, overlays, styles] = await Promise.all([
     readFile(path.join(moduleRoot, "ScheduleContent.jsx"), "utf8"),
     readFile(path.join(moduleRoot, "ScheduleOverlays.jsx"), "utf8"),
+    readFile(path.join(moduleRoot, "schedule.css"), "utf8"),
   ]);
-  return { content, overlays };
+  return { content, overlays, styles };
 }
+
+test("opcje widoku używają standardowych checkboxów 18 na 18 px", async () => {
+  const { content, styles } = await readScheduleSources();
+
+  assert.match(content, /className="tm-schedule-option-checkbox"/);
+  assert.match(content, /className="tm-schedule-option-checkbox"[\s\S]{0,320}type="checkbox"/);
+  assert.doesNotMatch(content, /className="tm-schedule-option-checkbox"[\s\S]{0,320}role="switch"/);
+  assert.match(styles, /#portalRoot \.tm-schedule-menu input\.tm-schedule-option-checkbox\s*\{[\s\S]{0,320}width:\s*18px\s*!important;[\s\S]{0,160}min-width:\s*18px\s*!important;[\s\S]{0,160}height:\s*18px\s*!important;[\s\S]{0,160}min-height:\s*18px\s*!important;[\s\S]{0,200}padding:\s*0\s*!important;/);
+  assert.match(styles, /\.tm-schedule-menu button,\s*\.tm-schedule-menu label\s*\{[\s\S]{0,120}min-height:\s*38px;/);
+});
+
+test("filtry Grafiku łączą lokalizację, zespół mobilny i konkretną osobę", async () => {
+  const { content } = await readScheduleSources();
+
+  assert.match(content, /const \[workerTypeFilter, setWorkerTypeFilter\] = useState\("all"\)/);
+  assert.match(content, /<span className="tm-sr-only">Filtr lokalizacji<\/span>/);
+  assert.match(content, /<span className="tm-sr-only">Filtr zespołu<\/span>[\s\S]{0,260}<option value="mobile">Zespół mobilny<\/option>/);
+  assert.match(content, /<span className="tm-sr-only">Filtr użytkownika<\/span>/);
+  assert.match(content, /filterShiftsByWorkerType\(matchingShifts, users, workerTypeFilter\)/);
+  assert.match(content, /filterScheduleUsers\(users, weekShifts, \{[\s\S]{0,220}locationId: locationFilter,[\s\S]{0,120}userId: userFilter,[\s\S]{0,120}workerType: workerTypeFilter/);
+  assert.match(content, /resourceUsers=\{resourceUsers\}/);
+  assert.match(content, /const rowUsers = Array\.isArray\(resourceUsers\) \? resourceUsers : users/);
+  assert.match(content, /const resources = grouping === "location" \? locations : rowUsers\.map/);
+});
+
+test("formularz zmiany może ograniczyć listę obsady do zespołu mobilnego", async () => {
+  const { overlays, styles } = await readScheduleSources();
+
+  assert.match(overlays, /const \[mobileAssigneesOnly, setMobileAssigneesOnly\] = useState\(false\)/);
+  assert.match(overlays, /filterScheduleAssigneeUsers\(users, form\.assigneeIds, mobileAssigneesOnly\)/);
+  assert.match(overlays, /aria-describedby=\{mobileFilterStatusId\}[\s\S]{0,180}checked=\{mobileAssigneesOnly\}[\s\S]{0,180}setMobileAssigneesOnly\(event\.target\.checked\)[\s\S]{0,180}Tylko zespół mobilny/);
+  assert.match(overlays, /\{visibleUsers\.map\(\(user\) =>/);
+  assert.match(overlays, /selectedOutsideFilter[\s\S]{0,520}wybrany poza zespołem mobilnym/);
+  assert.match(overlays, /<small aria-atomic="true" aria-live="polite" id=\{mobileFilterStatusId\} role="status">[\s\S]{0,360}selectedOutsideMobileCount/);
+  assert.match(overlays, /restoreFilterFocus[\s\S]{0,520}mobileFilterRef\.current\?\.focus\(\)/);
+  assert.match(overlays, /Brak osób w zespole mobilnym/);
+  assert.match(styles, /#portalRoot \.tm-schedule-form-grid \.tm-schedule-assignee-filter-row input\[type="checkbox"\]\s*\{[\s\S]{0,220}width:\s*18px !important;[\s\S]{0,180}height:\s*18px !important;/);
+  assert.match(styles, /#portalRoot \.tm-schedule-form-grid \.tm-schedule-assignees > label > input\[type="checkbox"\]\s*\{[\s\S]{0,220}width:\s*18px !important;[\s\S]{0,180}height:\s*18px !important;/);
+  assert.match(styles, /#portalRoot \.tm-schedule-form-grid \.tm-schedule-assignee-filter-row input\[type="checkbox"\]:focus-visible,[\s\S]{0,220}outline:\s*2px solid/);
+});
+
+test("Filtry pozostają dostępne i opisane na ekranach do 680 px", async () => {
+  const { content, styles } = await readScheduleSources();
+  const mobileStart = styles.indexOf("@media (max-width: 680px)");
+  const nextBreakpoint = styles.indexOf("@media (max-width:", mobileStart + 1);
+  const mobileStyles = styles.slice(mobileStart, nextBreakpoint >= 0 ? nextBreakpoint : styles.length);
+
+  assert.ok(mobileStart >= 0, "Brakuje breakpointu mobilnego 680 px");
+  assert.match(content, /aria-controls="workforceScheduleFilters"[^>]*aria-expanded=\{filtersOpen\}[^>]*aria-label="Filtry grafiku"[^>]*className="tm-schedule-filter-button"/);
+  assert.match(content, /className="tm-schedule-subtoolbar" id="workforceScheduleFilters"/);
+  assert.match(mobileStyles, /grid-template-columns:\s*auto auto 1fr auto;/);
+  assert.match(mobileStyles, /> button:not\(\.tm-schedule-date-button\):not\(\.tm-schedule-filter-button\)\s*\{\s*display:\s*none;/);
+  assert.match(mobileStyles, /\.tm-schedule-filter-button\s*\{[^}]*width:\s*38px;[^}]*min-width:\s*38px;[^}]*justify-content:\s*center;/);
+  assert.doesNotMatch(mobileStyles, /> button:not\(\.tm-schedule-date-button\)\s*\{\s*display:\s*none;/);
+});
 
 async function loadScheduleModel() {
   return import(pathToFileURL(path.join(moduleRoot, "scheduleModel.js")).href);

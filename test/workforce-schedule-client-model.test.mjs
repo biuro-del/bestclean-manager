@@ -33,7 +33,7 @@ test('bootstrap mapuje backend na widok bez danych demonstracyjnych', async () =
   const result = normalizeWorkforceScheduleBootstrap({
     setupRequired: false,
     settings: { timeZone: 'Europe/Warsaw' },
-    people: [{ personId: 'person-1', displayName: 'Anna Nowak', initials: 'AN', status: 'ACTIVE' }],
+    people: [{ personId: 'person-1', displayName: 'Anna Nowak', initials: 'AN', workerType: 'Zespół Mobilny', status: 'ACTIVE' }],
     locations: [{ locationId: 'location-1', name: 'Biuro', color: '#112233', softColor: '#ddeeff' }],
     shifts: [{ shiftId: 'shift-1', personIds: ['person-1'], instructions: ['Klucze'], revision: 3, publishedRevision: 2 }],
     requests: [],
@@ -42,6 +42,7 @@ test('bootstrap mapuje backend na widok bez danych demonstracyjnych', async () =
   assert.equal(result.users[0].id, 'person-1')
   assert.equal(result.users[0].displayName, 'Anna Nowak')
   assert.equal(result.users[0].firstName, 'Anna')
+  assert.equal(result.users[0].workerType, 'Zespół Mobilny')
   assert.deepEqual(result.shifts[0].assigneeIds, ['person-1'])
   assert.deepEqual(result.shifts[0].tasks, ['Klucze'])
   assert.deepEqual(result.templates, [])

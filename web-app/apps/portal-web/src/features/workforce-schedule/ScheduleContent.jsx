@@ -38,7 +38,9 @@ import {
   addMonths,
   dirtyShifts,
   duplicateShift,
+  filterScheduleUsers,
   filterShifts,
+  filterShiftsByWorkerType,
   findConflicts,
   formatDuration,
   getShiftMinutes,
@@ -197,7 +199,7 @@ function ShiftCard({ actionsEnabled = true, conflicts, dragEnabled = false, drag
   );
 }
 
-function WeekGrid({ conflicts, days, display, dragEnabled, editingEnabled, grouping, locations, onCellClick, onSearch, onShiftAction, onShiftDrop, onShiftOpen, onValidateShiftDrop, preferredLocationId = "", searchValue, shifts, todayIso, users }) {
+function WeekGrid({ conflicts, days, display, dragEnabled, editingEnabled, grouping, locations, onCellClick, onSearch, onShiftAction, onShiftDrop, onShiftOpen, onValidateShiftDrop, preferredLocationId = "", resourceUsers, searchValue, shifts, todayIso, users }) {
   const [dragged, setDragged] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
   const [announcement, setAnnouncement] = useState("");
@@ -206,7 +208,8 @@ function WeekGrid({ conflicts, days, display, dragEnabled, editingEnabled, group
   const activeLocation = preferredLocationId
     ? locations.find((location) => location.id === preferredLocationId && isCatalogSelectable(location))
     : locations.find(isCatalogSelectable);
-  const resources = grouping === "location" ? locations : users.map((user) => ({ id: user.id, name: userName(user), color: "#506de2", softColor: "#eef1ff", initials: user.initials, selectable: user.selectable }));
+  const rowUsers = Array.isArray(resourceUsers) ? resourceUsers : users;
+  const resources = grouping === "location" ? locations : rowUsers.map((user) => ({ id: user.id, name: userName(user), color: "#506de2", softColor: "#eef1ff", initials: user.initials, selectable: user.selectable }));
   const resourceShifts = (resourceId, day) => shifts.filter((shift) => shift.date === day && (grouping === "location" ? shift.locationId === resourceId : shift.assigneeIds.includes(resourceId)));
   const resourceWeekShiftCount = (resourceId) => days.reduce((total, day) => total + resourceShifts(resourceId, day).length, 0);
   const visibleResources = display.showEmpty ? resources : resources.filter((resource) => days.some((day) => resourceShifts(resource.id, day).length));
@@ -427,6 +430,7 @@ export function ScheduleContent({
   const [localSearch, setLocalSearch] = useState("");
   const [locationFilter, setLocationFilter] = useState("all");
   const [userFilter, setUserFilter] = useState("all");
+  const [workerTypeFilter, setWorkerTypeFilter] = useState("all");
   const [display, setDisplay] = useState({ showSummary: true, showProblems: false, showEmpty: true, compact: false });
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [menu, setMenu] = useState(null);
@@ -441,9 +445,15 @@ export function ScheduleContent({
   const mutationBusyRef = useRef(false);
   const days = useMemo(() => getWeekDays(weekStart), [weekStart]);
   const query = [globalSearch, localSearch].filter(Boolean).join(" ");
-  const visibleShifts = useMemo(() => filterShifts(shifts, query, locationFilter, userFilter), [shifts, query, locationFilter, userFilter]);
+  const matchingShifts = useMemo(() => filterShifts(shifts, query, locationFilter, userFilter), [shifts, query, locationFilter, userFilter]);
+  const visibleShifts = useMemo(() => filterShiftsByWorkerType(matchingShifts, users, workerTypeFilter), [matchingShifts, users, workerTypeFilter]);
   const currentShifts = useMemo(() => visibleShifts.filter((shift) => days.includes(shift.date)), [visibleShifts, days]);
   const weekShifts = useMemo(() => shifts.filter((shift) => days.includes(shift.date)), [shifts, days]);
+  const resourceUsers = useMemo(() => filterScheduleUsers(users, weekShifts, {
+    locationId: locationFilter,
+    userId: userFilter,
+    workerType: workerTypeFilter,
+  }), [users, weekShifts, locationFilter, userFilter, workerTypeFilter]);
   const weekCopySource = useMemo(() => weekShifts.filter((shift) => !shift.pendingDeletion), [weekShifts]);
   const changes = useMemo(() => dirtyShifts(shifts), [shifts]);
   const conflicts = useMemo(() => findConflicts(weekShifts, users, weeklyLimitMinutes), [weekShifts, users, weeklyLimitMinutes]);
@@ -789,8 +799,8 @@ export function ScheduleContent({
       <div className="tm-schedule-panel">
         <div className="tm-schedule-toolbar" ref={toolbarRef}>
           <div className="tm-schedule-toolbar-left">
-            <div className="tm-schedule-popover-anchor"><button aria-expanded={menu === "display"} onClick={() => setMenu(menu === "display" ? null : "display")} type="button"><SlidersHorizontal size={18} /> Wyświetl opcje <CaretDown size={14} /></button>{menu === "display" && <MenuLayer className="tm-schedule-display-menu"><strong>Układ grafiku</strong><button className={grouping === "location" ? "is-selected" : ""} onClick={() => setGrouping("location")} role="menuitemradio" type="button"><MapPin size={17} /> Według lokalizacji {grouping === "location" && <Check size={16} />}</button><button className={grouping === "user" ? "is-selected" : ""} onClick={() => setGrouping("user")} role="menuitemradio" type="button"><UserCircle size={17} /> Według użytkowników {grouping === "user" && <Check size={16} />}</button><hr />{[["showSummary", "Podsumowanie godzin"], ["showProblems", "Pokaż problemy"], ["showEmpty", "Puste zasoby"], ["compact", "Widok kompaktowy"]].map(([key, label]) => <label key={key}><span>{label}</span><input checked={display[key]} onChange={() => setDisplay({ ...display, [key]: !display[key] })} role="switch" type="checkbox" /></label>)}</MenuLayer>}</div>
-            <button aria-expanded={filtersOpen} onClick={() => setFiltersOpen((value) => !value)} type="button"><Funnel size={17} /> Filtry</button>
+            <div className="tm-schedule-popover-anchor"><button aria-expanded={menu === "display"} onClick={() => setMenu(menu === "display" ? null : "display")} type="button"><SlidersHorizontal size={18} /> Wyświetl opcje <CaretDown size={14} /></button>{menu === "display" && <MenuLayer className="tm-schedule-display-menu"><strong>Układ grafiku</strong><button className={grouping === "location" ? "is-selected" : ""} onClick={() => setGrouping("location")} role="menuitemradio" type="button"><MapPin size={17} /> Według lokalizacji {grouping === "location" && <Check size={16} />}</button><button className={grouping === "user" ? "is-selected" : ""} onClick={() => setGrouping("user")} role="menuitemradio" type="button"><UserCircle size={17} /> Według użytkowników {grouping === "user" && <Check size={16} />}</button><hr />{[["showSummary", "Podsumowanie godzin"], ["showProblems", "Pokaż problemy"], ["showEmpty", "Puste zasoby"], ["compact", "Widok kompaktowy"]].map(([key, label]) => <label key={key}><span>{label}</span><input className="tm-schedule-option-checkbox" checked={display[key]} onChange={() => setDisplay({ ...display, [key]: !display[key] })} type="checkbox" /></label>)}</MenuLayer>}</div>
+            <button aria-controls="workforceScheduleFilters" aria-expanded={filtersOpen} aria-label="Filtry grafiku" className="tm-schedule-filter-button" onClick={() => setFiltersOpen((value) => !value)} type="button"><Funnel size={17} /><span>Filtry</span></button>
             <div className="tm-schedule-nav-buttons"><button aria-label="Poprzedni okres" onClick={() => navigate(-1)} type="button"><CaretLeft size={18} /></button><button onClick={goToToday} type="button">Dzisiaj</button><button aria-label="Następny okres" onClick={() => navigate(1)} type="button"><CaretRight size={18} /></button></div>
             <label className="tm-schedule-view-select"><span className="tm-sr-only">Widok grafiku</span><select onChange={(event) => changeViewMode(event.target.value)} value={viewMode}><option value="day">Dzień</option><option value="week">Tydzień</option><option value="month">Miesiąc</option></select><CaretDown size={14} /></label>
             <button className="tm-schedule-date-button" onClick={() => changeViewMode("month")} type="button"><CalendarBlank size={17} /><span>{viewMode === "day" ? `${dateParts(selectedDay).day} ${dateParts(selectedDay).month} ${dateParts(selectedDay).year}` : viewMode === "month" ? `${dateParts(monthAnchor).month} ${dateParts(monthAnchor).year}` : rangeLabel(weekStart)}</span></button>
@@ -802,7 +812,7 @@ export function ScheduleContent({
           </div>
         </div>
 
-        {filtersOpen && <div className="tm-schedule-subtoolbar"><label><MagnifyingGlass size={17} /><input onChange={(event) => setLocalSearch(event.target.value)} placeholder="Szukaj zmian" value={localSearch} />{localSearch && <button aria-label="Wyczyść wyszukiwanie" onClick={() => setLocalSearch("")} type="button"><X size={15} /></button>}</label><div><label><Funnel size={16} /><span className="tm-sr-only">Filtr lokalizacji</span><select onChange={(event) => setLocationFilter(event.target.value)} value={locationFilter}><option value="all">Wszystkie lokalizacje</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label><UserCircle size={16} /><span className="tm-sr-only">Filtr użytkownika</span><select onChange={(event) => setUserFilter(event.target.value)} value={userFilter}><option value="all">Cały zespół</option>{users.map((user) => <option key={user.id} value={user.id}>{userName(user)}</option>)}</select></label></div></div>}
+        {filtersOpen && <div className="tm-schedule-subtoolbar" id="workforceScheduleFilters"><label><MagnifyingGlass size={17} /><input onChange={(event) => setLocalSearch(event.target.value)} placeholder="Szukaj zmian" value={localSearch} />{localSearch && <button aria-label="Wyczyść wyszukiwanie" onClick={() => setLocalSearch("")} type="button"><X size={15} /></button>}</label><div><label><Funnel size={16} /><span className="tm-sr-only">Filtr lokalizacji</span><select onChange={(event) => setLocationFilter(event.target.value)} value={locationFilter}><option value="all">Wszystkie lokalizacje</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label><Users size={16} /><span className="tm-sr-only">Filtr zespołu</span><select onChange={(event) => setWorkerTypeFilter(event.target.value)} value={workerTypeFilter}><option value="all">Wszystkie zespoły</option><option value="mobile">Zespół mobilny</option></select></label><label><UserCircle size={16} /><span className="tm-sr-only">Filtr użytkownika</span><select onChange={(event) => setUserFilter(event.target.value)} value={userFilter}><option value="all">Wszyscy pracownicy</option>{users.map((user) => <option key={user.id} value={user.id}>{userName(user)}</option>)}</select></label></div></div>}
 
         {!editingEnabled && <div className="tm-schedule-catalog-warning" role="status"><Info size={19} /><span><strong>Tryb podglądu.</strong> Twoja rola pozwala przeglądać Grafik bez wprowadzania zmian.</span></div>}
         {(!activeLocations.length || !users.some(isCatalogSelectable)) && <div className="tm-schedule-catalog-warning" role="status"><WarningCircle size={19} /><span><strong>Niepełny katalog</strong> {!activeLocations.length && !users.some(isCatalogSelectable) ? "Brakuje aktywnych obiektów i pracowników." : !activeLocations.length ? "Brakuje aktywnych obiektów." : "Brakuje aktywnych pracowników."} Grafik nie uzupełnia tych danych przykładami.</span></div>}
@@ -815,7 +825,7 @@ export function ScheduleContent({
         {display.showProblems && (conflicts.length > 0 || pendingRequests > 0) && <div className="tm-schedule-alert"><WarningCircle size={19} weight="fill" /><span><strong>{conflicts.length} {conflicts.length === 1 ? "problem" : "problemy"} w grafiku</strong> · {summary.openSlots} wolnych miejsc{requestsEnabled ? ` · ${pendingRequests} wnioski czekają` : ""}</span>{requestsEnabled && <button onClick={() => setOverlay("requests")} type="button">Sprawdź</button>}</div>}
 
         <div className={`tm-schedule-canvas ${display.compact ? "is-compact" : ""}`}>
-          {viewMode === "week" && <WeekGrid conflicts={conflicts} days={days} display={display} dragEnabled={dragEnabled && editingEnabled} editingEnabled={editingEnabled} grouping={grouping} locations={locations} onCellClick={openNewShift} onSearch={setLocalSearch} onShiftAction={handleShiftAction} onShiftDrop={handleShiftDrop} onShiftOpen={setEditorShift} onValidateShiftDrop={validateShiftDrop} preferredLocationId={locationFilter === "all" ? "" : locationFilter} searchValue={localSearch} shifts={currentShifts} todayIso={todayIso} users={users} />}
+          {viewMode === "week" && <WeekGrid conflicts={conflicts} days={days} display={display} dragEnabled={dragEnabled && editingEnabled} editingEnabled={editingEnabled} grouping={grouping} locations={locations} onCellClick={openNewShift} onSearch={setLocalSearch} onShiftAction={handleShiftAction} onShiftDrop={handleShiftDrop} onShiftOpen={setEditorShift} onValidateShiftDrop={validateShiftDrop} preferredLocationId={locationFilter === "all" ? "" : locationFilter} resourceUsers={resourceUsers} searchValue={localSearch} shifts={currentShifts} todayIso={todayIso} users={users} />}
           {viewMode === "day" && <DayAgenda conflicts={conflicts} day={selectedDay} editingEnabled={editingEnabled} locations={locations} onCellClick={openNewShift} onShiftAction={handleShiftAction} onShiftOpen={setEditorShift} shifts={visibleShifts} users={users} />}
           {viewMode === "month" && <MonthGrid locations={locations} monthDate={monthAnchor} onDayOpen={(day) => { setSelectedDay(day); setWeekStart(mondayFor(day)); setViewMode("day"); }} shifts={visibleShifts} todayIso={todayIso} />}
         </div>

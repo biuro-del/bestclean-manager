@@ -130,6 +130,98 @@ export function filterShifts(shifts, query, locationId = "all", userId = "all") 
   });
 }
 
+function filterValue(value) {
+  return String(value ?? "")
+    .trim()
+    .toLocaleLowerCase("pl")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replaceAll("ł", "l");
+}
+
+function isAllFilter(value) {
+  const normalized = filterValue(value);
+  return !normalized || normalized === "all";
+}
+
+function scheduleUserId(user = {}) {
+  return String(user.id ?? user.personId ?? "").trim();
+}
+
+function scheduleUserType(user = {}) {
+  return String(user.workerType ?? user.type ?? user.profileType ?? user.employeeType ?? user.staffType ?? "").trim();
+}
+
+function shiftAssigneeIds(shift = {}) {
+  const ids = Array.isArray(shift.assigneeIds)
+    ? shift.assigneeIds
+    : Array.isArray(shift.personIds) ? shift.personIds : [];
+  return ids.map((id) => String(id ?? "").trim()).filter(Boolean);
+}
+
+function matchesWorkerType(user, workerType) {
+  if (isAllFilter(workerType)) return true;
+  const expected = filterValue(workerType);
+  const actual = filterValue(scheduleUserType(user));
+  if (expected === "mobile" || expected === "mobile-team" || expected === "zespol mobilny") {
+    const canonicalActual = actual.replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+    return canonicalActual === "mobile" || canonicalActual === "mobile team" || canonicalActual === "zespol mobilny";
+  }
+  return Boolean(actual) && actual === expected;
+}
+
+export function filterShiftsByWorkerType(shifts, users, workerType = "all") {
+  const activeShifts = (Array.isArray(shifts) ? shifts : []).filter((shift) => !shift?.pendingDeletion);
+  if (isAllFilter(workerType)) return activeShifts;
+  const matchingUserIds = new Set(
+    (Array.isArray(users) ? users : [])
+      .filter((user) => matchesWorkerType(user, workerType))
+      .map(scheduleUserId)
+      .filter(Boolean),
+  );
+  return activeShifts.filter((shift) => shiftAssigneeIds(shift).some((id) => matchingUserIds.has(id)));
+}
+
+export function filterScheduleUsers(users, shifts, {
+  locationId = "all",
+  workerType = "all",
+  userId = "all",
+} = {}) {
+  const selectedLocationId = String(locationId ?? "").trim();
+  const selectedUserId = String(userId ?? "").trim();
+  const filterByLocation = !isAllFilter(selectedLocationId);
+  const filterByUser = !isAllFilter(selectedUserId);
+  const locationUserIds = filterByLocation
+    ? new Set(
+      (Array.isArray(shifts) ? shifts : [])
+        .filter((shift) => !shift?.pendingDeletion && String(shift?.locationId ?? "").trim() === selectedLocationId)
+        .flatMap(shiftAssigneeIds),
+    )
+    : null;
+
+  return (Array.isArray(users) ? users : []).filter((user) => {
+    const id = scheduleUserId(user);
+    if (!id) return false;
+    if (filterByUser && id !== selectedUserId) return false;
+    if (!matchesWorkerType(user, workerType)) return false;
+    return !locationUserIds || locationUserIds.has(id);
+  });
+}
+
+export function filterScheduleAssigneeUsers(users, assigneeIds, mobileOnly = false) {
+  const sourceUsers = Array.isArray(users) ? users : [];
+  if (!mobileOnly) return sourceUsers;
+  const selectedIds = new Set(
+    (Array.isArray(assigneeIds) ? assigneeIds : [])
+      .map((id) => String(id ?? "").trim())
+      .filter(Boolean),
+  );
+  return sourceUsers.filter((user) => {
+    const id = scheduleUserId(user);
+    return selectedIds.has(id) || matchesWorkerType(user, "mobile");
+  });
+}
+
 export function findConflicts(shifts, users, weeklyLimitMinutes = 40 * 60) {
   const conflicts = [];
   const active = shifts.filter((shift) => !shift.pendingDeletion);
