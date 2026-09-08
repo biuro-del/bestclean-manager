@@ -179,10 +179,13 @@ test('API wiring cannot fall back to the shared portal pool', () => {
   assert.doesNotMatch(wiring, /\n\s*connectDbClient,/)
 })
 
-test('App Hosting keeps Grafik dormant with isolated runtime secret references', () => {
+test('App Hosting enables only the isolated backend canary with runtime secret references', () => {
   assert.match(appHostingVariableBlock('VITE_WORKFORCE_SCHEDULE_MODE'), /value: disabled[\s\S]*- BUILD/)
+  assert.match(
+    appHostingVariableBlock('WORKFORCE_SCHEDULE_ENABLED'),
+    /value: "true"[\s\S]*- RUNTIME/,
+  )
   for (const name of [
-    'WORKFORCE_SCHEDULE_ENABLED',
     'WORKFORCE_SCHEDULE_DELIVERY_ENABLED',
     'WORKFORCE_SCHEDULE_NOTIFICATIONS_ENABLED',
     'WORKFORCE_SCHEDULE_DOWNSTREAM_ENABLED',
@@ -191,8 +194,11 @@ test('App Hosting keeps Grafik dormant with isolated runtime secret references',
   }
   assert.match(
     appHostingVariableBlock('WORKFORCE_SCHEDULE_ROLLOUT_MODE'),
-    /value: "OFF"[\s\S]*- RUNTIME/,
+    /value: "CANARY"[\s\S]*- RUNTIME/,
   )
+  const allowedOrganizationBlock = appHostingVariableBlock('WORKFORCE_SCHEDULE_ALLOWED_ORG_IDS')
+  assert.match(allowedOrganizationBlock, /^    value: bestclean\r?$/m)
+  assert.match(allowedOrganizationBlock, /availability:[\s\S]*- RUNTIME/)
   assert.match(
     appHostingVariableBlock('WORKFORCE_SCHEDULE_DB_AUTH_TYPE'),
     /value: PASSWORD[\s\S]*- RUNTIME/,

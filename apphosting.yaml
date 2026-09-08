@@ -167,14 +167,18 @@ env:
     availability:
       - RUNTIME
   # Dedicated Grafik credentials are isolated from the legacy portal pool.
-  # The feature remains dormant because every rollout and delivery flag below
-  # is fail-closed and the frontend build mode stays disabled.
+  # The backend canary is limited to one organization. Delivery remains
+  # internal-only and the frontend build mode stays disabled.
   - variable: WORKFORCE_SCHEDULE_ENABLED
-    value: "false"
+    value: "true"
     availability:
       - RUNTIME
   - variable: WORKFORCE_SCHEDULE_ROLLOUT_MODE
-    value: "OFF"
+    value: "CANARY"
+    availability:
+      - RUNTIME
+  - variable: WORKFORCE_SCHEDULE_ALLOWED_ORG_IDS
+    value: bestclean
     availability:
       - RUNTIME
   - variable: WORKFORCE_SCHEDULE_DELIVERY_ENABLED

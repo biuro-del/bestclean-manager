@@ -93,7 +93,7 @@ test('ALL wymaga jawnego trybu i nadal respektuje master oraz bezpieczne flagi',
   assert.equal(isWorkforceScheduleOrganizationAllowed(policy, '*'), false)
 })
 
-test('konfiguracja bazowa pozostaje jawnie OFF i nie zawiera produkcyjnej allowlisty', () => {
+test('konfiguracja produkcyjna ogranicza backend canary do jednej organizacji', () => {
   const appHosting = fs.readFileSync(path.join(root, 'apphosting.yaml'), 'utf8')
   const rootEnv = fs.readFileSync(path.join(root, '.env.example'), 'utf8')
   const webEnv = fs.readFileSync(path.join(root, 'web-app', '.env.example'), 'utf8')
@@ -104,9 +104,17 @@ test('konfiguracja bazowa pozostaje jawnie OFF i nie zawiera produkcyjnej allowl
 
   assert.match(
     appHosting,
-    /variable: WORKFORCE_SCHEDULE_ROLLOUT_MODE[\s\S]{0,100}value: "OFF"[\s\S]{0,100}- RUNTIME/,
+    /variable: WORKFORCE_SCHEDULE_ENABLED[\s\S]{0,100}value: "true"[\s\S]{0,100}- RUNTIME/,
   )
-  assert.doesNotMatch(appHosting, /variable: WORKFORCE_SCHEDULE_ALLOWED_ORG_IDS/)
+  assert.match(
+    appHosting,
+    /variable: WORKFORCE_SCHEDULE_ROLLOUT_MODE[\s\S]{0,100}value: "CANARY"[\s\S]{0,100}- RUNTIME/,
+  )
+  assert.match(
+    appHosting,
+    /variable: WORKFORCE_SCHEDULE_ALLOWED_ORG_IDS\r?\n\s+value: bestclean\r?\n\s+availability:\r?\n\s+- RUNTIME/,
+  )
+  assert.equal((appHosting.match(/variable: WORKFORCE_SCHEDULE_ALLOWED_ORG_IDS/g) || []).length, 1)
   assert.match(rootEnv, /^WORKFORCE_SCHEDULE_ROLLOUT_MODE=OFF$/m)
   assert.match(rootEnv, /^# WORKFORCE_SCHEDULE_ALLOWED_ORG_IDS=bestclean$/m)
   assert.match(webEnv, /^# WORKFORCE_SCHEDULE_ROLLOUT_MODE=OFF$/m)

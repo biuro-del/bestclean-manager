@@ -143,10 +143,10 @@ projektem i wymaga nowego kontraktu oraz jawnego włączenia efektu.
 - Grafik ma osobny pool i login `workforce_schedule_session`, zasilany wyłącznie
   przez `WORKFORCE_SCHEDULE_DB_USER` oraz `WORKFORCE_SCHEDULE_DB_PASS`. Nie
   korzysta z `DB_USER`, `DB_PASS` ani członkostwa `portal_app`.
-- Uśpiona konfiguracja `apphosting.yaml` celowo nie wskazuje jeszcze sekretów
-  loginu Grafiku. Referencje do nich wolno dodać dopiero w osobnym kandydacie
-  aktywacyjnym, po utworzeniu aktywnych wersji i nadaniu dostępu kontu runtime;
-  dzięki temu brak nowych sekretów nie blokuje wdrożeń niezwiązanych z Grafikiem.
+- `apphosting.yaml` wskazuje dedykowane sekrety loginu Grafiku wyłącznie jako
+  referencje runtime. Backendowy canary jest ograniczony dokładną allowlistą
+  organizacji, a frontend, dostarczanie, powiadomienia i integracje downstream
+  pozostają wyłączone.
 - Tryb logowania do bazy jest wymagany osobno jako
   `WORKFORCE_SCHEDULE_DB_AUTH_TYPE=PASSWORD`. Nie dziedziczy
   `CLOUD_SQL_AUTH_TYPE` ani `DB_AUTH_TYPE`; brak, `IAM` lub inna wartość
