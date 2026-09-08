@@ -41,6 +41,7 @@ test('Grafik jest wewnętrzną trasą bezpośrednio pod Pulpitem', () => {
   assert.equal(menu.slice(dashboardEnd, grafikStart).trim(), '')
   assert.equal(menu.slice(grafikEnd, eventsStart).trim(), '')
   assert.match(menu.slice(grafikStart, grafikEnd), /<span class="mi-label">Grafik<\/span>/)
+  assert.match(menu.slice(grafikStart, grafikEnd), /\shidden(?:\s|>)/)
   assert.doesNotMatch(menu.slice(grafikStart, grafikEnd), /href=|target=|Grafik \(demo\)/)
   assert.doesNotMatch(layout, new RegExp(retiredDemoUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.match(router, /workforceSchedule:\s*'view-workforceSchedule'/)

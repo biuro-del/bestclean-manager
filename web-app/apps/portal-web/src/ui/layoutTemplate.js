@@ -430,7 +430,7 @@ export const portalLayoutTemplate = `
             <span class="mi-ico" aria-hidden="true"><i class="ph ph-squares-four"></i></span>
             <span class="mi-label">Pulpit</span>
           </button>
-          <button class="menu-item" data-route="workforceSchedule" type="button">
+          <button class="menu-item" data-route="workforceSchedule" type="button" hidden>
             <span class="mi-ico" aria-hidden="true"><i class="ph ph-calendar-dots"></i></span>
             <span class="mi-label">Grafik</span>
           </button>
