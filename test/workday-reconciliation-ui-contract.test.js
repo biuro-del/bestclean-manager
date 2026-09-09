@@ -55,6 +55,35 @@ test('raport otwiera wspolny dialog i nie zapisuje zdarzen pojedynczo', () => {
   assert.doesNotMatch(workerDetailsBlock, /reportHistoryEditButtonHtml/)
 })
 
+test('historia raportu pokazuje osobne miejsce START i STOP', () => {
+  const source = read('web-app/apps/portal-web/src/features/reports/index.js')
+  const renderBlock = source.slice(
+    source.indexOf('function reportWorkerHistorySessionHtml'),
+    source.indexOf('function reportWorkerHistoryUnassignedHtml'),
+  )
+  const phaseMetaBlock = source.slice(
+    source.indexOf('function reportWorkerHistorySessionPhaseMeta'),
+    source.indexOf('function reportWorkerHistoryGeoButton'),
+  )
+  const gpsBlock = source.slice(
+    source.indexOf('function reportHistoryResolveDayGpsCoords'),
+    source.indexOf('function reportHistoryParseGeoPair'),
+  )
+
+  assert.doesNotMatch(renderBlock, /activities\[0\]\s*\?\?\s*session/)
+  assert.match(renderBlock, /reportWorkerHistorySessionPhaseMeta\(session, 'START'\)/)
+  assert.match(renderBlock, /reportWorkerHistorySessionPhaseMeta\(session, 'STOP'\)/)
+  assert.match(phaseMetaBlock, /rep-worker-code__place/)
+  assert.match(phaseMetaBlock, /rep-worker-code__location/)
+  assert.match(phaseMetaBlock, /Miejsce zamknięcia/)
+  assert.match(phaseMetaBlock, /Lokalizacja QR/)
+  assert.match(phaseMetaBlock, /stopRecoveredFromActivity/)
+  assert.match(phaseMetaBlock, /brak prawdziwego QR STOP/)
+  assert.match(gpsBlock, /workIntervalGpsCoordinates\(item, normalizedPhase/)
+  assert.match(gpsBlock, /phaseOnly:\s*normalizedPhase === 'stop'/)
+  assert.match(gpsBlock, /stopRecoveredFromActivity/)
+})
+
 test('raport pracownika sumuje tylko unie zamknietych par bez Date.now i obwiedni Workday', () => {
   const source = read('web-app/apps/portal-web/src/features/reports/index.js')
   const calculationBlock = source.slice(
@@ -184,6 +213,24 @@ test('dialog sesji zachowuje zwarty wyglad START i STOP z jednym lacznym czasem'
   assert.match(template, /id="waTimeCodesDone"[^>]*>Gotowe</)
   assert.match(style, /width:\s*min\(820px, calc\(100vw - 32px\)\)/)
   assert.match(style, /\.wa-time-code-item \.wa-time-code-controls\s*\{[\s\S]*grid-column:\s*2 \/ -1/)
+})
+
+test('dialog pokazuje jawnie kod i lokalizacje QR osobno dla START i STOP', () => {
+  const source = read('web-app/apps/portal-web/src/features/workers/account/index.js')
+  const renderBlock = source.slice(
+    source.indexOf('function reconciliationSessionMarkup'),
+    source.indexOf('function refreshWorkerAccountReconciliationControls'),
+  )
+
+  assert.match(renderBlock, /resolveWorkIntervalZoneSnapshot\(session, type, appState\.zones, \{ phaseOnly: true \}\)/)
+  assert.match(renderBlock, /<b>Kod QR:<\/b>/)
+  assert.match(renderBlock, /<b>Lokalizacja QR:<\/b>/)
+  assert.match(renderBlock, /workerAccountTimeCodeGpsIndicator\(code\)/)
+  assert.match(source, /workIntervalGpsCoordinates\(interval, code\.type, \{\s*phaseOnly: code\.type === 'STOP'/)
+  assert.match(source, /stopRecoveredFromActivity/)
+  assert.match(source, /Brak prawdziwego QR STOP/)
+  assert.match(source, /OFFICE_STOP_PROPOSAL/)
+  assert.match(source, /Zatwierdzenie w portalu \(bez skanu QR STOP\)/)
 })
 
 test('dialog pokazuje godziny START i STOP bez sekund', () => {

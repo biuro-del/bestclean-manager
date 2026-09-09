@@ -24,6 +24,7 @@ import {
   reportWorkerHistoryOpenState,
 } from './zestawienia/reportWorkerHistoryModel.js'
 import {
+  workIntervalGpsCoordinates,
   resolveWorkIntervalZoneSnapshot,
   workIntervalsTotalSeconds,
 } from '../workers/workIntervals.js'
@@ -1166,6 +1167,54 @@ export function createReportsFeature(ctx) {
     return { clientLabel, zoneLabel, qrCode, zoneDisplay, zoneSource: zoneSource || source }
   }
 
+  function reportWorkerHistorySessionPhaseMeta(session = {}, phase = 'START') {
+    const normalizedPhase = String(phase ?? '').trim().toUpperCase() === 'STOP' ? 'STOP' : 'START'
+    const placeLabel = normalizedPhase === 'STOP' ? 'Miejsce zamknięcia' : 'Miejsce rozpoczęcia'
+    if (normalizedPhase === 'STOP' && session?.stopRecoveredFromActivity === true) {
+      return {
+        placeLabel,
+        message: 'brak prawdziwego QR STOP — czas odzyskano z końca ostatniej aktywności',
+      }
+    }
+    const snapshot = resolveWorkIntervalZoneSnapshot(
+      session,
+      normalizedPhase,
+      appState.zones,
+      { phaseOnly: true },
+    )
+    const qrCode = String(snapshot?.qrCode ?? '').trim()
+    if (normalizedPhase === 'STOP' && qrCode.toUpperCase() === 'OFFICE_STOP_PROPOSAL') {
+      return {
+        placeLabel,
+        message: 'zatwierdzenie w portalu (bez skanu QR STOP)',
+      }
+    }
+    if (!qrCode) {
+      return {
+        placeLabel,
+        message: `brak zapisanego QR ${normalizedPhase}`,
+      }
+    }
+
+    return {
+      placeLabel,
+      clientLabel: reportHistoryResolveClientByZoneCode(qrCode, snapshot?.clientName || '-'),
+      zoneLabel: String(snapshot?.zoneName ?? '').trim() || 'Brak nazwy strefy',
+      qrCode,
+      locationLabel: String(snapshot?.location ?? '').trim() || 'Brak opisu lokalizacji',
+    }
+  }
+
+  function reportWorkerHistorySessionPhaseMetaHtml(meta = {}) {
+    if (meta?.message) {
+      return `<span class="rep-worker-code__place is-empty"><b>${escapeHtml(meta.placeLabel)}:</b> ${escapeHtml(meta.message)}</span>`
+    }
+    return `
+      <span class="rep-worker-code__place"><b>${escapeHtml(meta.placeLabel)}:</b> Klient: ${escapeHtml(meta.clientLabel)} · Strefa: ${escapeHtml(meta.zoneLabel)} · Kod QR: ${escapeHtml(meta.qrCode)}</span>
+      <span class="rep-worker-code__location"><b>Lokalizacja QR:</b> ${escapeHtml(meta.locationLabel)}</span>
+    `
+  }
+
   function reportWorkerHistoryGeoButton(source = {}, edge = 'start') {
     const value = reportHistoryResolveDayGpsCoords(source, edge)
     const parsed = reportHistoryParseGeoPair(value)
@@ -1203,8 +1252,8 @@ export function createReportsFeature(ctx) {
 
   function reportWorkerHistorySessionHtml(session = {}, index = 0, { missingStop = false } = {}) {
     const activities = Array.isArray(session?.activities) ? session.activities : []
-    const anchor = activities[0] ?? session
-    const meta = reportWorkerHistoryEntityMeta(anchor)
+    const startMeta = reportWorkerHistorySessionPhaseMeta(session, 'START')
+    const stopMeta = reportWorkerHistorySessionPhaseMeta(session, 'STOP')
     const sessionNumber = Number(session?.sessionNumber) || index + 1
     const isOpen = Boolean(session?.isOpen || !session?.endAt)
     const durationLabel = isOpen ? 'W toku' : durationSecondsToHms(session?.durationSec || 0)
@@ -1217,7 +1266,7 @@ export function createReportsFeature(ctx) {
             <div class="rep-worker-code__copy">
               <strong>START</strong>
               <small>Sesja ${escapeHtml(String(sessionNumber))}</small>
-              <span>Klient: ${escapeHtml(meta.clientLabel)} · Strefa: ${escapeHtml(meta.zoneDisplay)}</span>
+              ${reportWorkerHistorySessionPhaseMetaHtml(startMeta)}
             </div>
             <time>${escapeHtml(formatTime(session?.startAt) || '-')}</time>
             ${reportWorkerHistoryGeoButton(session, 'start')}
@@ -1228,10 +1277,12 @@ export function createReportsFeature(ctx) {
             <div class="rep-worker-code__copy">
               <strong>${isOpen ? missingStop ? 'BRAK STOP' : 'SESJA OTWARTA' : 'STOP'}</strong>
               <small>Sesja ${escapeHtml(String(sessionNumber))}</small>
-              <span>${isOpen ? missingStop ? 'Dzień wymaga uzupełnienia STOP' : 'Oczekiwanie na zakończenie dnia' : `Czas sesji: ${escapeHtml(durationLabel)}`}</span>
+              ${isOpen
+                ? `<span>${missingStop ? 'Dzień wymaga uzupełnienia STOP' : 'Oczekiwanie na zakończenie dnia'}</span>`
+                : `${reportWorkerHistorySessionPhaseMetaHtml(stopMeta)}<span class="rep-worker-code__duration">Czas sesji: ${escapeHtml(durationLabel)}</span>`}
             </div>
             <time>${escapeHtml(isOpen ? missingStop ? 'Brak STOP' : 'W toku' : formatTime(session?.endAt) || '-')}</time>
-            ${isOpen ? '' : reportWorkerHistoryGeoButton(session, 'stop')}
+            ${isOpen || session?.stopRecoveredFromActivity === true ? '' : reportWorkerHistoryGeoButton(session, 'stop')}
           </div>
         </div>
       </article>
@@ -1947,15 +1998,15 @@ export function createReportsFeature(ctx) {
 
   function reportHistoryResolveDayGpsCoords(item, phase) {
     const normalizedPhase = String(phase ?? '').trim().toLowerCase() === 'start' ? 'start' : 'stop'
-    const sources = [item?.dayGps, item?.gps, item?.dayComment, item?.comment]
-    for (const source of sources) {
-      const resolved = reportHistoryExtractGpsCoords(source, normalizedPhase)
-      if (resolved) {
-        return resolved
-      }
-    }
-
-    return '-'
+    if (normalizedPhase === 'stop' && item?.stopRecoveredFromActivity === true) return '-'
+    const stopObject = [item?.dayStopObject, item?.stopObject, item?.workdayStopObject]
+      .map((value) => String(value ?? '').trim())
+      .find(Boolean)
+    if (normalizedPhase === 'stop' && stopObject?.toUpperCase() === 'OFFICE_STOP_PROPOSAL') return '-'
+    const coords = workIntervalGpsCoordinates(item, normalizedPhase, {
+      phaseOnly: normalizedPhase === 'stop',
+    })
+    return coords ? `${coords.lat}, ${coords.lon}` : '-'
   }
 
   function reportHistoryParseGeoPair(value) {

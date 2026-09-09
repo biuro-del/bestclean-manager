@@ -2290,6 +2290,32 @@
   white-space:nowrap;
 }
 
+#portalRoot #view-reports .reports-modern .rep-worker-code__copy .rep-worker-code__place,
+#portalRoot #view-reports .reports-modern .rep-worker-code__copy .rep-worker-code__location{
+  overflow:visible;
+  line-height:1.35;
+  text-overflow:clip;
+  white-space:normal;
+}
+
+#portalRoot #view-reports .reports-modern .rep-worker-code__copy .rep-worker-code__place b,
+#portalRoot #view-reports .reports-modern .rep-worker-code__copy .rep-worker-code__location b{
+  color:#46566f;
+  font-weight:900;
+}
+
+#portalRoot #view-reports .reports-modern .rep-worker-code__copy .rep-worker-code__location{
+  color:#4f617b;
+}
+
+#portalRoot #view-reports .reports-modern .rep-worker-code__copy .rep-worker-code__place.is-empty{
+  color:#8a5a44;
+}
+
+#portalRoot #view-reports .reports-modern .rep-worker-code__copy .rep-worker-code__duration{
+  margin-top:1px;
+}
+
 #portalRoot #view-reports .reports-modern .rep-worker-code time{
   min-width:67px;
   padding:7px 10px;

@@ -2790,11 +2790,12 @@ export function createWorkerAccountFeature(ctx) {
     return { label: rawValue, className: 'is-default' }
   }
 
-  function workerAccountTimeCodeZoneIndicator(code = {}, index = 0) {
+  function workerAccountTimeCodeZoneIndicator(code = {}, index = 0, resolvedZoneSnapshot = null) {
     const interval = code?.interval ?? {}
-    const zoneSnapshot = resolveWorkIntervalZoneSnapshot(interval, code?.type, appState.zones)
-    const clientLabel = zoneSnapshot.clientName || workerAccountTimeIntervalClient(interval)
-    const zoneLabel = zoneSnapshot.zoneName || workerAccountTimeIntervalZone(interval)
+    const zoneSnapshot = resolvedZoneSnapshot ?? resolveWorkIntervalZoneSnapshot(interval, code?.type, appState.zones)
+    const isPhaseOnly = resolvedZoneSnapshot !== null
+    const clientLabel = zoneSnapshot.clientName || (isPhaseOnly ? 'Brak klienta' : workerAccountTimeIntervalClient(interval))
+    const zoneLabel = zoneSnapshot.zoneName || (isPhaseOnly ? 'Brak strefy' : workerAccountTimeIntervalZone(interval))
     const qrCode = workerAccountTimeIntervalInfoValue(zoneSnapshot.qrCode)
     const functionInfo = workerAccountTimeIntervalFunction({
       functionName: zoneSnapshot.functionName,
@@ -2828,7 +2829,14 @@ export function createWorkerAccountFeature(ctx) {
 
   function workerAccountTimeCodeGpsIndicator(code = {}) {
     const interval = code?.interval ?? {}
-    const coords = workIntervalGpsCoordinates(interval, code.type)
+    if (code?.type === 'STOP' && interval?.stopRecoveredFromActivity === true) return ''
+    const stopObject = [interval?.dayStopObject, interval?.stopObject, interval?.workdayStopObject]
+      .map((value) => String(value ?? '').trim())
+      .find(Boolean)
+    if (code?.type === 'STOP' && stopObject?.toUpperCase() === 'OFFICE_STOP_PROPOSAL') return ''
+    const coords = workIntervalGpsCoordinates(interval, code.type, {
+      phaseOnly: code.type === 'STOP',
+    })
     const locationRaw = String(interval?.lokalizacja ?? interval?.location ?? '').trim()
     const locationLabel = locationRaw && locationRaw !== '-' ? locationRaw : ''
     const hasGps = Boolean(coords)
@@ -4015,7 +4023,6 @@ export function createWorkerAccountFeature(ctx) {
     const collapsedCopy = sourceRecordCount > 1
       ? ` · scalono ${sourceRecordCount} ${sourceRecordCount >= 2 && sourceRecordCount <= 4 ? 'rekordy' : 'rekordów'}`
       : ''
-    const clientLabel = workerAccountTimeIntervalClient(session)
     const activeWorkdayId = String(appState.workerAccountReconciliationModel?.workdayId ?? '').trim()
     const sessionWorkdayId = String(session.workdayId ?? '').trim()
     const sessionBelongsToActiveWorkday = appState.workerAccountReconciliationModel?.isWorkTimeDay || !activeWorkdayId || !sessionWorkdayId || activeWorkdayId === sessionWorkdayId
@@ -4033,6 +4040,25 @@ export function createWorkerAccountFeature(ctx) {
       const showMissingStop = isMissingStop && !isCurrentOpenDay
       const isInvalid = !isMissingStop && session.isValid === false
       const code = { type, session: number, interval: session }
+      const stopRecoveredFromActivity = type === 'STOP' && session?.stopRecoveredFromActivity === true
+      const zoneSnapshot = stopRecoveredFromActivity
+        ? {}
+        : resolveWorkIntervalZoneSnapshot(session, type, appState.zones, { phaseOnly: true })
+      const officeStopProposal = type === 'STOP' && String(zoneSnapshot?.qrCode ?? '').trim().toUpperCase() === 'OFFICE_STOP_PROPOSAL'
+      const phaseClientLabel = zoneSnapshot.clientName || 'Brak klienta'
+      const qrCodeLabel = workerAccountTimeIntervalInfoValue(zoneSnapshot.qrCode)
+      const qrLocationLabel = workerAccountTimeIntervalInfoValue(zoneSnapshot.location)
+      let phaseLocationMarkup = `
+        <span><b>Klient:</b> ${escapeHtml(phaseClientLabel)}</span>
+        <span><b>Strefa:</b> ${workerAccountTimeCodeZoneIndicator(code, codeNumber, zoneSnapshot)}</span>
+        <span><b>Kod QR:</b> <span class="mono">${escapeHtml(qrCodeLabel)}</span></span>
+        <span><b>Lokalizacja QR:</b> ${escapeHtml(qrLocationLabel)}</span>
+      `
+      if (stopRecoveredFromActivity) {
+        phaseLocationMarkup = '<span><b>Miejsce zamknięcia:</b> Brak prawdziwego QR STOP — czas odzyskano z końca ostatniej aktywności.</span>'
+      } else if (officeStopProposal) {
+        phaseLocationMarkup = '<span><b>Miejsce zamknięcia:</b> Zatwierdzenie w portalu (bez skanu QR STOP).</span>'
+      }
       const markerIcon = isStart ? 'ph-sign-in' : 'ph-sign-out'
       const stateClasses = [
         isStart ? 'is-start' : 'is-stop',
@@ -4059,7 +4085,9 @@ export function createWorkerAccountFeature(ctx) {
           <span class="wa-time-code-copy">
             <strong>${type}</strong>
             <small>Sesja ${number}${collapsedCopy}${showMissingStop ? ' · brak zakończenia' : ''}</small>
-            <span class="wa-time-code-location"><span><b>Klient:</b> ${escapeHtml(clientLabel)}</span><span><b>Strefa:</b> ${workerAccountTimeCodeZoneIndicator(code, codeNumber)}</span></span>
+            <span class="wa-time-code-location">
+              ${phaseLocationMarkup}
+            </span>
           </span>
           <span class="wa-time-code-controls">
             ${timeMarkup}

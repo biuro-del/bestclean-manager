@@ -33,11 +33,20 @@ function workIntervalZoneCode(zone = {}) {
   return String(zone?.id ?? zone?.zoneId ?? zone?.qr ?? zone?.code ?? '').trim()
 }
 
-function workIntervalPhaseQrCandidates(interval = {}, codeType = 'START') {
+function workIntervalPhaseQrCandidates(interval = {}, codeType = 'START', options = {}) {
   const phase = String(codeType ?? '').trim().toUpperCase() === 'STOP' ? 'STOP' : 'START'
   const phaseCandidates = phase === 'STOP'
     ? [interval?.stopObject, interval?.workdayStopObject, interval?.stopQrCode, interval?.qrStopObject]
     : [interval?.startObject, interval?.workdayStartObject, interval?.startQrCode, interval?.qrStartObject]
+  const mappedDayCandidate = phase === 'STOP' ? interval?.dayStopObject : interval?.dayStartObject
+  const phaseLegacyCandidates = phase === 'START'
+    ? [interval?.workdayUtilityRoomId, interval?.utilityRoomId, interval?.roomId, interval?.zoneId]
+    : []
+  if (options?.phaseOnly === true) {
+    return [mappedDayCandidate, ...phaseCandidates, ...phaseLegacyCandidates]
+      .map((value) => String(value ?? '').trim())
+      .filter(Boolean)
+  }
   return [
     ...phaseCandidates,
     interval?.qrCode,
@@ -73,16 +82,19 @@ function fallbackWorkIntervalQrCode(candidates = []) {
 /**
  * Resolves the phase-specific QR code against the current zone catalog. The
  * catalog is authoritative for labels and function; START/STOP is never used
- * as a substitute for a missing zone function.
+ * as a substitute for a missing zone function. phaseOnly prevents a missing
+ * STOP scan from inheriting the START/shared zone metadata in audit UI.
  */
-export function resolveWorkIntervalZoneSnapshot(interval = {}, codeType = 'START', zones = []) {
+export function resolveWorkIntervalZoneSnapshot(interval = {}, codeType = 'START', zones = [], options = {}) {
   const phase = String(codeType ?? '').trim().toUpperCase() === 'STOP' ? 'STOP' : 'START'
-  const candidates = workIntervalPhaseQrCandidates(interval, phase)
-  const currentZone = (Array.isArray(zones) ? zones : []).find((zone) => {
-    const zoneCode = workIntervalZoneCode(zone)
-    return candidates.some((candidate) => workIntervalQrCandidateMatchesZone(candidate, zoneCode))
-  }) ?? null
+  const phaseOnly = options?.phaseOnly === true
+  const candidates = workIntervalPhaseQrCandidates(interval, phase, { phaseOnly })
+  const availableZones = Array.isArray(zones) ? zones : []
+  const currentZone = candidates.reduce((match, candidate) => match ?? availableZones.find((zone) => (
+    workIntervalQrCandidateMatchesZone(candidate, workIntervalZoneCode(zone))
+  )) ?? null, null)
   const qrCode = currentZone ? workIntervalZoneCode(currentZone) : fallbackWorkIntervalQrCode(candidates)
+  const intervalFallback = phaseOnly ? {} : interval
   const phaseFunction = phase === 'STOP'
     ? interval?.stopZoneFunction ?? interval?.stopFunction
     : interval?.startZoneFunction ?? interval?.startFunction
@@ -91,20 +103,22 @@ export function resolveWorkIntervalZoneSnapshot(interval = {}, codeType = 'START
     zone: currentZone,
     qrCode,
     clientName: String(
-      currentZone?.clientName ?? currentZone?.client?.name ?? interval?.clientName ??
-      interval?.klient ?? interval?.clientLabel ?? interval?.clientId ?? '',
+      currentZone?.clientName ?? currentZone?.client?.name ?? intervalFallback?.clientName ??
+      intervalFallback?.klient ?? intervalFallback?.clientLabel ?? intervalFallback?.clientId ?? '',
     ).trim(),
     functionName: String(
-      currentZone?.function ?? currentZone?.functionName ?? phaseFunction ?? interval?.functionName ??
-      interval?.zoneFunction ?? interval?.function ?? interval?.qrFunction ?? '',
+      currentZone?.function ?? currentZone?.functionName ?? phaseFunction ?? intervalFallback?.functionName ??
+      intervalFallback?.zoneFunction ?? intervalFallback?.function ?? intervalFallback?.qrFunction ?? '',
     ).trim(),
-    isSpecialZone: currentZone?.isSpecialZone === true || interval?.isSpecialZone === true,
+    isSpecialZone: currentZone?.isSpecialZone === true || intervalFallback?.isSpecialZone === true,
     location: String(
-      currentZone?.location ?? interval?.lokalizacja ?? interval?.location ?? interval?.zoneLocation ?? '',
+      currentZone?.location ?? intervalFallback?.lokalizacja ?? intervalFallback?.location ??
+      intervalFallback?.zoneLocation ?? '',
     ).trim(),
     zoneName: String(
-      currentZone?.name ?? currentZone?.zone ?? currentZone?.zoneName ?? interval?.zoneName ??
-      interval?.strefa ?? interval?.zoneLabel ?? interval?.zoneId ?? interval?.utilityRoomId ?? interval?.roomId ?? '',
+      currentZone?.name ?? currentZone?.zone ?? currentZone?.zoneName ?? intervalFallback?.zoneName ??
+      intervalFallback?.strefa ?? intervalFallback?.zoneLabel ?? intervalFallback?.zoneId ??
+      intervalFallback?.utilityRoomId ?? intervalFallback?.roomId ?? '',
     ).trim(),
   }
 }
@@ -140,7 +154,7 @@ function gpsPairFromValue(value) {
   return pairMatch ? normalizedGpsPair(pairMatch[1], pairMatch[2]) : null
 }
 
-function taggedGpsPair(value, phase) {
+function taggedGpsPair(value, phase, options = {}) {
   const raw = String(value ?? '').trim()
   if (!raw) return null
   const normalizedPhase = String(phase ?? '').trim().toUpperCase() === 'STOP' ? 'STOP' : 'START'
@@ -151,29 +165,39 @@ function taggedGpsPair(value, phase) {
   while (bracketMatch) {
     const body = String(bracketMatch[1] ?? '')
     const sourceMatch = body.match(/\b(?:src|source|phase)\s*=\s*["']?(START|STOP)/i)
-    entries.push({ phase: String(sourceMatch?.[1] ?? '').toUpperCase(), pair: gpsPairFromValue(body) })
+    const entryPhase = String(sourceMatch?.[1] ?? '').toUpperCase()
+    entries.push({
+      label: entryPhase ? `${entryPhase}_GPS` : 'GPS',
+      phase: entryPhase,
+      pair: gpsPairFromValue(body),
+    })
     bracketMatch = bracketRegex.exec(raw)
   }
 
-  const labeledRegex = /\b(?:CLEAN_)?(START|STOP)_GPS\b([^\r\n|]*)/gi
+  const labeledRegex = /\b((?:CLEAN_)?(START|STOP)_GPS)\b([^\r\n|]*)/gi
   let labeledMatch = labeledRegex.exec(raw)
   while (labeledMatch) {
     entries.push({
-      phase: String(labeledMatch[1] ?? '').toUpperCase(),
-      pair: gpsPairFromValue(labeledMatch[2]),
+      label: String(labeledMatch[1] ?? '').toUpperCase(),
+      phase: String(labeledMatch[2] ?? '').toUpperCase(),
+      pair: gpsPairFromValue(labeledMatch[3]),
     })
     labeledMatch = labeledRegex.exec(raw)
   }
 
+  const boundary = entries.find((entry) => entry.label === `${normalizedPhase}_GPS` && entry.pair)
+  if (boundary) return boundary.pair
   const matching = entries.find((entry) => entry.phase === normalizedPhase && entry.pair)
   if (matching) return matching.pair
+  if (options?.phaseOnly === true) return null
   const generic = entries.find((entry) => !entry.phase && entry.pair)
   if (generic) return generic.pair
   return entries.length ? null : gpsPairFromValue(raw)
 }
 
-export function workIntervalGpsCoordinates(interval = {}, codeType = 'START') {
+export function workIntervalGpsCoordinates(interval = {}, codeType = 'START', options = {}) {
   const phase = String(codeType ?? '').trim().toUpperCase() === 'STOP' ? 'STOP' : 'START'
+  const phaseOnly = options?.phaseOnly === true
   const phaseSources = phase === 'START'
     ? [interval?.startGps, interval?.startGPS, interval?.gpsStart, interval?.startLocationGps]
     : [interval?.stopGps, interval?.stopGPS, interval?.gpsStop, interval?.stopLocationGps]
@@ -185,10 +209,11 @@ export function workIntervalGpsCoordinates(interval = {}, codeType = 'START') {
 
   const sharedSources = [interval?.dayGps, interval?.gps, interval?.dayComment, interval?.comment]
   for (const source of sharedSources) {
-    const parsed = taggedGpsPair(source, phase)
+    const parsed = taggedGpsPair(source, phase, { phaseOnly })
     if (parsed) return parsed
   }
 
+  if (phaseOnly) return null
   return normalizedGpsPair(
     interval?.lat ?? interval?.latitude,
     interval?.lon ?? interval?.lng ?? interval?.longitude,
@@ -723,8 +748,16 @@ export function aggregateWorkSessions(workday = {}, events = [], options = {}) {
   attendanceSession.workdayId = String(workday?.workdayId ?? workday?.id ?? '').trim()
   attendanceSession.workerLogin = workdayWorkerLogin
   attendanceSession.workerName = String(workday?.workerName ?? '').trim()
-  attendanceSession.startObject = workday?.startObject ?? workday?.workdayStartObject ?? ''
-  attendanceSession.stopObject = workday?.stopObject ?? workday?.workdayStopObject ?? ''
+  attendanceSession.startObject = [
+    workday?.dayStartObject,
+    workday?.startObject,
+    workday?.workdayStartObject,
+  ].map((value) => String(value ?? '').trim()).find(Boolean) ?? ''
+  attendanceSession.stopObject = [
+    workday?.dayStopObject,
+    workday?.stopObject,
+    workday?.workdayStopObject,
+  ].map((value) => String(value ?? '').trim()).find(Boolean) ?? ''
   attendanceSession.stopZoneFunction = String(
     workday?.stopZoneFunction ?? workday?.stopFunction ?? '',
   ).trim()

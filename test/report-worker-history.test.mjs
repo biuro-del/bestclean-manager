@@ -105,6 +105,44 @@ test('zdarzenie jest przypisane do sesji po linkedWorkdayId i nie zmienia czasu 
   assert.equal(day.unassignedActivities.length, 0)
 })
 
+test('sesja raportu zachowuje osobne QR START i STOP niezależnie od CLEAN', () => {
+  const [day] = buildReportWorkerHistoryDays({
+    workdays: [{
+      ...workday('WD-QR', '2026-08-25T06:00:00.000Z', '2026-08-25T12:00:00.000Z'),
+      dayStartObject: 'BC-START',
+      dayStopObject: 'BC-STOP',
+    }],
+    events: [{
+      eventId: 'EV-CLEAN',
+      linkedWorkdayId: 'WD-QR',
+      workerLogin: 'anna@example.com',
+      eventType: 'CLEAN',
+      zoneId: 'BC-CLEAN',
+      startAt: '2026-08-25T07:00:00.000Z',
+      endAt: '2026-08-25T08:00:00.000Z',
+    }],
+  })
+
+  assert.equal(day.sessions[0].startObject, 'BC-START')
+  assert.equal(day.sessions[0].stopObject, 'BC-STOP')
+  assert.equal(day.sessions[0].activities[0].zoneId, 'BC-CLEAN')
+})
+
+test('puste pola day QR nie zasłaniają właściwych pól START i STOP', () => {
+  const [day] = buildReportWorkerHistoryDays({
+    workdays: [{
+      ...workday('WD-QR-FALLBACK', '2026-08-25T06:00:00.000Z', '2026-08-25T12:00:00.000Z'),
+      dayStartObject: '',
+      dayStopObject: '',
+      startObject: 'BC-START',
+      stopObject: 'BC-STOP',
+    }],
+  })
+
+  assert.equal(day.sessions[0].startObject, 'BC-START')
+  assert.equal(day.sessions[0].stopObject, 'BC-STOP')
+})
+
 test('aktywność bez Workday trafia do grupy Poza sesją', () => {
   const [day] = buildReportWorkerHistoryDays({
     events: [{

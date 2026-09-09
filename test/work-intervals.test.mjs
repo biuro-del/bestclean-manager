@@ -262,6 +262,59 @@ test('resolves separate GPS coordinates for START and STOP codes', () => {
   assert.equal(workIntervalGpsCoordinates({ dayGps: 'brak' }, 'START'), null)
 })
 
+test('phase-only STOP GPS never borrows the generic or START position', () => {
+  assert.equal(
+    workIntervalGpsCoordinates(
+      { dayGps: 'START_GPS lat=52.2297 lon=21.0122' },
+      'STOP',
+      { phaseOnly: true },
+    ),
+    null,
+  )
+  assert.equal(
+    workIntervalGpsCoordinates(
+      { gps: '[[GPS lat=52.2297 lng=21.0122]]' },
+      'STOP',
+      { phaseOnly: true },
+    ),
+    null,
+  )
+  assert.deepEqual(
+    workIntervalGpsCoordinates(
+      { dayGps: 'STOP_GPS lat=52.2301 lon=21.0134' },
+      'STOP',
+      { phaseOnly: true },
+    ),
+    { lat: '52.2301', lon: '21.0134' },
+  )
+  assert.deepEqual(
+    workIntervalGpsCoordinates(
+      { stopGps: '52.2301, 21.0134' },
+      'STOP',
+      { phaseOnly: true },
+    ),
+    { lat: '52.2301', lon: '21.0134' },
+  )
+})
+
+test('workday boundary GPS wins over CLEAN GPS for the same phase', () => {
+  const dayGps = [
+    'CLEAN_START_GPS lat=50.1000 lon=18.1000',
+    'START_GPS lat=50.2000 lon=18.2000',
+    'CLEAN_STOP_GPS lat=50.3000 lon=18.3000',
+    'STOP_GPS lat=50.4000 lon=18.4000',
+  ].join(' | ')
+
+  assert.deepEqual(
+    workIntervalGpsCoordinates({ dayGps }, 'START', { phaseOnly: true }),
+    { lat: '50.2', lon: '18.2' },
+  )
+  assert.deepEqual(
+    workIntervalGpsCoordinates({ dayGps }, 'STOP', { phaseOnly: true }),
+    { lat: '50.4', lon: '18.4' },
+  )
+})
+
 test('hides technical GPS payloads without removing a user comment', () => {
   assert.equal(
     workIntervalVisibleComment('Sprawdzono wejście | [[GPS lat=49.917776 lng=18.48361 acc=15 ts=2026-07-21T17:06:00Z]]'),
@@ -484,6 +537,7 @@ test('frontend recovers a CLEAN code misclassified as attendance STOP through th
   assert.equal(accounting.closedSessionsSec, 2 * 3600 + 22 * 60 + 54)
   assert.equal(accounting.workIntervals[0].recordedEndAt, '2026-08-01T16:04:00.000Z')
   assert.equal(accounting.workIntervals[0].endAt, '2026-08-01T18:26:00.000Z')
+  assert.equal(accounting.workIntervals[0].stopRecoveredFromActivity, true)
   assert.equal(accounting.integrityIssues.some((entry) => entry.code === 'ACTIVITY_OUTSIDE_SESSION'), false)
   assert.equal(accounting.integrityState, WORKDAY_INTEGRITY_STATES.COMPLETE)
 })
@@ -506,6 +560,83 @@ test('history resolves STOP phase metadata from the current zone catalog without
   assert.equal(snapshot.zoneName, 'WC / Prysznic')
   assert.equal(snapshot.functionName, 'clean (spoza listy)')
   assert.equal(snapshot.clientName, 'GAPR')
+})
+
+test('history prioritizes the phase QR over shared fallbacks regardless of zone catalog order', () => {
+  const interval = {
+    startObject: 'BC-START',
+    stopObject: 'BC-STOP',
+    zoneId: 'BC-START',
+  }
+  const zones = [
+    { id: 'BC-START', name: 'Wejscie A', location: 'Drzwi frontowe' },
+    { id: 'BC-STOP', name: 'Wyjscie B', location: 'Brama tylna' },
+  ]
+
+  const startSnapshot = resolveWorkIntervalZoneSnapshot(interval, 'START', zones)
+  const stopSnapshot = resolveWorkIntervalZoneSnapshot(interval, 'STOP', zones)
+
+  assert.equal(startSnapshot.qrCode, 'BC-START')
+  assert.equal(startSnapshot.location, 'Drzwi frontowe')
+  assert.equal(stopSnapshot.qrCode, 'BC-STOP')
+  assert.equal(stopSnapshot.location, 'Brama tylna')
+})
+
+test('phase-only STOP metadata never borrows the START QR or a generic location', () => {
+  const interval = {
+    startObject: 'BC-START',
+    zoneId: 'BC-START',
+    utilityRoomId: 'BC-START',
+    location: 'Drzwi frontowe',
+  }
+  const zones = [
+    { id: 'BC-START', name: 'Wejscie A', location: 'Drzwi frontowe' },
+  ]
+
+  const startSnapshot = resolveWorkIntervalZoneSnapshot(interval, 'START', zones, { phaseOnly: true })
+  const stopSnapshot = resolveWorkIntervalZoneSnapshot(interval, 'STOP', zones, { phaseOnly: true })
+
+  assert.equal(startSnapshot.qrCode, 'BC-START')
+  assert.equal(startSnapshot.location, 'Drzwi frontowe')
+  assert.equal(stopSnapshot.qrCode, '')
+  assert.equal(stopSnapshot.location, '')
+  assert.equal(stopSnapshot.zoneName, '')
+})
+
+test('phase-only history resolves mapped day START and STOP QR independently', () => {
+  const interval = {
+    dayStartObject: 'BC-START',
+    dayStopObject: 'BC-STOP',
+    zoneId: 'BC-CLEAN',
+    location: 'Lokalizacja CLEAN',
+  }
+  const zones = [
+    { id: 'BC-CLEAN', location: 'Lokalizacja CLEAN' },
+    { id: 'BC-STOP', location: 'Wyjście tylne' },
+    { id: 'BC-START', location: 'Wejście główne' },
+  ]
+
+  const start = resolveWorkIntervalZoneSnapshot(interval, 'START', zones, { phaseOnly: true })
+  const stop = resolveWorkIntervalZoneSnapshot(interval, 'STOP', zones, { phaseOnly: true })
+
+  assert.equal(start.qrCode, 'BC-START')
+  assert.equal(start.location, 'Wejście główne')
+  assert.equal(stop.qrCode, 'BC-STOP')
+  assert.equal(stop.location, 'Wyjście tylne')
+})
+
+test('activity metadata keeps its own QR instead of the mapped Workday START QR', () => {
+  const snapshot = resolveWorkIntervalZoneSnapshot({
+    dayStartObject: 'BC-WORKDAY-START',
+    startObject: 'BC-CLEAN',
+    zoneId: 'BC-CLEAN',
+  }, 'START', [
+    { id: 'BC-WORKDAY-START', location: 'Wejście do pracy' },
+    { id: 'BC-CLEAN', location: 'Pomieszczenie sprzątania' },
+  ])
+
+  assert.equal(snapshot.qrCode, 'BC-CLEAN')
+  assert.equal(snapshot.location, 'Pomieszczenie sprzątania')
 })
 
 test('profile and evidence exports use the closed Workday even when an activity is open', async () => {
