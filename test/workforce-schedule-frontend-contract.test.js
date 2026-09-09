@@ -127,6 +127,29 @@ test("kopiowanie tygodnia jest jedną operacją serwera bez optymistycznego dopi
   assert.match(transportSource, /sendCommand\(orgId, 'COPY_WEEK', payload, optionsValue\)/);
 });
 
+test("powtarzające się zmiany są tworzone jednym atomowym wywołaniem backendu", async () => {
+  const hostSource = await readFile(path.join(moduleRoot, "index.js"), "utf8");
+  const componentSource = await readFile(path.join(moduleRoot, "ScheduleContent.jsx"), "utf8");
+  const contractSource = await readFile(path.join(moduleRoot, "scheduleContract.js"), "utf8");
+  const serviceSource = await readFile(path.resolve(moduleRoot, "..", "..", "services", "workforceScheduleService.js"), "utf8");
+  const transportSource = await readFile(path.resolve(moduleRoot, "..", "..", "services", "workforceScheduleTransport.js"), "utf8");
+  const saveStart = componentSource.indexOf('  const saveShift = async (form) => {');
+  const deleteStart = componentSource.indexOf('  const deleteShift = async', saveStart);
+  const saveSource = componentSource.slice(saveStart, deleteStart);
+
+  assert.match(contractSource, /"onRecurringShiftsCreate"/);
+  assert.match(saveSource, /await runMutation\("onRecurringShiftsCreate", \{ publishNow, recurrence, shift: values \}\)/);
+  assert.match(saveSource, /if \(!saved\) return/);
+  assert.match(saveSource, /saved\.shifts/);
+  assert.doesNotMatch(saveSource, /Promise\.all|\.forEach\([^)]*onShiftCreate|onShiftCreate[^\n]*onShiftCreate/);
+  assert.match(hostSource, /onRecurringShiftsCreate:\s*\(payload\)\s*=>\s*runWrite\(\(\)\s*=>\s*createRecurringShifts\(payload\)\)/);
+  assert.match(hostSource, /service\.createRecurringWorkforceScheduleShifts\(orgId, payload, \{ idempotencyKey \}\)/);
+  assert.match(hostSource, /normalizeWorkforceScheduleRecurringShiftsReceipt\(response\?\.recurrence/);
+  assert.match(serviceSource, /createRecurringWorkforceScheduleShifts = transport\.createRecurringShifts/);
+  assert.match(transportSource, /'CREATE_RECURRING_SHIFTS'/);
+  assert.match(transportSource, /sendCommand\(orgId, 'CREATE_RECURRING_SHIFTS', payload, optionsValue\)/);
+});
+
 test("konfiguracja i zapis ignorują wyniki starej sesji", async () => {
   const hostSource = await readFile(path.join(moduleRoot, "index.js"), "utf8");
   const configureStart = hostSource.indexOf("  async function configure()")

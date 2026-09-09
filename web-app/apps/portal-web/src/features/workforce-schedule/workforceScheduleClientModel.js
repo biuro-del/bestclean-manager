@@ -1,4 +1,5 @@
 import { dirtyShifts } from './scheduleModel.js'
+import { expandRecurrenceDraftDates, normalizeRecurrenceDraft } from './recurrenceModel.js'
 
 function text(value) {
   return String(value ?? '').trim()
@@ -171,6 +172,104 @@ export function normalizeWorkforceScheduleWeekCopyReceipt(receipt, expected = {}
     targetTo,
     createdCount: created.length,
     created,
+  }
+}
+
+export function buildWorkforceScheduleRecurringShiftsPayload(shift = {}, recurrence = {}) {
+  if (positiveInteger(shift.version) > 0 || text(shift.shiftId || shift.id)) {
+    const error = new Error('Powtarzanie można ustawić podczas tworzenia nowej zmiany.')
+    error.code = 'WORKFORCE_SCHEDULE_RECURRENCE_CREATE_ONLY'
+    throw error
+  }
+  const payload = buildWorkforceScheduleShiftPayload({ ...shift, id: '', shiftId: '', version: 0 })
+  const normalized = normalizeRecurrenceDraft(recurrence, payload.date)
+  expandRecurrenceDraftDates(normalized, payload.date)
+  const normalizedPattern = normalized.monthlyPattern
+    ? { ...normalized.monthlyPattern, type: normalized.monthlyPattern.kind }
+    : null
+  if (normalizedPattern) delete normalizedPattern.kind
+  return {
+    shift: payload,
+    recurrence: {
+      frequency: normalized.frequency,
+      interval: normalized.interval,
+      ...(normalized.weekdays ? { weekdays: normalized.weekdays } : {}),
+      ...(normalizedPattern ? { pattern: normalizedPattern } : {}),
+      ends: normalized.ends.mode === 'COUNT'
+        ? { type: 'COUNT', count: normalized.ends.count }
+        : { type: 'UNTIL', until: normalized.ends.until },
+    },
+  }
+}
+
+export function normalizeWorkforceScheduleRecurringShiftsReceipt(receipt, expected = {}) {
+  if (!exactKeys(receipt, ['created', 'createdCount', 'from', 'orgId', 'to'])) return null
+  const orgId = text(expected.orgId)
+  let payload
+  try {
+    payload = buildWorkforceScheduleRecurringShiftsPayload(expected.shift, expected.recurrence)
+  } catch {
+    return null
+  }
+  let expectedDates
+  try {
+    expectedDates = expandRecurrenceDraftDates(expected.recurrence, payload.shift.date)
+  } catch {
+    return null
+  }
+  if (
+    !orgId
+    || text(receipt.orgId) !== orgId
+    || !Array.isArray(receipt.created)
+    || !Number.isSafeInteger(receipt.createdCount)
+    || receipt.createdCount < 1
+    || receipt.createdCount > 366
+    || receipt.createdCount !== receipt.created.length
+    || receipt.createdCount !== expectedDates.length
+  ) return null
+
+  const ids = new Set()
+  const dates = new Set()
+  let previousDate = ''
+  const created = []
+  const shifts = []
+  for (const [index, item] of receipt.created.entries()) {
+    if (!exactKeys(item, ['date', 'revision', 'shiftId', 'version'])) return null
+    const shiftId = text(item.shiftId)
+    const date = text(item.date)
+    if (
+      !shiftId
+      || ids.has(shiftId)
+      || !addIsoDays(date, 0)
+      || date !== expectedDates[index]
+      || dates.has(date)
+      || (previousDate && date <= previousDate)
+      || positiveInteger(item.revision) !== 1
+      || positiveInteger(item.version) !== 1
+    ) return null
+    ids.add(shiftId)
+    dates.add(date)
+    previousDate = date
+    created.push({ shiftId, date, revision: 1, version: 1 })
+    shifts.push(normalizeWorkforceScheduleShift({
+      ...payload.shift,
+      shiftId,
+      date,
+      revision: 1,
+      version: 1,
+      publishedRevision: null,
+      status: 'DRAFT',
+      pendingDeletion: false,
+    }))
+  }
+  if (text(receipt.from) !== created[0]?.date || text(receipt.to) !== created.at(-1)?.date) return null
+  return {
+    orgId,
+    from: created[0].date,
+    to: created.at(-1).date,
+    createdCount: created.length,
+    created,
+    shifts,
   }
 }
 

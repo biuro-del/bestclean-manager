@@ -11,6 +11,7 @@ import {
 } from './scheduleContract.js'
 import {
   assertWorkforceScheduleSelectableReferences,
+  buildWorkforceScheduleRecurringShiftsPayload,
   buildWorkforceScheduleWeekCopyPayload,
   buildWorkforceScheduleShiftPayload,
   formatWorkforceScheduleWarning,
@@ -19,6 +20,7 @@ import {
   normalizeWorkforceScheduleBootstrap,
   normalizeWorkforceScheduleSettings,
   normalizeWorkforceScheduleShift,
+  normalizeWorkforceScheduleRecurringShiftsReceipt,
   normalizeWorkforceScheduleWeekCopyReceipt,
   workforceScheduleCatalogConflictsFromError,
   workforceSchedulePublicationCandidates,
@@ -230,6 +232,7 @@ export function createWorkforceScheduleFeature(ctx = {}) {
         void refresh({ forceRefresh: true, range, syncCatalogs: false })
       },
       onSchedulePublish: (payload) => runWrite(() => publish(payload)),
+      onRecurringShiftsCreate: (payload) => runWrite(() => createRecurringShifts(payload)),
       onShiftCreate: (payload) => runWrite(() => saveShift(payload)),
       onShiftDelete: (payload) => runWrite(() => archiveShift(payload)),
       onShiftMove: (payload) => runWrite(() => saveShift(payload)),
@@ -597,6 +600,28 @@ export function createWorkforceScheduleFeature(ctx = {}) {
       throw error
     }
     return savedShift
+  }
+
+  async function createRecurringShifts({ shift, recurrence }) {
+    const orgId = currentOrgId()
+    assertWorkforceScheduleSelectableReferences(shift, state.snapshot)
+    const payload = buildWorkforceScheduleRecurringShiftsPayload(shift, recurrence)
+    return runIdempotent('create-recurring-shifts', { orgId, payload }, (idempotencyKey) => (
+      service.createRecurringWorkforceScheduleShifts(orgId, payload, { idempotencyKey })
+    ), (response) => {
+      const receipt = normalizeWorkforceScheduleRecurringShiftsReceipt(response?.recurrence, {
+        orgId,
+        recurrence,
+        shift,
+      })
+      if (!receipt) {
+        const error = new Error('Serwer nie zwrócił pełnego potwierdzenia utworzenia powtarzających się zmian. Odśwież Grafik przed kolejną operacją.')
+        error.code = 'WORKFORCE_SCHEDULE_INVALID_RECURRENCE_RESPONSE'
+        error.retryWithSameIdempotencyKey = true
+        throw error
+      }
+      return receipt
+    })
   }
 
   async function copyWeek({ sourceShifts = [], sourceWeekStart = '' } = {}) {

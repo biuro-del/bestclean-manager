@@ -18,6 +18,35 @@ const copyWeekBody = (payload = {}) => ({
   },
 })
 
+const recurringBody = (overrides = {}) => ({
+  type: 'CREATE_RECURRING_SHIFTS',
+  orgId: 'bestclean',
+  idempotencyKey: 'recurrence-1',
+  effects: noEffects(),
+  payload: {
+    shift: {
+      expectedVersion: 0,
+      title: 'Zmiana poranna',
+      date: '2026-03-23',
+      startTime: '07:00',
+      endTime: '15:00',
+      breakMinutes: 30,
+      requiredHeadcount: 1,
+      locationId: 'location-1',
+      notes: 'Otworz magazyn',
+      personIds: ['person-1'],
+      instructions: ['Odprawa'],
+    },
+    recurrence: {
+      frequency: 'WEEKLY',
+      interval: 1,
+      weekdays: [1],
+      ends: { type: 'COUNT', count: 3 },
+    },
+    ...overrides,
+  },
+})
+
 const sourceShift = (overrides = {}) => ({
   shiftId: 'shift-source-1',
   version: 2,
@@ -698,6 +727,90 @@ test('idempotentny replay COPY_WEEK nie czyta ponownie zrodla ani nie tworzy kop
   assert.deepEqual(f.responses[0].payload.copy, storedResponse.copy)
   assert.equal(f.calls.some(([name]) => name === 'lockWeekCopySource'), false)
   assert.equal(f.calls.some(([name]) => name === 'assertWeekCopyTargetEmpty'), false)
+  assert.equal(f.calls.some(([name]) => name === 'copyShifts'), false)
+  assert.equal(f.calls.some(([name]) => name === 'audit'), false)
+})
+
+test('CREATE_RECURRING_SHIFTS zapisuje wszystkie wystąpienia atomowo i przelicza DST osobno', async () => {
+  const f = fixture({ body: recurringBody() })
+
+  await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
+
+  assert.equal(f.errors.length, 0)
+  const copyCalls = f.calls.filter(([name]) => name === 'copyShifts')
+  assert.equal(copyCalls.length, 1)
+  const copies = copyCalls[0][1].copies
+  assert.deepEqual(copies.map((copy) => copy.shift.date), ['2026-03-23', '2026-03-30', '2026-04-06'])
+  assert.deepEqual(copies.map((copy) => copy.shift.startsAt), [
+    '2026-03-23T06:00:00.000Z',
+    '2026-03-30T05:00:00.000Z',
+    '2026-04-06T05:00:00.000Z',
+  ])
+  assert.deepEqual(copies.map((copy) => copy.shiftId), ['wss_id-1', 'wss_id-2', 'wss_id-3'])
+  assert.deepEqual(f.responses[0].payload.recurrence, {
+    orgId: 'bestclean',
+    from: '2026-03-23',
+    to: '2026-04-06',
+    createdCount: 3,
+    created: [
+      { shiftId: 'wss_id-1', date: '2026-03-23', revision: 1, version: 1 },
+      { shiftId: 'wss_id-2', date: '2026-03-30', revision: 1, version: 1 },
+      { shiftId: 'wss_id-3', date: '2026-04-06', revision: 1, version: 1 },
+    ],
+  })
+  const audit = f.calls.find(([name]) => name === 'audit')[1]
+  assert.equal(audit.entityType, 'SHIFT_RECURRENCE')
+  assert.equal(audit.entityId, 'wss_id-1')
+  assert.equal(audit.action, 'CREATED')
+  assert.ok(f.calls.findIndex(([name]) => name === 'copyShifts') < f.calls.findIndex(([name]) => name === 'audit'))
+})
+
+test('CREATE_RECURRING_SHIFTS odrzuca nieprawidłową regułę przed zapisem', async () => {
+  const f = fixture({ body: recurringBody({
+    recurrence: { frequency: 'WEEKLY', interval: 31, weekdays: [1], ends: { type: 'COUNT', count: 3 } },
+  }) })
+
+  await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
+
+  assert.equal(f.errors[0].code, 'WORKFORCE_SCHEDULE_INVALID_RECURRENCE')
+  assert.equal(f.calls.some(([name]) => name === 'connect'), false)
+  assert.equal(f.calls.some(([name]) => name === 'copyShifts'), false)
+})
+
+test('błąd zbiorczego zapisu powtarzania wycofuje całą transakcję bez audytu i receipt', async () => {
+  const f = fixture({ body: recurringBody(), copyShiftsError: new Error('batch insert failed') })
+
+  await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
+
+  assert.equal(f.responses.length, 0)
+  assert.equal(f.errors[0].status, 500)
+  assert.equal(f.calls.some(([name]) => name === 'audit'), false)
+  assert.equal(f.calls.some(([name]) => name === 'complete'), false)
+  assert.equal(f.calls.some(([name, sql]) => name === 'sql' && sql === 'rollback'), true)
+})
+
+test('idempotentny replay powtarzania nie generuje ani nie zapisuje wystąpień ponownie', async () => {
+  const recurrence = {
+    orgId: 'bestclean',
+    from: '2026-03-23',
+    to: '2026-04-06',
+    createdCount: 3,
+    created: [
+      { shiftId: 'wss-existing-1', date: '2026-03-23', revision: 1, version: 1 },
+      { shiftId: 'wss-existing-2', date: '2026-03-30', revision: 1, version: 1 },
+      { shiftId: 'wss-existing-3', date: '2026-04-06', revision: 1, version: 1 },
+    ],
+  }
+  const f = fixture({
+    body: recurringBody(),
+    claim: { replay: true, response: { ok: true, recurrence } },
+  })
+
+  await f.api.handle({ method: 'POST' }, {}, new URL('http://localhost/api/portal/workforce-schedule/commands'))
+
+  assert.equal(f.errors.length, 0)
+  assert.equal(f.responses[0].payload.idempotent, true)
+  assert.deepEqual(f.responses[0].payload.recurrence, recurrence)
   assert.equal(f.calls.some(([name]) => name === 'copyShifts'), false)
   assert.equal(f.calls.some(([name]) => name === 'audit'), false)
 })

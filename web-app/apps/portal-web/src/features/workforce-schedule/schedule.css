@@ -1755,6 +1755,188 @@
   font-weight: 700;
 }
 
+.tm-schedule-recurrence {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  color: #344358;
+  background: #f8fafc;
+  border: 1px solid #dbe4ea;
+  border-radius: 10px;
+}
+
+.tm-schedule-recurrence-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tm-schedule-recurrence-heading > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tm-schedule-recurrence-heading strong { color: #27364a; font-size: 13px; }
+.tm-schedule-recurrence-heading small,
+.tm-schedule-recurrence-note { color: #738195; font-size: 10px; font-weight: 600; line-height: 1.45; }
+
+.tm-schedule-recurrence-toggle {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  background: #fff;
+  border: 1px solid #d4dee6;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.tm-schedule-shift-drawer .tm-schedule-form-grid .tm-schedule-recurrence-toggle input[type="checkbox"],
+.tm-schedule-shift-drawer .tm-schedule-form-grid .tm-schedule-recurrence-ending input[type="radio"] {
+  width: 18px !important;
+  min-width: 18px !important;
+  max-width: 18px !important;
+  height: 18px !important;
+  min-height: 18px !important;
+  max-height: 18px !important;
+  margin: 0;
+  padding: 0 !important;
+  accent-color: #238cee;
+}
+
+.tm-schedule-recurrence-settings { display: flex; flex-direction: column; gap: 13px; }
+.tm-schedule-recurrence-settings fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.tm-schedule-recurrence-settings legend,
+.tm-schedule-recurrence-settings > label > span:first-child {
+  margin-bottom: 7px;
+  color: #536174;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tm-schedule-recurrence-frequency {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.tm-schedule-recurrence-frequency button,
+.tm-schedule-recurrence-weekdays button {
+  min-height: 42px;
+  padding: 0 8px;
+  color: #536174;
+  background: #fff;
+  border: 1px solid #d4dee6;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.tm-schedule-recurrence-frequency button.is-active,
+.tm-schedule-recurrence-weekdays button.is-active {
+  color: #126fc7;
+  background: #eaf5ff;
+  border-color: #238cee;
+  box-shadow: inset 0 0 0 1px #238cee;
+}
+
+.tm-schedule-recurrence-interval {
+  display: grid;
+  grid-template-columns: auto 72px 1fr;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tm-schedule-form-grid .tm-schedule-recurrence-interval input[type="number"] {
+  width: 72px;
+  min-height: 40px;
+}
+
+.tm-schedule-recurrence-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(40px, 1fr));
+  gap: 6px;
+}
+
+.tm-schedule-recurrence-settings > label { display: flex; flex-direction: column; gap: 0; }
+.tm-schedule-recurrence-settings > label select { min-height: 42px; }
+
+.tm-schedule-recurrence-ending {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tm-schedule-recurrence-ending-option {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  background: #fff;
+  border: 1px solid #d4dee6;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tm-schedule-recurrence-ending-option > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.tm-schedule-form-grid .tm-schedule-recurrence-ending input[type="number"] {
+  width: 58px;
+  min-width: 58px;
+  min-height: 34px;
+  padding: 5px 7px;
+}
+
+.tm-schedule-form-grid .tm-schedule-recurrence-ending input[type="date"] {
+  min-width: 128px;
+  min-height: 34px;
+  padding: 5px 7px;
+}
+
+.tm-schedule-recurrence-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 9px 10px;
+  color: #1b609c;
+  background: #eaf5ff;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.tm-schedule-recurrence-summary svg { flex: 0 0 auto; margin-top: 1px; }
+.tm-schedule-recurrence-error { margin: 0; color: #b42318; font-size: 11px; font-weight: 800; }
+
+.tm-schedule-recurrence button:focus-visible,
+.tm-schedule-recurrence input:focus-visible,
+.tm-schedule-recurrence select:focus-visible {
+  outline: 2px solid #1e7ee8;
+  outline-offset: 2px;
+}
+
 .tm-schedule-shift-facts {
   display: flex;
   flex-wrap: wrap;
@@ -2555,4 +2737,14 @@
     margin: 0;
     padding: 28px 20px;
   }
+
+  .tm-schedule-recurrence-heading { align-items: flex-start; }
+  .tm-schedule-recurrence-ending { grid-template-columns: 1fr; }
+  .tm-schedule-form-grid .tm-schedule-recurrence-ending input[type="date"] { min-width: 0; }
+}
+
+@media (max-width: 400px) {
+  .tm-schedule-recurrence-frequency { grid-template-columns: 1fr; }
+  .tm-schedule-recurrence-weekdays { grid-template-columns: repeat(4, minmax(40px, 1fr)); }
+  .tm-schedule-recurrence-heading { flex-direction: column; }
 }

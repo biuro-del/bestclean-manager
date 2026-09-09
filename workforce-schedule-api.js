@@ -10,11 +10,13 @@ const {
   normalizeCommand,
   normalizeIanaTimeZone,
   normalizePublication,
+  normalizeRecurringShifts,
   normalizeShiftInput,
   normalizeWeekCopy,
   parseDateRange,
   text,
 } = require('./workforce-schedule-policy')
+const { expandRecurrenceDates } = require('./workforce-schedule-recurrence')
 const { createWorkforceScheduleRepository } = require('./workforce-schedule-repository')
 
 const WORKFORCE_SCHEDULE_BASE_PATH = '/api/portal/workforce-schedule'
@@ -430,6 +432,41 @@ function createWorkforceScheduleApi(dependencies = {}) {
         entityId: `${command.orgId}:${copy.targetFrom}`,
         action: 'COPIED',
         response: { copy: receipt },
+      }
+    }
+    if (command.type === 'CREATE_RECURRING_SHIFTS') {
+      const settings = await repository.readSettings(command.orgId)
+      if (!settings?.timeZone) {
+        throw apiError(409, 'WORKFORCE_SCHEDULE_TIME_ZONE_REQUIRED', 'Najpierw ustaw jawną strefę czasową Grafiku.')
+      }
+      const recurring = normalizeRecurringShifts(payload)
+      const dates = expandRecurrenceDates(recurring.shift.date, recurring.recurrence)
+      if (!dates.length) {
+        throw apiError(409, 'WORKFORCE_SCHEDULE_RECURRENCE_EMPTY', 'Reguła powtarzania nie tworzy żadnej zmiany.')
+      }
+      const copies = dates.map((date) => ({
+        sourceShiftId: '',
+        shiftId: `wss_${createId()}`,
+        shift: normalizeShiftInput({
+          ...recurring.shift,
+          shiftId: '',
+          expectedVersion: 0,
+          date,
+        }, settings.timeZone),
+      }))
+      const created = await repository.copyShifts({ orgId: command.orgId, actorUid: identity.uid, copies })
+      const receipt = {
+        orgId: command.orgId,
+        from: created[0].date,
+        to: created.at(-1).date,
+        createdCount: created.length,
+        created: created.map(({ shiftId, date, revision, version }) => ({ shiftId, date, revision, version })),
+      }
+      return {
+        entityType: 'SHIFT_RECURRENCE',
+        entityId: created[0].shiftId,
+        action: 'CREATED',
+        response: { recurrence: receipt },
       }
     }
     if (command.type === 'ARCHIVE_SHIFT') {

@@ -4,6 +4,7 @@ const WORKFORCE_SCHEDULE_PATH = '/portal/workforce-schedule'
 const WRITE_COMMANDS = new Set([
   'ARCHIVE_SHIFT',
   'COPY_WEEK',
+  'CREATE_RECURRING_SHIFTS',
   'SET_CONFIGURATION',
   'SYNC_CATALOGS',
   'UPSERT_SHIFT',
@@ -402,6 +403,9 @@ export function createWorkforceScheduleTransport(options = {}) {
     ),
     copyWeek: (orgId, payload, optionsValue) => (
       sendCommand(orgId, 'COPY_WEEK', payload, optionsValue)
+    ),
+    createRecurringShifts: (orgId, payload, optionsValue) => (
+      sendCommand(orgId, 'CREATE_RECURRING_SHIFTS', payload, optionsValue)
     ),
     fetchBootstrap,
     publish,

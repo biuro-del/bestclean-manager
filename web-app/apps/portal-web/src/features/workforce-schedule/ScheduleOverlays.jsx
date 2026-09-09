@@ -19,6 +19,13 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { filterScheduleAssigneeUsers, formatDuration, getShiftMinutes } from "./scheduleModel.js";
+import {
+  createDefaultRecurrence,
+  expandRecurrenceDraftDates,
+  normalizeRecurrenceDraft,
+  recurrenceSummary,
+  RECURRENCE_WEEKDAYS,
+} from "./recurrenceModel.js";
 
 const FOCUSABLE = "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex='-1'])";
 
@@ -96,6 +103,28 @@ function isCatalogSelectable(item) {
   return item?.selectable !== false;
 }
 
+const MONTHLY_ORDINALS = Object.freeze([
+  [1, { feminine: "Pierwsza", masculine: "Pierwszy" }],
+  [2, { feminine: "Druga", masculine: "Drugi" }],
+  [3, { feminine: "Trzecia", masculine: "Trzeci" }],
+  [-1, { feminine: "Ostatnia", masculine: "Ostatni" }],
+]);
+const WEEKDAY_NAMES = Object.freeze(["poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"]);
+const FEMININE_WEEKDAYS = new Set([2, 5, 6]);
+
+function monthlyPatternValue(pattern = {}) {
+  if (pattern.kind === "LAST_DAY") return "LAST_DAY";
+  if (pattern.kind === "NTH_WEEKDAY") return `NTH_WEEKDAY:${pattern.ordinal}:${pattern.weekday}`;
+  return `DAY_OF_MONTH:${pattern.day || 1}`;
+}
+
+function monthlyPatternFromValue(value) {
+  const [kind, first, second] = String(value).split(":");
+  if (kind === "LAST_DAY") return { kind };
+  if (kind === "NTH_WEEKDAY") return { kind, ordinal: Number(first), weekday: Number(second) };
+  return { kind: "DAY_OF_MONTH", day: Number(first) || 1 };
+}
+
 export function ShiftDrawer({ busy = false, deliveryDisabled = true, initialShift, locations, onClose, onDelete, onSave, templates, templatesEnabled = false, todayIso, users }) {
   const titleId = useId();
   const mobileFilterStatusId = useId();
@@ -115,6 +144,8 @@ export function ShiftDrawer({ busy = false, deliveryDisabled = true, initialShif
     tasks: initialShift?.tasks || [],
   }));
   const [taskDraft, setTaskDraft] = useState("");
+  const [recurrence, setRecurrence] = useState(() => createDefaultRecurrence(initialShift?.date || todayIso));
+  const [recurrenceError, setRecurrenceError] = useState("");
   const [mobileAssigneesOnly, setMobileAssigneesOnly] = useState(false);
   const mobileFilterRef = useRef(null);
   const mobileUsers = useMemo(() => filterScheduleAssigneeUsers(users, [], true), [users]);
@@ -136,7 +167,30 @@ export function ShiftDrawer({ busy = false, deliveryDisabled = true, initialShif
     }));
     if (restoreFilterFocus) window.requestAnimationFrame(() => mobileFilterRef.current?.focus());
   };
-  const save = (publishNow = false) => onSave({ ...form, publishNow });
+  const normalizedRecurrence = useMemo(() => {
+    if (!isNew || !recurrence.enabled) return null;
+    try {
+      const normalized = normalizeRecurrenceDraft(recurrence, form.date);
+      expandRecurrenceDraftDates(normalized, form.date);
+      return normalized;
+    } catch {
+      return null;
+    }
+  }, [form.date, isNew, recurrence]);
+  const save = (publishNow = false) => {
+    let recurrenceRule = null;
+    if (isNew && recurrence.enabled) {
+      try {
+        recurrenceRule = normalizeRecurrenceDraft(recurrence, form.date);
+        expandRecurrenceDraftDates(recurrenceRule, form.date);
+        setRecurrenceError("");
+      } catch (error) {
+        setRecurrenceError(error?.message || "Sprawdź ustawienia powtarzania.");
+        return;
+      }
+    }
+    return onSave({ ...form, publishNow, recurrence: recurrenceRule });
+  };
 
   return (
     <PortalDialog className="tm-schedule-shift-drawer" closeLocked={busy} labelledBy={titleId} onClose={onClose} side>
@@ -156,7 +210,17 @@ export function ShiftDrawer({ busy = false, deliveryDisabled = true, initialShif
         {tab === "details" && (
           <div className="tm-schedule-form-grid">
             <label className="is-wide">Tytuł zmiany<input onChange={(e) => setForm({ ...form, title: e.target.value })} value={form.title} /></label>
-            <label>Data<input onChange={(e) => setForm({ ...form, date: e.target.value })} type="date" value={form.date} /></label>
+            <label>Data<input onChange={(e) => {
+              const date = e.target.value;
+              setForm({ ...form, date });
+              setRecurrenceError("");
+              if (!recurrence.enabled && date) {
+                try { setRecurrence(createDefaultRecurrence(date)); } catch { /* native date validation owns the empty state */ }
+              }
+              else if (recurrence.ends.mode === "UNTIL" && recurrence.ends.until < date) {
+                setRecurrence((current) => ({ ...current, ends: { ...current.ends, until: date } }));
+              }
+            }} type="date" value={form.date} /></label>
             <label>Lokalizacja<select onChange={(e) => setForm({ ...form, locationId: e.target.value })} value={form.locationId}>{locations.map((location) => <option disabled={!isCatalogSelectable(location)} key={location.id} value={location.id}>{location.name}{isCatalogSelectable(location) ? "" : " — Nieaktywny"}</option>)}</select></label>
             <label>Od<input onChange={(e) => setForm({ ...form, startTime: e.target.value })} type="time" value={form.startTime} /></label>
             <label>Do<input onChange={(e) => setForm({ ...form, endTime: e.target.value })} type="time" value={form.endTime} /></label>
@@ -178,6 +242,25 @@ export function ShiftDrawer({ busy = false, deliveryDisabled = true, initialShif
               {!visibleUsers.length && <p className="tm-schedule-assignee-empty">Brak osób w zespole mobilnym.</p>}
             </fieldset>
             <label className="is-wide">Notatka<textarea onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Dodaj informacje dla zespołu" rows="4" value={form.notes} /></label>
+            {isNew && <section className="tm-schedule-recurrence is-wide">
+              <div className="tm-schedule-recurrence-heading">
+                <div><strong>Powtarzanie</strong><small>Utwórz kilka niezależnych szkiców tej samej zmiany.</small></div>
+                <label className="tm-schedule-recurrence-toggle"><input checked={recurrence.enabled} disabled={busy} onChange={(event) => { setRecurrence((current) => ({ ...current, enabled: event.target.checked })); setRecurrenceError(""); }} role="switch" type="checkbox" /><span>{recurrence.enabled ? "Włączone" : "Wyłączone"}</span></label>
+              </div>
+              {recurrence.enabled && <div className="tm-schedule-recurrence-settings">
+                <fieldset><legend>Częstotliwość</legend><div className="tm-schedule-recurrence-frequency">{[["DAILY", "Codziennie"], ["WEEKLY", "Co tydzień"], ["MONTHLY", "Co miesiąc"]].map(([value, label]) => <button aria-pressed={recurrence.frequency === value} className={recurrence.frequency === value ? "is-active" : ""} disabled={busy} key={value} onClick={() => { setRecurrence((current) => ({ ...current, frequency: value })); setRecurrenceError(""); }} type="button">{label}</button>)}</div></fieldset>
+                <label className="tm-schedule-recurrence-interval"><span>Powtarzaj co</span><input disabled={busy} max="30" min="1" onChange={(event) => { setRecurrence((current) => ({ ...current, interval: event.target.value })); setRecurrenceError(""); }} type="number" value={recurrence.interval} /><span>{recurrence.frequency === "DAILY" ? "dni" : recurrence.frequency === "MONTHLY" ? "miesięcy" : "tygodni"}</span></label>
+                {recurrence.frequency === "WEEKLY" && <fieldset><legend>Dni tygodnia</legend><div className="tm-schedule-recurrence-weekdays">{RECURRENCE_WEEKDAYS.map((label, index) => { const weekday = index + 1; const selected = recurrence.weekdays.includes(weekday); return <button aria-label={WEEKDAY_NAMES[index]} aria-pressed={selected} className={selected ? "is-active" : ""} disabled={busy} key={weekday} onClick={() => { setRecurrence((current) => ({ ...current, weekdays: selected ? current.weekdays.filter((item) => item !== weekday) : [...current.weekdays, weekday].sort((a, b) => a - b) })); setRecurrenceError(""); }} type="button">{label.slice(0, 1).toUpperCase()}</button>; })}</div></fieldset>}
+                {recurrence.frequency === "MONTHLY" && <label><span>W każdym miesiącu</span><select disabled={busy} onChange={(event) => { setRecurrence((current) => ({ ...current, monthlyPattern: monthlyPatternFromValue(event.target.value) })); setRecurrenceError(""); }} value={monthlyPatternValue(recurrence.monthlyPattern)}><optgroup label="Dzień miesiąca">{Array.from({ length: 31 }, (_, index) => <option key={index + 1} value={`DAY_OF_MONTH:${index + 1}`}>{index + 1}. dzień miesiąca</option>)}</optgroup><option value="LAST_DAY">Ostatni dzień miesiąca</option><optgroup label="Dzień tygodnia">{MONTHLY_ORDINALS.flatMap(([ordinal, ordinalLabel]) => WEEKDAY_NAMES.map((weekday, index) => <option key={`${ordinal}:${index + 1}`} value={`NTH_WEEKDAY:${ordinal}:${index + 1}`}>{ordinalLabel[FEMININE_WEEKDAYS.has(index) ? "feminine" : "masculine"]} {weekday} miesiąca</option>))}</optgroup></select></label>}
+                <fieldset><legend>Zakończenie</legend><div className="tm-schedule-recurrence-ending">
+                  <div className="tm-schedule-recurrence-ending-option"><label><input checked={recurrence.ends.mode === "COUNT"} disabled={busy} name="scheduleRecurrenceEnd" onChange={() => { setRecurrence((current) => ({ ...current, ends: { mode: "COUNT", count: current.ends.count || 5 } })); setRecurrenceError(""); }} type="radio" /><span>Po</span></label><input aria-label="Liczba wystąpień" disabled={busy || recurrence.ends.mode !== "COUNT"} max="366" min="1" onChange={(event) => { setRecurrence((current) => ({ ...current, ends: { mode: "COUNT", count: event.target.value } })); setRecurrenceError(""); }} type="number" value={recurrence.ends.count || 5} /><span>wystąpieniach</span></div>
+                  <div className="tm-schedule-recurrence-ending-option"><label><input checked={recurrence.ends.mode === "UNTIL"} disabled={busy} name="scheduleRecurrenceEnd" onChange={() => { setRecurrence((current) => ({ ...current, ends: { mode: "UNTIL", until: current.ends.until || form.date } })); setRecurrenceError(""); }} type="radio" /><span>Dnia</span></label><input aria-label="Data zakończenia powtarzania" disabled={busy || recurrence.ends.mode !== "UNTIL"} min={form.date} onChange={(event) => { setRecurrence((current) => ({ ...current, ends: { mode: "UNTIL", until: event.target.value } })); setRecurrenceError(""); }} type="date" value={recurrence.ends.until || form.date} /></div>
+                </div></fieldset>
+                {normalizedRecurrence && <p className="tm-schedule-recurrence-summary"><CalendarBlank size={17} /> {recurrenceSummary(normalizedRecurrence)}</p>}
+                {recurrenceError && <p className="tm-schedule-recurrence-error" role="alert">{recurrenceError}</p>}
+                <small className="tm-schedule-recurrence-note">Późniejsza edycja dotyczy pojedynczej zmiany. Grafik nie wysyła tych danych do aplikacji pracownika.</small>
+              </div>}
+            </section>}
             <div className="tm-schedule-shift-facts is-wide"><span><Clock size={17} /> {formatDuration(getShiftMinutes(form))} pracy</span><span><Users size={17} /> {form.assigneeIds.length}/{form.requiredHeadcount} obsady</span><span><Bell size={17} /> {deliveryDisabled ? "Bez wysyłki do pracowników" : "Powiadomienie po publikacji"}</span></div>
           </div>
         )}

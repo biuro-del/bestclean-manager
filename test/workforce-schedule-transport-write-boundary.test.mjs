@@ -64,15 +64,19 @@ test('jawne komendy zapisu trafiają tylko do commands i zawsze wyłączają efe
     sourceWeekStart: '2026-09-07',
     expectedVersions: [{ shiftId: 'shift-1', version: 1 }],
   })
+  await f.transport.createRecurringShifts('bestclean', {
+    shift: { date: '2026-09-07' },
+    recurrence: { frequency: 'DAILY', interval: 1, ends: { type: 'COUNT', count: 2 } },
+  })
 
-  assert.equal(f.calls.length, 5)
+  assert.equal(f.calls.length, 6)
   assert.deepEqual(
     f.calls.map(({ url }) => url),
-    Array(5).fill('https://portal.example.test/root/api/portal/workforce-schedule/commands'),
+    Array(6).fill('https://portal.example.test/root/api/portal/workforce-schedule/commands'),
   )
   assert.deepEqual(
     f.calls.map(({ init }) => JSON.parse(init.body).type),
-    ['SET_CONFIGURATION', 'SYNC_CATALOGS', 'UPSERT_SHIFT', 'ARCHIVE_SHIFT', 'COPY_WEEK'],
+    ['SET_CONFIGURATION', 'SYNC_CATALOGS', 'UPSERT_SHIFT', 'ARCHIVE_SHIFT', 'COPY_WEEK', 'CREATE_RECURRING_SHIFTS'],
   )
   for (const { init } of f.calls) {
     const body = JSON.parse(init.body)
@@ -80,6 +84,25 @@ test('jawne komendy zapisu trafiają tylko do commands i zawsze wyłączają efe
     assert.equal(body.orgId, 'bestclean')
     assert.deepEqual(body.effects, effectsDisabled)
   }
+})
+
+test('powtarzanie jest jednym commandem i zachowuje jeden klucz idempotencji', async () => {
+  const f = await fixture()
+  const payload = {
+    shift: { date: '2026-09-07', title: 'Zmiana' },
+    recurrence: { frequency: 'WEEKLY', interval: 1, weekdays: [1, 3], ends: { type: 'COUNT', count: 8 } },
+  }
+
+  await f.transport.createRecurringShifts('bestclean', payload, { idempotencyKey: 'recurrence-operation-1' })
+
+  assert.equal(f.calls.length, 1)
+  assert.deepEqual(JSON.parse(f.calls[0].init.body), {
+    type: 'CREATE_RECURRING_SHIFTS',
+    orgId: 'bestclean',
+    idempotencyKey: 'recurrence-operation-1',
+    effects: effectsDisabled,
+    payload,
+  })
 })
 
 test('COPY_WEEK wysyła jeden atomowy command z wersjami źródeł i bez efektów zewnętrznych', async () => {

@@ -2,6 +2,7 @@ const EMPTY_LIST = Object.freeze([]);
 
 export const WORKFORCE_SCHEDULE_ADAPTER_METHODS = Object.freeze([
   "onShiftCreate",
+  "onRecurringShiftsCreate",
   "onShiftUpdate",
   "onShiftDelete",
   "onShiftMove",

@@ -75,6 +75,7 @@ export { WORKFORCE_SCHEDULE_EFFECTS }
 
 export const archiveWorkforceScheduleShift = transport.archiveShift
 export const copyWorkforceScheduleWeek = transport.copyWeek
+export const createRecurringWorkforceScheduleShifts = transport.createRecurringShifts
 export const fetchWorkforceScheduleBootstrap = transport.fetchBootstrap
 export const publishWorkforceSchedule = transport.publish
 export const setWorkforceScheduleConfiguration = transport.setConfiguration

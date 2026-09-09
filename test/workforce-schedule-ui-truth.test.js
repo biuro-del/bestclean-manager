@@ -139,6 +139,27 @@ test("edytor zmiany i dialog zatwierdzenia nie mogą zamknąć się podczas muta
   assert.match(overlays, /<PortalDialog[^>]*className="tm-schedule-settings-dialog"[^>]*closeLocked=\{locked\}|<PortalDialog[^>]*closeLocked=\{locked\}[^>]*className="tm-schedule-settings-dialog"/);
 });
 
+test("nowa zmiana ma kompletne i dostępne ustawienia powtarzania", async () => {
+  const { overlays, styles } = await readScheduleSources();
+
+  assert.match(overlays, /\{isNew && <section className="tm-schedule-recurrence is-wide">/);
+  assert.match(overlays, /Powtarzanie/);
+  assert.match(overlays, /Codziennie/);
+  assert.match(overlays, /Co tydzień/);
+  assert.match(overlays, /Co miesiąc/);
+  assert.match(overlays, /max="30" min="1"/);
+  assert.match(overlays, /RECURRENCE_WEEKDAYS\.map/);
+  assert.match(overlays, /DAY_OF_MONTH/);
+  assert.match(overlays, /NTH_WEEKDAY/);
+  assert.match(overlays, /LAST_DAY/);
+  assert.match(overlays, /name="scheduleRecurrenceEnd"[\s\S]{0,260}type="radio"/);
+  assert.match(overlays, /aria-label="Liczba wystąpień"/);
+  assert.match(overlays, /aria-label="Data zakończenia powtarzania"/);
+  assert.match(overlays, /role="alert">\{recurrenceError\}/);
+  assert.match(styles, /\.tm-schedule-recurrence-weekdays\s*\{[\s\S]{0,180}grid-template-columns:\s*repeat\(7/);
+  assert.match(styles, /@media \(max-width: 400px\)[\s\S]{0,360}\.tm-schedule-recurrence-weekdays\s*\{[^}]*repeat\(4/);
+});
+
 test("licznik zasobu w widoku tygodnia obejmuje wszystkie siedem dni", async () => {
   const { content } = await readScheduleSources();
 

@@ -297,8 +297,36 @@ function normalizeCommand(value) {
   const idempotencyKey = identifier(value?.idempotencyKey, 'idempotencyKey', 128)
   const effects = normalizeInternalEffects(value?.effects)
   const payload = value?.payload && typeof value.payload === 'object' && !Array.isArray(value.payload) ? value.payload : {}
-  const canonicalPayload = type === 'COPY_WEEK' ? normalizeWeekCopy(payload) : payload
+  const canonicalPayload = type === 'COPY_WEEK'
+    ? normalizeWeekCopy(payload)
+    : type === 'CREATE_RECURRING_SHIFTS'
+      ? normalizeRecurringShifts(payload)
+      : payload
   return { type, orgId, idempotencyKey, effects, payload, requestHash: stableHash({ type, orgId, effects, payload: canonicalPayload }) }
+}
+
+function normalizeRecurringShifts(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : null
+  if (!source) {
+    fail(400, 'WORKFORCE_SCHEDULE_INVALID_RECURRENCE', 'Komenda powtarzania musi zawierać zmianę i regułę.', { field: 'payload' })
+  }
+  const unknownKeys = Object.keys(source).filter((key) => !['recurrence', 'shift'].includes(key)).sort()
+  if (unknownKeys.length) {
+    fail(400, 'WORKFORCE_SCHEDULE_INVALID_RECURRENCE', 'Komenda powtarzania zawiera nieobsługiwane pola.', { fields: unknownKeys })
+  }
+  if (!source.shift || typeof source.shift !== 'object' || Array.isArray(source.shift)) {
+    fail(400, 'WORKFORCE_SCHEDULE_INVALID_RECURRENCE', 'Komenda powtarzania nie zawiera prawidłowej zmiany.', { field: 'shift' })
+  }
+  if (text(source.shift.shiftId) || Number(source.shift.expectedVersion) !== 0) {
+    fail(400, 'WORKFORCE_SCHEDULE_RECURRENCE_CREATE_ONLY', 'Powtarzanie można ustawić wyłącznie dla nowej zmiany.', { field: 'shift' })
+  }
+  // Required lazily to keep the shared WorkforceScheduleError class as the
+  // single public error type without introducing a module-initialization cycle.
+  const { normalizeRecurrenceRule } = require('./workforce-schedule-recurrence')
+  return {
+    shift: source.shift,
+    recurrence: normalizeRecurrenceRule(source.recurrence, source.shift.date),
+  }
 }
 
 function normalizePublication(value) {
@@ -408,6 +436,7 @@ module.exports = {
   normalizeIanaTimeZone,
   normalizeInternalEffects,
   normalizePublication,
+  normalizeRecurringShifts,
   normalizeShiftInput,
   normalizeWeekCopy,
   optionalText,

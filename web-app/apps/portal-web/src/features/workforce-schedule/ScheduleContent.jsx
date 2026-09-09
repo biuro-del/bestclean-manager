@@ -373,6 +373,7 @@ export function ScheduleContent({
   onRequestResolve,
   onSchedulePublish,
   onSettingsSave,
+  onRecurringShiftsCreate,
   onShiftCreate,
   onShiftDelete,
   onShiftMove,
@@ -408,6 +409,7 @@ export function ScheduleContent({
   const activeLocations = useMemo(() => locations.filter(isCatalogSelectable), [locations]);
   const adapter = useMemo(() => createWorkforceScheduleAdapter({
     ...providedAdapter,
+    ...(onRecurringShiftsCreate ? { onRecurringShiftsCreate } : {}),
     ...(onShiftCreate ? { onShiftCreate } : {}),
     ...(onShiftUpdate ? { onShiftUpdate } : {}),
     ...(onWeekCopy ? { onWeekCopy } : {}),
@@ -419,7 +421,7 @@ export function ScheduleContent({
     ...(onExport ? { onExport } : {}),
     ...(onRangeChange ? { onRangeChange } : {}),
     ...(onSnapshotChange ? { onSnapshotChange } : {}),
-  }), [providedAdapter, onShiftCreate, onShiftUpdate, onShiftDelete, onShiftMove, onWeekCopy, onSchedulePublish, onRequestResolve, onSettingsSave, onExport, onRangeChange, onSnapshotChange]);
+  }), [providedAdapter, onRecurringShiftsCreate, onShiftCreate, onShiftUpdate, onShiftDelete, onShiftMove, onWeekCopy, onSchedulePublish, onRequestResolve, onSettingsSave, onExport, onRangeChange, onSnapshotChange]);
   const [shifts, setShifts] = useState(() => [...source.shifts]);
   const [requests, setRequests] = useState(() => [...source.requests]);
   const [weekStart, setWeekStart] = useState(source.weekStart);
@@ -571,7 +573,7 @@ export function ScheduleContent({
   };
 
   const saveShift = async (form) => {
-    const { publishNow, ...values } = form;
+    const { publishNow, recurrence, ...values } = form;
     const selectedLocation = locations.find((location) => location.id === values.locationId);
     const unavailablePeople = values.assigneeIds
       .map((personId) => users.find((user) => user.id === personId))
@@ -581,6 +583,21 @@ export function ScheduleContent({
       return;
     }
     const previousShift = values.id ? shifts.find((shift) => shift.id === values.id) : null;
+    if (!previousShift && recurrence) {
+      const saved = await runMutation("onRecurringShiftsCreate", { publishNow, recurrence, shift: values });
+      if (!saved) return;
+      const confirmedShifts = Array.isArray(saved.shifts) ? saved.shifts.map(normalizeWorkforceScheduleShift) : [];
+      if (!confirmedShifts.length || confirmedShifts.length !== saved.createdCount || confirmedShifts.some((shift) => !isConfirmedWorkforceScheduleShift(shift))) {
+        onNotify("Serwer nie potwierdził wszystkich powtarzających się zmian. Odśwież Grafik przed kolejną operacją.", "error");
+        return;
+      }
+      const nextShifts = [...shifts, ...confirmedShifts];
+      setShifts(nextShifts);
+      setEditorShift(null);
+      emitSnapshot("recurring-shifts-create", nextShifts);
+      onNotify(`Utworzono ${confirmedShifts.length} powtarzających się zmian jako niezależne szkice.`);
+      return saved;
+    }
     const revision = previousShift ? (previousShift.revision || 0) + 1 : 1;
     const nextShift = previousShift
       ? { ...previousShift, ...values, revision, publishedRevision: publishNow ? revision : previousShift.publishedRevision }
