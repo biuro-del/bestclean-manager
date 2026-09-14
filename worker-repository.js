@@ -332,7 +332,8 @@ async function readWorkerForUpdate(client, orgId, login) {
        from public.worker w
       where w.org_id = $1::text
         and lower(w.login) = lower($2::text)
-      limit 1`,
+      limit 1
+      for update of w`,
     [orgId, login],
   )
   return result.rows[0] ?? null
@@ -347,6 +348,7 @@ async function readWorkerForPasswordReset(client, orgId, identifier) {
             full_name,
             login_email,
             email,
+            phone,
             auth_uid,
             active,
             role,

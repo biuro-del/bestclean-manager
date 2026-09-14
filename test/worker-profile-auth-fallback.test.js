@@ -27,7 +27,7 @@ test('edycja profilu zapisuje Cloud SQL, gdy pracownik nie ma konta Firebase Aut
   )
   assert.match(
     updateBlock,
-    /if \(shouldResolveFirebaseUser && authUid && authMatch\.user\) \{[\s\S]*\.updateUser\(authUid/,
+    /const shouldUpdateFirebaseUser = Boolean\(authUid && authMatch\.user\)[\s\S]*if \(shouldUpdateFirebaseUser\) \{[\s\S]*\.updateUser\(authUid/,
   )
   assert.doesNotMatch(updateBlock, /createWorkerProfileAuthRequiredError/)
   assert.match(updateBlock, /workerRepository\.updateWorkerRow/)

@@ -18,6 +18,8 @@
     "migrate:job-card-photo": "node scripts/migrate-job-card-photo.js",
     "migrate:cleaning-company-onboarding": "node scripts/migrate-cleaning-company-onboarding.js",
     "migrate:facility-manager-object": "node scripts/migrate-facility-manager-object.js",
+    "worker-phone-identity:audit": "node scripts/backfill-worker-firebase-phone.js --audit",
+    "worker-phone-identity:apply": "node scripts/backfill-worker-firebase-phone.js --apply",
     "platform-admin": "node scripts/platform-admin.js",
     "smoke:workforce-schedule:bootstrap": "node scripts/smoke-workforce-schedule-bootstrap.js"
   },

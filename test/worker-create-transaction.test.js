@@ -17,7 +17,7 @@ function functionBody(name, nextName) {
 
 test('utworzenie pracownika nie wykonuje zawodnego cleanupu po zatwierdzeniu SQL', () => {
   const source = functionBody('createAdminManagedUserDatabase', 'handleAuthProvisionWorkerRequest')
-  const createAuthIndex = source.indexOf('createdAuthUser = await createFirebaseAuthUser(payload)')
+  const createAuthIndex = source.indexOf('createdAuthUser = await createFirebaseAuthUser(payload')
   const insertIndex = source.indexOf('await workerRepository.insertWorkerAndMembership')
   const commitIndex = source.indexOf("await client.query('commit')")
   const committedIndex = source.indexOf('transactionStarted = false', commitIndex)

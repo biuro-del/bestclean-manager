@@ -249,6 +249,12 @@ env:
     value: database
     availability:
       - RUNTIME
+  # Candidate only. It must remain false until the existing Firebase users are
+  # backfilled and the native APK phone-login path has passed a controlled test.
+  - variable: WORKER_FIREBASE_PHONE_IDENTITY_ENABLED
+    value: "false"
+    availability:
+      - RUNTIME
   - variable: MOBILE_SERVICE_EXECUTION_CORRELATION_ENABLED
     value: "true"
     availability:

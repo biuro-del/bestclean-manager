@@ -35,6 +35,16 @@ const {
   parseWorkerNumber,
 } = require('./worker-id-policy')
 const { normalizePolishPhoneE164 } = require('./polish-phone-policy')
+const {
+  buildWorkerFirebasePhoneCreateFields,
+  buildWorkerFirebasePhoneRollbackFields,
+  buildWorkerFirebasePhoneUpdateFields,
+  hasWorkerFirebasePhoneAuthMismatch,
+  hasWorkerFirebasePhoneIdentityChange,
+  isFirebaseInvalidPhoneError,
+  isFirebasePhoneAlreadyExistsError,
+  isWorkerFirebasePhoneIdentityEnabled,
+} = require('./worker-firebase-phone-identity')
 const workerRepository = require('./worker-repository')
 const platformRepository = require('./platform-repository')
 const { createPlatformApi } = require('./platform-api')
@@ -879,6 +889,22 @@ function mapFirebaseAdminError(error) {
     }
   }
 
+  if (isFirebasePhoneAlreadyExistsError(error)) {
+    return {
+      status: 409,
+      code: 'PHONE_ALREADY_EXISTS',
+      message: 'Ten numer telefonu jest juz przypisany do innego konta.',
+    }
+  }
+
+  if (isFirebaseInvalidPhoneError(error)) {
+    return {
+      status: 400,
+      code: 'WORKER_PHONE_INVALID',
+      message: 'Podaj poprawny polski numer telefonu, np. +48664322028.',
+    }
+  }
+
   if (code.includes('invalid-password') || restMessage.includes('WEAK_PASSWORD')) {
     return {
       status: 400,
@@ -1497,13 +1523,19 @@ async function assertFirebaseEmailAvailable(email) {
   }
 }
 
-async function createFirebaseAuthUser(payload) {
+async function createFirebaseAuthUser(payload, options = {}) {
+  const workerPhoneIdentityEnabled = Boolean(options.workerPhoneIdentity) &&
+    isWorkerFirebasePhoneIdentityEnabled(process.env)
+  const workerPhoneFields = options.workerPhoneIdentity
+    ? buildWorkerFirebasePhoneCreateFields(payload.phone, process.env)
+    : {}
   try {
     const user = await ensureFirebaseAdmin().auth().createUser({
       email: payload.email,
       password: payload.password,
       displayName: payload.displayName,
       disabled: !payload.active,
+      ...workerPhoneFields,
     })
     return {
       provider: 'admin',
@@ -1511,7 +1543,7 @@ async function createFirebaseAuthUser(payload) {
       email: user.email || payload.email,
     }
   } catch (adminError) {
-    if (!canUseFirebaseRest() || !shouldAllowFirebaseAuthRestFallback()) {
+    if (workerPhoneIdentityEnabled || !canUseFirebaseRest() || !shouldAllowFirebaseAuthRestFallback()) {
       const mapped = mapFirebaseAdminError(adminError)
       adminError.statusCode = mapped.status
       adminError.publicCode = mapped.code
@@ -5260,7 +5292,6 @@ function buildWorkerProfileUpdatePayload(body) {
   const memberRole = normalizeWorkerProfileRole(roleLabel || workerType)
   const active = asPayloadBoolean(body?.active, true)
   const editedBy = normalizeText(body?.editedBy || body?.edit).slice(0, 160)
-  const authUid = normalizeText(body?.authUid || body?.uid).slice(0, 128)
   const photo = normalizeWorkerPhotoPayload(body)
 
   if (!orgId) validationErrors.push('Brak poprawnego orgId.')
@@ -5287,7 +5318,6 @@ function buildWorkerProfileUpdatePayload(body) {
       memberRole,
       active,
       editedBy,
-      authUid,
       ...photo,
     },
     validationErrors,
@@ -5306,13 +5336,12 @@ function buildWorkerProfileDeletePayload(body) {
   }
 
   const workerId = normalizeText(body?.workerId || body?.id).slice(0, 128)
-  const authUid = normalizeText(body?.authUid || body?.uid).slice(0, 128)
 
   if (!orgId) validationErrors.push('Brak poprawnego orgId.')
   if (!login) validationErrors.push('Brak loginu pracownika.')
 
   return {
-    value: { orgId, login, workerId, authUid },
+    value: { orgId, login, workerId },
     validationErrors,
   }
 }
@@ -5862,7 +5891,7 @@ async function changeWorkerProfileLogin(client, currentWorker, payload, authUid,
   }
 }
 
-async function findFirebaseUserForWorker(worker, preferredUid = '') {
+async function findFirebaseUserForWorker(worker, preferredUid = '', options = {}) {
   const auth = ensureFirebaseAdmin().auth()
   const uid = normalizeText(preferredUid || worker?.auth_uid)
   if (uid) {
@@ -5873,6 +5902,16 @@ async function findFirebaseUserForWorker(worker, preferredUid = '') {
       if (!isFirebaseUserNotFound(error)) {
         throw error
       }
+    }
+  }
+
+  if (options.allowEmailFallback === false) {
+    return {
+      user: null,
+      authUid: '',
+      authWarning: uid
+        ? 'UID pracownika nie istnieje w Firebase Auth.'
+        : 'Pracownik nie ma przypisanego UID Firebase Auth.',
     }
   }
 
@@ -6081,24 +6120,43 @@ async function deleteWorkerProfileAccessRows(client, orgId, login, workerId, aut
 
 async function deleteFirebaseUserQuietly(user) {
   const uid = normalizeText(typeof user === 'string' ? user : user?.uid)
-  if (!uid) return
+  if (!uid) return { deleted: false, fallbackDisabled: false }
 
   if (user?.provider === 'rest' && user?.idToken) {
     try {
       await callFirebaseIdentityToolkit('delete', { idToken: user.idToken })
-      return
-    } catch {
+      return { deleted: true, fallbackDisabled: false }
+    } catch (restDeleteError) {
+      console.warn(
+        '[firebase-auth-cleanup] REST delete failed; trying Admin cleanup',
+        normalizeText(restDeleteError?.code || restDeleteError?.message || 'UNKNOWN'),
+      )
       // Fall back to Admin cleanup below when possible.
     }
   }
 
   try {
     await ensureFirebaseAdmin().auth().deleteUser(uid)
-  } catch {
+    return { deleted: true, fallbackDisabled: false }
+  } catch (deleteError) {
     try {
-      await ensureFirebaseAdmin().auth().updateUser(uid, { disabled: true })
-    } catch {
-      // Cleanup best effort. The primary DB error is returned to the caller.
+      // A disabled Firebase account still reserves its globally unique phone.
+      // Clear it while disabling so a safe retry is not permanently blocked.
+      await ensureFirebaseAdmin().auth().updateUser(uid, {
+        disabled: true,
+        phoneNumber: null,
+      })
+      console.error(
+        '[firebase-auth-cleanup] delete failed; account disabled and phone released',
+        normalizeText(deleteError?.code || deleteError?.message || 'UNKNOWN'),
+      )
+      return { deleted: false, fallbackDisabled: true }
+    } catch (fallbackError) {
+      console.error(
+        '[firebase-auth-cleanup] orphan account cleanup failed',
+        normalizeText(fallbackError?.code || fallbackError?.message || 'UNKNOWN'),
+      )
+      return { deleted: false, fallbackDisabled: false }
     }
   }
 }
@@ -6134,7 +6192,7 @@ async function createAdminManagedUser(payload, requesterUid) {
     }
 
     await assertFirebaseEmailAvailable(payload.email)
-    createdAuthUser = await createFirebaseAuthUser(payload)
+    createdAuthUser = await createFirebaseAuthUser(payload, { workerPhoneIdentity: true })
 
     await client.query('begin')
     await ensureWorkerAuthUidColumn(client)
@@ -6300,7 +6358,7 @@ async function createAdminManagedUserDatabase(payload, requesterUid) {
     }
 
     await assertFirebaseEmailAvailable(payload.email)
-    createdAuthUser = await createFirebaseAuthUser(payload)
+    createdAuthUser = await createFirebaseAuthUser(payload, { workerPhoneIdentity: true })
     uploadedPhoto = await uploadWorkerProfilePhoto(payload, { uid: requesterUid })
     if (uploadedPhoto?.url) {
       payload.photoUrl = uploadedPhoto.url
@@ -6610,8 +6668,9 @@ async function setWorkerPasswordDatabase(payload, decodedToken) {
         email,
         password: payload.password,
         displayName: normalizeText(worker.full_name) || normalizeText(worker.login),
+        phone: normalizeText(worker.phone),
         active: asPayloadBoolean(worker.active, true),
-      })
+      }, { workerPhoneIdentity: true })
       authUid = normalizeText(createdAuthUser?.uid)
       authCreated = true
       if (!authUid) {
@@ -6986,7 +7045,12 @@ function hasWorkerProfileAuthFieldChange(payload, currentWorker) {
   return (
     normalizeText(payload.name) !== currentName ||
     normalizeEmail(payload.email) !== currentEmail ||
-    Boolean(payload.active) !== Boolean(currentActive)
+    Boolean(payload.active) !== Boolean(currentActive) ||
+    hasWorkerFirebasePhoneIdentityChange(
+      payload.phone,
+      currentWorker.phone,
+      process.env,
+    )
   )
 }
 
@@ -7058,13 +7122,13 @@ function resolveWorkerProfileWorkerId(payload, currentWorker = null, loginChange
 async function updateFirebaseAuthForWorkerProfilePayload(payload, currentWorker = null, options = {}) {
   if (!hasWorkerProfileAuthFieldChange(payload, currentWorker)) {
     return {
-      authUid: normalizeText(payload?.authUid || currentWorker?.authUid || currentWorker?.auth_uid),
+      authUid: normalizeText(currentWorker?.authUid || currentWorker?.auth_uid),
       authUpdated: false,
       authWarning: '',
     }
   }
 
-  const authUid = normalizeText(payload?.authUid || currentWorker?.authUid || currentWorker?.auth_uid)
+  const authUid = normalizeText(currentWorker?.authUid || currentWorker?.auth_uid)
   if (!authUid) {
     if (options.strict) {
       throw createWorkerProfilePublicError(
@@ -7086,6 +7150,7 @@ async function updateFirebaseAuthForWorkerProfilePayload(payload, currentWorker 
       displayName: payload.name,
       email: payload.email,
       disabled: !payload.active,
+      ...buildWorkerFirebasePhoneUpdateFields(payload.phone, process.env),
     })
     return { authUid, authUpdated: true, authWarning: '' }
   } catch (error) {
@@ -7162,13 +7227,29 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
 
   try {
     await workerRepository.assertWorkerSchemaReady(client)
+    const preliminaryMembership = await getRequesterMembership(
+      client,
+      payload.orgId,
+      decodedToken.uid,
+    )
+    const requesterRole = normalizeRequesterRole(preliminaryMembership?.role)
+    if (!['ADMIN', 'MANAGER'].includes(requesterRole)) {
+      throw workerProfileAccessError(preliminaryMembership, 'edycji pracownikow')
+    }
+
+    await client.query('begin')
+    transactionStarted = true
+    await client.query(
+      'select pg_advisory_xact_lock(hashtext($1::text))',
+      [`worker-update:${payload.orgId}:${payload.login}`],
+    )
+
     const membership = await getRequesterMembership(
       client,
       payload.orgId,
       decodedToken.uid,
     )
-    const requesterRole = normalizeRequesterRole(membership?.role)
-    if (!['ADMIN', 'MANAGER'].includes(requesterRole)) {
+    if (!['ADMIN', 'MANAGER'].includes(normalizeRequesterRole(membership?.role))) {
       throw workerProfileAccessError(membership, 'edycji pracownikow')
     }
 
@@ -7212,12 +7293,21 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
     }
 
     const finalEmail = payload.email
-    const knownAuthUid = normalizeText(payload.authUid || currentWorker.auth_uid)
+    // authUid from the request is deliberately ignored. Only the server-side
+    // worker row may select the Firebase account that is updated.
+    const knownAuthUid = normalizeText(currentWorker.auth_uid)
     const authFieldsChanged = hasWorkerProfileAuthFieldChange(
       { ...payload, email: finalEmail },
       currentWorker,
     )
-    const shouldResolveFirebaseUser = loginChanged || authFieldsChanged
+    const phoneIdentityChanged = hasWorkerFirebasePhoneIdentityChange(
+      payload.phone,
+      currentWorker.phone,
+      process.env,
+    )
+    const phoneIdentityManaged = isWorkerFirebasePhoneIdentityEnabled(process.env) &&
+      Boolean(normalizeText(payload.phone || currentWorker.phone))
+    const shouldResolveFirebaseUser = loginChanged || authFieldsChanged || phoneIdentityManaged
     const [, , authMatch] = await Promise.all([
       workerRepository.assertLoginAvailable(
         client,
@@ -7232,7 +7322,9 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
         finalEmail,
       ),
       shouldResolveFirebaseUser
-        ? findFirebaseUserForWorker(currentWorker, knownAuthUid)
+        ? findFirebaseUserForWorker(currentWorker, knownAuthUid, {
+            allowEmailFallback: !phoneIdentityManaged,
+          })
         : Promise.resolve({ user: null, authUid: knownAuthUid, authWarning: '' }),
     ])
     authUid = normalizeText(authMatch.authUid)
@@ -7241,18 +7333,37 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
       authWarning = WORKER_PROFILE_DB_ONLY_AUTH_WARNING
     }
 
-    if (shouldResolveFirebaseUser && authUid && authMatch.user) {
+    if ((phoneIdentityChanged || phoneIdentityManaged) && (!authUid || !authMatch.user)) {
+      throw createWorkerProfilePublicError(
+        409,
+        'FIREBASE_AUTH_USER_MISSING',
+        'Nie znaleziono konta Firebase Auth tego pracownika. Numer telefonu nie zostal zmieniony.',
+      )
+    }
+
+    const phoneIdentityMismatch = Boolean(authMatch.user) &&
+      hasWorkerFirebasePhoneAuthMismatch(
+        payload.phone,
+        authMatch.user.phoneNumber,
+        process.env,
+      )
+    const shouldUpdateFirebaseUser = Boolean(authUid && authMatch.user) &&
+      (authFieldsChanged || phoneIdentityMismatch)
+
+    if (shouldUpdateFirebaseUser) {
       authSnapshot = {
         displayName: normalizeText(authMatch.user.displayName) || null,
         disabled: Boolean(authMatch.user.disabled),
         ...(normalizeEmail(authMatch.user.email)
           ? { email: normalizeEmail(authMatch.user.email) }
           : {}),
+        ...buildWorkerFirebasePhoneRollbackFields(authMatch.user, process.env),
       }
       await ensureFirebaseAdmin().auth().updateUser(authUid, {
         displayName: payload.name,
         email: finalEmail,
         disabled: !payload.active,
+        ...buildWorkerFirebasePhoneUpdateFields(payload.phone, process.env),
       })
       authUpdated = true
     }
@@ -7263,13 +7374,6 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
       payload.photoUrlChanged = true
     }
 
-    await client.query('begin')
-    transactionStarted = true
-    await client.query(
-      'select pg_advisory_xact_lock(hashtext($1::text))',
-      [`worker-update:${payload.orgId}:${payload.login}`],
-    )
-
     const currentMembership = await getRequesterMembership(
       client,
       payload.orgId,
@@ -7279,34 +7383,6 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
     if (!['ADMIN', 'MANAGER'].includes(currentRequesterRole)) {
       throw workerProfileAccessError(currentMembership, 'edycji pracownikow')
     }
-    if (loginChanged) {
-      throw createWorkerProfilePublicError(
-        400,
-        'WORKER_LOGIN_IMMUTABLE',
-        'Login techniczny pracownika jest niemodyfikowalny.',
-      )
-    }
-
-    currentWorker = await workerRepository.readWorkerForUpdate(
-      client,
-      payload.orgId,
-      payload.login,
-    )
-    if (!currentWorker) {
-      throw createWorkerProfilePublicError(
-        404,
-        'WORKER_NOT_FOUND',
-        'Nie znaleziono pracownika do edycji.',
-      )
-    }
-
-    ownerWorkerId = await workerRepository.getOrganizationOwnerWorkerId(
-      client,
-      payload.orgId,
-    )
-    targetIsOwner = Boolean(
-      ownerWorkerId && normalizeText(currentWorker.worker_id) === ownerWorkerId,
-    )
     payload.memberRole = assertWorkerRoleAssignmentAllowed(
       currentMembership?.role,
       payload.memberRole,
@@ -7363,12 +7439,14 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
           'Nie znaleziono pracownika do edycji.',
         )
       }
-      await workerRepository.upsertWorkerMembership(client, {
-        orgId: payload.orgId,
-        authUid,
-        role: payload.memberRole,
-        workerId: normalizeText(currentWorker.worker_id),
-      })
+      if (authUid) {
+        await workerRepository.upsertWorkerMembership(client, {
+          orgId: payload.orgId,
+          authUid,
+          role: payload.memberRole,
+          workerId: normalizeText(currentWorker.worker_id),
+        })
+      }
     }
 
     await client.query('commit')
@@ -7402,6 +7480,10 @@ async function updateWorkerProfileDatabase(payload, decodedToken) {
         error.authRollbackWarning =
           mapFirebaseAdminError(rollbackError)?.message ||
           normalizeText(rollbackError?.message)
+        console.error(
+          '[worker-profile] Firebase Auth rollback failed',
+          normalizeText(rollbackError?.code || rollbackError?.message || 'UNKNOWN'),
+        )
       }
     }
     await deleteWorkerProfilePhotoObject(uploadedPhoto)
@@ -7511,7 +7593,9 @@ async function deleteWorkerProfileDatabase(payload, decodedToken) {
       )
     }
 
-    let authUid = normalizeText(payload.authUid || currentWorker.auth_uid)
+    // Never accept a Firebase UID from the request when selecting an account
+    // to delete. The authoritative UID belongs to the locked worker row.
+    let authUid = normalizeText(currentWorker.auth_uid)
     let authWarning = ''
     if (isRequesterDeletingSelf(currentWorker, authUid, decodedToken)) {
       throw createWorkerProfilePublicError(
@@ -7549,6 +7633,7 @@ async function deleteWorkerProfileDatabase(payload, decodedToken) {
         'Nie znaleziono pracownika do usuniecia.',
       )
     }
+    authUid = normalizeText(currentWorker.auth_uid)
     ownerWorkerId = await workerRepository.getOrganizationOwnerWorkerId(
       client,
       payload.orgId,
@@ -7754,6 +7839,16 @@ async function handleAdminWorkersRestoreRequest(req, res) {
       400,
       'VALIDATION_ERROR',
       'Podaj poprawne orgId oraz tablice rows z pracownikami.',
+    )
+    return
+  }
+
+  if (isWorkerFirebasePhoneIdentityEnabled(process.env)) {
+    sendApiError(
+      res,
+      409,
+      'WORKER_RESTORE_PHONE_IDENTITY_REQUIRES_AUDIT',
+      'Odtwarzanie backupu pracownikow wymaga najpierw wylaczenia synchronizacji telefonu i ponownego audytu Firebase Auth.',
     )
     return
   }
