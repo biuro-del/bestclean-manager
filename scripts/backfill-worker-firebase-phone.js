@@ -125,7 +125,14 @@ async function readPhoneProviderState(projectId, credential) {
     const accessToken = await credential.getAccessToken()
     const response = await fetch(
       `https://identitytoolkit.googleapis.com/admin/v2/projects/${encodeURIComponent(projectId)}/config`,
-      { headers: { Authorization: `Bearer ${accessToken.access_token}` } },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken.access_token}`,
+          // User ADC requires an explicit quota project for Identity Toolkit.
+          // The project is already pinned by the apply gate.
+          'x-goog-user-project': text(process.env.GOOGLE_CLOUD_QUOTA_PROJECT) || projectId,
+        },
+      },
     )
     if (!response.ok) {
       return { state: 'UNKNOWN', httpStatus: response.status }

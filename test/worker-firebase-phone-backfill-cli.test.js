@@ -132,6 +132,7 @@ test('skrypt jest audit-first i nie zawiera operacji zmieniajacych inne dane kon
   assert.match(script, /lock table public\.worker, public\.organization_member in share mode/)
   assert.match(script, /active_uid_membership_count/)
   assert.match(script, /completedUpdates = applyResult\.completedUpdates/)
+  assert.match(script, /'x-goog-user-project'/)
   assert.doesNotMatch(script, /\.createUser\(|\.deleteUser\(|\.importUsers\(|revokeRefreshTokens/)
   assert.match(service, /auth\.updateUser\(entry\.authUid, \{ phoneNumber: entry\.phone \}\)/)
   assert.equal(
