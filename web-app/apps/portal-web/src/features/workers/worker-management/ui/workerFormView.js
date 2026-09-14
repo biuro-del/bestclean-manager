@@ -1,6 +1,7 @@
 import { normalizeWorkerEmail } from '../domain/workerCrudModel.js'
+import { normalizePolishPhoneE164 } from '../../../../utils/polishPhone.js'
 
-const BASIC_FIELD_IDS = ['wkEditId', 'wkEditNumber', 'wkEditName', 'wkEditEmail', 'wkEditRole', 'wkEditType']
+const BASIC_FIELD_IDS = ['wkEditId', 'wkEditNumber', 'wkEditName', 'wkEditEmail', 'wkEditPhone', 'wkEditRole', 'wkEditType']
 const PASSWORD_FIELD_IDS = ['wkNewPass', 'wkNewPass2']
 
 export function createWorkerFormView(documentRef = globalThis.document) {
@@ -22,7 +23,7 @@ export function createWorkerFormView(documentRef = globalThis.document) {
       workerType: byId('wkEditType')?.value,
       active: Boolean(active),
       email: normalizeEmailField(),
-      phone: String(byId('wkEditPhone')?.value ?? '').trim(),
+      phone: normalizePhoneField(),
       password: String(byId('wkNewPass')?.value ?? '').trim(),
       repeatedPassword: String(byId('wkNewPass2')?.value ?? '').trim(),
     }
@@ -33,6 +34,14 @@ export function createWorkerFormView(documentRef = globalThis.document) {
     const email = normalizeWorkerEmail(input?.value)
     if (input && 'value' in input) input.value = email
     return email
+  }
+
+  function normalizePhoneField() {
+    const input = byId('wkEditPhone')
+    const rawPhone = String(input?.value ?? '').trim()
+    const phone = normalizePolishPhoneE164(rawPhone)
+    if (input && phone) input.value = phone
+    return phone || rawPhone
   }
 
   function clearError(errorId, fieldIds) {

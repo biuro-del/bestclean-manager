@@ -42,6 +42,10 @@ import {
   saveWorkdayReconciliation,
 } from '../../../services/workdayReconciliationService.js'
 import {
+  normalizePolishPhoneE164,
+  polishPhoneForDisplay,
+} from '../../../utils/polishPhone.js'
+import {
   getWorkTimeDay,
   getWorkTimeDays,
   saveWorkTimeDay,
@@ -1304,7 +1308,7 @@ export function createWorkerAccountFeature(ctx) {
   function renderForms(worker) {
     setInputValue('waName', workerName(worker))
     setInputValue('waEmail', worker.email || worker.loginEmail || '')
-    setInputValue('waPhone', worker.phone || '')
+    setInputValue('waPhone', polishPhoneForDisplay(worker.phone))
     setInputValue('waWorkerId', workerId(worker))
     setInputValue('waEditedBy', worker.editedBy || worker.updatedBy || '')
     setWorkerAccountPhotoState({ photoUrl: workerPhotoUrl(worker) })
@@ -3430,7 +3434,7 @@ export function createWorkerAccountFeature(ctx) {
       login: workerLogin(worker),
       email: String(document.getElementById('waEmail')?.value ?? '').trim(),
       loginEmail: String(document.getElementById('waEmail')?.value ?? '').trim(),
-      phone: String(document.getElementById('waPhone')?.value ?? '').trim(),
+      phone: polishPhoneForDisplay(document.getElementById('waPhone')?.value),
       role: nextRole,
       workerType: nextWorkerType,
       contractType,
@@ -3457,6 +3461,16 @@ export function createWorkerAccountFeature(ctx) {
   async function saveWorkerPatch(payload, successMessage, options = {}) {
     const worker = resolveCurrentWorker()
     if (!worker || !appState.session?.orgId) return null
+    const rawPhone = String(payload?.phone ?? '').trim()
+    const phone = rawPhone ? normalizePolishPhoneE164(rawPhone) : ''
+    if (rawPhone && !phone) {
+      if (options.silent !== true) {
+        showTransientNotice('Podaj poprawny polski numer telefonu, np. +48664322028.', 'error')
+        document.getElementById('waPhone')?.focus?.()
+      }
+      return null
+    }
+    payload = { ...payload, phone }
     const currentLogin = workerLogin(worker)
     if (!payload.name || !payload.email) {
       alert('Uzupelnij imie i email pracownika.')

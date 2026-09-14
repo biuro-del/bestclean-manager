@@ -1,3 +1,5 @@
+import { normalizePolishPhoneE164 } from '../../../../utils/polishPhone.js'
+
 export const WORKER_DEFAULT_ROLE = 'WORKER'
 export const WORKER_DEFAULT_TYPE = 'Stały personel na obiekcie'
 
@@ -107,6 +109,8 @@ export function prepareWorkerSave({
 } = {}) {
   const isAdding = mode === 'add'
   const currentLogin = isAdding ? '' : currentWorkerLogin(currentWorker)
+  const rawPhone = String(form.phone ?? '').trim()
+  const phone = rawPhone ? normalizePolishPhoneE164(rawPhone) : ''
   const payload = {
     workerId: String(form.workerId ?? '').trim(),
     name: String(form.name ?? '').trim(),
@@ -116,7 +120,7 @@ export function prepareWorkerSave({
     workerType: normalizeWorkerType(form.workerType),
     active: Boolean(form.active),
     email: normalizeWorkerEmail(form.email),
-    phone: String(form.phone ?? '').trim(),
+    phone,
   }
 
   const normalizedPhotoDataUrl = String(photoDataUrl ?? '').trim()
@@ -138,6 +142,20 @@ export function prepareWorkerSave({
       'basic',
       'Podaj poprawny email, którym pracownik będzie się logował.',
       'wkEditEmail',
+    )
+  }
+  if (isAdding && !rawPhone) {
+    return validationError(
+      'basic',
+      'Podaj numer telefonu pracownika.',
+      'wkEditPhone',
+    )
+  }
+  if (rawPhone && !phone) {
+    return validationError(
+      'basic',
+      'Podaj poprawny polski numer telefonu, np. +48664322028.',
+      'wkEditPhone',
     )
   }
   if (payload.role !== WORKER_DEFAULT_ROLE && !canAdministerWorkers) {

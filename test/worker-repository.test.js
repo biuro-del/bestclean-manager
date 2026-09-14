@@ -9,9 +9,61 @@ const {
   clearWorkerSchemaReadyCache,
   deleteWorkerAccessRows,
   insertWorkerAndMembership,
+  normalizeRestoreRow,
   relinkWorkerAuth,
   reserveWorkerId,
+  restoreWorkers,
 } = require('../worker-repository')
+
+test('restore normalizuje telefon i rozpoznaje brak pola w starym backupie', () => {
+  const withPhone = normalizeRestoreRow({ login: 'jan', phone: '664 322 028' })
+  const legacyWithoutPhone = normalizeRestoreRow({ login: 'anna' })
+
+  assert.equal(withPhone.phone, '+48664322028')
+  assert.equal(withPhone.phoneProvided, true)
+  assert.equal(legacyWithoutPhone.phone, null)
+  assert.equal(legacyWithoutPhone.phoneProvided, false)
+  assert.throws(
+    () => normalizeRestoreRow({ login: 'ewa', phone: '+49 123 456 789' }),
+    (error) => error?.publicCode === 'WORKER_PHONE_INVALID',
+  )
+})
+
+test('restore zachowuje obecny telefon, gdy stary backup nie zawiera pola phone', async () => {
+  const calls = []
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params })
+      if (sql.includes('select login, worker_id, auth_uid')) {
+        return { rows: [{ login: 'jan', worker_id: 'worker_org123_1', auth_uid: 'uid-1' }] }
+      }
+      if (sql.includes('from public.worker_id_reservation')) return { rows: [] }
+      return { rows: [], rowCount: 1 }
+    },
+  }
+
+  await restoreWorkers(client, 'org123', [{ login: 'jan', fullName: 'Jan Kowalski' }], 'admin-1')
+
+  const update = calls.find((call) => call.sql.includes('phone = case when'))
+  assert.ok(update)
+  assert.equal(update.params[4], false)
+  assert.equal(update.params[5], null)
+})
+
+test('restore nie tworzy nowego pracownika bez telefonu', async () => {
+  const client = {
+    async query(sql) {
+      if (sql.includes('select login, worker_id, auth_uid')) return { rows: [] }
+      if (sql.includes('from public.worker_id_reservation')) return { rows: [] }
+      return { rows: [], rowCount: 1 }
+    },
+  }
+
+  await assert.rejects(
+    restoreWorkers(client, 'org123', [{ login: 'jan', fullName: 'Jan Kowalski' }], 'admin-1'),
+    (error) => error?.publicCode === 'WORKER_PHONE_INVALID',
+  )
+})
 
 test('worker schema readiness is shared and cached after a successful inspection', async () => {
   clearWorkerSchemaReadyCache()
@@ -72,7 +124,7 @@ test('worker insert keeps login and worker type in the correct SQL parameters', 
     email: 'jan.kowalski@gmail.com',
     role: 'WORKER',
     active: true,
-    phone: '123',
+    phone: '664 322 028',
     workerType: 'Pracownik',
     authUid: 'firebase-uid',
     createdByUid: 'admin-uid',
@@ -88,7 +140,7 @@ test('worker insert keeps login and worker type in the correct SQL parameters', 
     'jan.kowalski@gmail.com',
     'WORKER',
     true,
-    '123',
+    '+48664322028',
     undefined,
     'Pracownik',
     'firebase-uid',

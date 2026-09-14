@@ -4,6 +4,7 @@ import {
   platformContextHeaders,
 } from './platformDataConnectService'
 import { ensureFirebase, isFirebaseConfigured } from '../firebase/firebaseClient'
+import { normalizePolishPhoneE164 } from '../utils/polishPhone'
 
 const READ_CACHE_MS = 5 * 60 * 1000
 const workersCache = new Map()
@@ -502,6 +503,8 @@ function mapWorker(orgId, row) {
   const displayType = rawWorkerType || formatWorkerRoleLabel(rawRole || systemRole, 'Pracownik')
   const loginEmail = String(row.loginEmail ?? row.email ?? '').trim()
   const photoUrl = String(row.photoUrl ?? row.profilePhotoUrl ?? row.avatarUrl ?? row.photo_url ?? '').trim()
+  const rawPhone = String(row.phone ?? '').trim()
+  const phone = normalizePolishPhoneE164(rawPhone) || rawPhone
 
   return {
     id: workerId,
@@ -520,7 +523,7 @@ function mapWorker(orgId, row) {
     active: asBoolean(row.active, true),
     authUid: String(row.authUid ?? row.auth_uid ?? '').trim(),
     email: loginEmail,
-    phone: String(row.phone ?? '').trim(),
+    phone,
     photoUrl,
     profilePhotoUrl: photoUrl,
     editedBy: String(row.updatedBy ?? row.edit ?? '').trim(),
@@ -605,6 +608,10 @@ export async function createWorkerUser(orgId, payload) {
   if (!role) {
     throw new Error('Wybierz poprawny typ pracownika.')
   }
+  const phone = normalizePolishPhoneE164(payload?.phone)
+  if (!phone) {
+    throw new Error('Podaj poprawny polski numer telefonu, np. +48664322028.')
+  }
 
   const request = {
     orgId: normalizedOrgId,
@@ -613,7 +620,7 @@ export async function createWorkerUser(orgId, payload) {
     role,
     workerType: String(payload?.workerType ?? payload?.role ?? role).trim() || role,
     password,
-    phone: asNullableText(payload?.phone),
+    phone,
     photoUrl: asNullableText(payload?.photoUrl),
     photoDataUrl: asNullableText(payload?.photoDataUrl),
     removePhoto: Boolean(payload?.removePhoto),
@@ -689,13 +696,18 @@ export async function updateWorker(orgId, workerId, payload) {
   }
 
   const active = asBoolean(payload?.active, true)
+  const rawPhone = String(payload?.phone ?? '').trim()
+  const phone = rawPhone ? normalizePolishPhoneE164(rawPhone) : null
+  if (rawPhone && !phone) {
+    throw new Error('Podaj poprawny polski numer telefonu, np. +48664322028.')
+  }
   const response = await workerProfileUpdate({
     orgId,
     login,
     workerId: asNullableText(payload?.workerId ?? payload?.id) ?? login,
     name: asNullableText(payload?.workerName ?? payload?.name ?? payload?.fullName),
     email: asNullableText(payload?.loginEmail ?? payload?.email),
-    phone: asNullableText(payload?.phone),
+    phone,
     role: asNullableText(payload?.role ?? payload?.workerType) ?? 'WORKER',
     workerType: asNullableText(payload?.workerType ?? payload?.role) ?? 'WORKER',
     active,

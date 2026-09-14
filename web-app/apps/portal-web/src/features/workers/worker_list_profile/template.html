@@ -397,7 +397,8 @@
 
         <div class="field">
           <label for="wkEditPhone">Telefon (J)</label>
-          <input id="wkEditPhone" type="text" maxlength="80" />
+          <input id="wkEditPhone" type="tel" inputmode="tel" autocomplete="tel" maxlength="16" placeholder="+48 000 000 000" aria-describedby="wkEditPhoneHint" />
+          <div class="muted" id="wkEditPhoneHint">Numer zapisujemy w formacie +48XXXXXXXXX.</div>
         </div>
       </div>
     </div>

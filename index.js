@@ -34,6 +34,7 @@ const {
   normalizeWorkerNumber,
   parseWorkerNumber,
 } = require('./worker-id-policy')
+const { normalizePolishPhoneE164 } = require('./polish-phone-policy')
 const workerRepository = require('./worker-repository')
 const platformRepository = require('./platform-repository')
 const { createPlatformApi } = require('./platform-api')
@@ -5166,7 +5167,8 @@ function buildUserPayload(body) {
   const role = requestedRole === 'OWNER' ? '' : requestedRole
   const workerType = normalizeWorkerType(body?.workerType)
   const password = normalizeText(body?.password)
-  const phone = normalizeText(body?.phone)
+  const rawPhone = normalizeText(body?.phone)
+  const phone = normalizePolishPhoneE164(rawPhone)
   const active = asPayloadBoolean(body?.active, true)
   const photo = normalizeWorkerPhotoPayload(body)
   const rawWorkerNumberOverride = body?.workerNumberOverride
@@ -5182,6 +5184,11 @@ function buildUserPayload(body) {
   if (!displayName) validationErrors.push('Podaj imiÄ™ i nazwisko.')
   if (!role) validationErrors.push('Wybierz rolę ADMIN, MANAGER, COORDINATOR albo WORKER.')
   if (password.length < 6) validationErrors.push('HasĹ‚o tymczasowe musi mieÄ‡ co najmniej 6 znakĂłw.')
+  if (!rawPhone) {
+    validationErrors.push('Podaj numer telefonu pracownika.')
+  } else if (!phone) {
+    validationErrors.push('Podaj poprawny polski numer telefonu, np. +48664322028.')
+  }
   if (hasWorkerNumberOverride && workerNumberOverride === null) {
     validationErrors.push(workerNumberOverrideError().publicMessage)
   }
@@ -5246,7 +5253,8 @@ function buildWorkerProfileUpdatePayload(body) {
   const workerId = normalizeText(body?.workerId || body?.id).slice(0, 128)
   const name = normalizeText(body?.name || body?.workerName || body?.fullName).slice(0, 200)
   const email = normalizeEmail(body?.email || body?.loginEmail)
-  const phone = normalizeText(body?.phone).slice(0, 80)
+  const rawPhone = normalizeText(body?.phone).slice(0, 80)
+  const phone = rawPhone ? normalizePolishPhoneE164(rawPhone) : ''
   const roleLabel = normalizeText(body?.role || 'WORKER').slice(0, 32)
   const workerType = normalizeWorkerType(body?.workerType)
   const memberRole = normalizeWorkerProfileRole(roleLabel || workerType)
@@ -5260,6 +5268,10 @@ function buildWorkerProfileUpdatePayload(body) {
   if (!newLogin) validationErrors.push('Podaj poprawny nowy login pracownika.')
   if (!name) validationErrors.push('Podaj imie i nazwisko pracownika.')
   if (!email) validationErrors.push('Podaj poprawny email pracownika.')
+
+  if (rawPhone && !phone) {
+    validationErrors.push('Podaj poprawny polski numer telefonu, np. +48664322028.')
+  }
 
   return {
     value: {

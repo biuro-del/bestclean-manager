@@ -32,6 +32,7 @@ function validAddInput(overrides = {}) {
       workerNumber: '2',
       name: 'Anna Nowak',
       email: 'anna@example.com',
+      phone: '664 322 028',
       role: 'WORKER',
       workerType: 'Stały personel na obiekcie',
       active: true,
@@ -69,6 +70,7 @@ test('kontroler dodaje pracownika przez gateway i buduje wpis optymistyczny', as
   assert.equal(calls.length, 1)
   assert.equal(calls[0][0], 'org-1')
   assert.equal(calls[0][1].password, 'sekret1')
+  assert.equal(calls[0][1].phone, '+48664322028')
   assert.equal(result.optimisticWorker.login, 'anna@example.com')
   assert.match(result.successNotice, /Dodano użytkownika/)
 })

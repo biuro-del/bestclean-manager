@@ -120,6 +120,7 @@ type Worker @table(
   status: String @col(name: "status", dataType: "varchar(30)")
   email: String @col(name: "email")
   phone: String @col(name: "phone")
+  phoneNormalized: String @col(name: "phone_normalized", dataType: "varchar(40)")
   photoUrl: String @col(name: "photo_url")
   workerType: String @col(name: "worker_type", dataType: "varchar(40)")
 

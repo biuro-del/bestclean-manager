@@ -7,6 +7,7 @@ const {
   parseWorkerNumber,
 } = require('./worker-id-policy')
 const { resolvePlatformMembership } = require('./platform-repository')
+const { normalizePolishPhoneE164 } = require('./polish-phone-policy')
 
 const REQUIRED_WORKER_SCHEMA = {
   organizations: {
@@ -26,6 +27,7 @@ const REQUIRED_WORKER_SCHEMA = {
     active: null,
     email: null,
     phone: null,
+    phone_normalized: 40,
     photo_url: null,
     worker_type: null,
     created_at: null,
@@ -97,6 +99,21 @@ function publicError(statusCode, publicCode, publicMessage, details = undefined)
   error.publicMessage = publicMessage
   if (details !== undefined) error.details = details
   return error
+}
+
+function workerPhone(value, { required = false } = {}) {
+  const rawPhone = text(value)
+  const phone = rawPhone ? normalizePolishPhoneE164(rawPhone) : ''
+  if ((required && !phone) || (rawPhone && !phone)) {
+    throw publicError(
+      400,
+      'WORKER_PHONE_INVALID',
+      required && !rawPhone
+        ? 'Podaj numer telefonu pracownika.'
+        : 'Podaj poprawny polski numer telefonu, np. +48664322028.',
+    )
+  }
+  return phone
 }
 
 async function runQuery(client, label, queryText, params = []) {
@@ -430,6 +447,7 @@ async function reserveWorkerId(client, orgId, workerNumberOverride, createdByUid
 }
 
 async function insertWorkerAndMembership(client, payload) {
+  const phone = workerPhone(payload.phone, { required: true })
   await runQuery(
     client,
     'create-worker-organization-member',
@@ -488,7 +506,7 @@ async function insertWorkerAndMembership(client, payload) {
       payload.email,
       payload.role,
       payload.active,
-      payload.phone,
+      phone,
       payload.photoUrl,
       payload.workerType,
       payload.authUid,
@@ -588,6 +606,7 @@ async function relinkWorkerAuth(client, payload) {
 }
 
 async function updateWorkerRow(client, payload) {
+  const phone = workerPhone(payload.phone)
   const result = await runQuery(
     client,
     'update-worker-profile-row',
@@ -614,7 +633,7 @@ async function updateWorkerRow(client, payload) {
       payload.login,
       payload.name,
       payload.email,
-      payload.phone,
+      phone,
       payload.role,
       payload.workerType,
       payload.active,
@@ -668,6 +687,7 @@ async function renameWorker(client, currentWorker, payload) {
   const oldLogin = payload.login
   const newLogin = payload.newLogin
   const workerId = text(currentWorker.worker_id)
+  const phone = workerPhone(payload.phone)
   const relations = await readExistingRelations(client)
 
   const inserted = await runQuery(
@@ -717,7 +737,7 @@ async function renameWorker(client, currentWorker, payload) {
       newLogin,
       payload.name,
       payload.email,
-      payload.phone,
+      phone,
       payload.role,
       payload.workerType,
       payload.active,
@@ -950,12 +970,23 @@ async function deleteWorkerAccessRows(client, orgId, login, workerId, authUid) {
 function normalizeRestoreRow(row) {
   const login = nullableText(row?.login ?? row?.workerLogin, 80)
   if (!login) return null
+  const phoneProvided = Object.prototype.hasOwnProperty.call(row ?? {}, 'phone')
+  const rawPhone = nullableText(row?.phone, 80)
+  const phone = rawPhone ? normalizePolishPhoneE164(rawPhone) : null
+  if (rawPhone && !phone) {
+    throw publicError(
+      400,
+      'WORKER_PHONE_INVALID',
+      `Pracownik ${login} ma niepoprawny polski numer telefonu.`,
+    )
+  }
   return {
     login,
     workerId: nullableText(row?.workerId ?? row?.worker_id ?? row?.id, 128),
     name: nullableText(row?.fullName ?? row?.workerName ?? row?.name, 240) || login,
     email: nullableText(row?.loginEmail ?? row?.login_email ?? row?.email, 160),
-    phone: nullableText(row?.phone, 80),
+    phone,
+    phoneProvided,
     role: nullableText(row?.role, 32) || 'WORKER',
     workerType: nullableText(row?.workerType ?? row?.worker_type ?? row?.type ?? row?.role, 40) || 'WORKER',
     active: asBoolean(row?.active, true),
@@ -1026,11 +1057,11 @@ async function restoreWorkers(client, orgId, rows, restoredBy) {
             set full_name = $3::text,
                 login_email = nullif($4::text, ''),
                 email = nullif($4::text, ''),
-                phone = nullif($5::text, ''),
-                role = $6::text,
-                worker_type = $7::text,
-                active = $8::boolean,
-                edit = nullif($9::text, ''),
+                phone = case when $5::boolean then nullif($6::text, '') else phone end,
+                role = $7::text,
+                worker_type = $8::text,
+                active = $9::boolean,
+                edit = nullif($10::text, ''),
                 updated_at = now()
           where org_id = $1::text
             and lower(login) = lower($2::text)`,
@@ -1039,6 +1070,7 @@ async function restoreWorkers(client, orgId, rows, restoredBy) {
           row.login,
           row.name,
           row.email,
+          row.phoneProvided,
           row.phone,
           row.role,
           row.workerType,
@@ -1049,6 +1081,8 @@ async function restoreWorkers(client, orgId, rows, restoredBy) {
       updated += 1
       continue
     }
+
+    const restoredPhone = workerPhone(row.phone, { required: true })
 
     let workerId = row.workerId
     const parsedNumber = workerId ? parseWorkerNumber(orgId, workerId) : null
@@ -1114,7 +1148,7 @@ async function restoreWorkers(client, orgId, rows, restoredBy) {
         workerId,
         row.name,
         row.email,
-        row.phone,
+        restoredPhone,
         row.role,
         row.workerType,
         restoredBy,

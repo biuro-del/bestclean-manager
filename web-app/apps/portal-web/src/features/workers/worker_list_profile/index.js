@@ -33,6 +33,10 @@ import {
 import { resolveOperationalMapAvatarKind } from '../../dashboard/operationalMapModel.js'
 import { applyCurrentMonthMissingStopStatus } from './missingStopModel.js'
 import { getWorkTimeDays } from '../../../services/workTimeDayService.js'
+import {
+  POLISH_PHONE_PREFIX,
+  polishPhoneForDisplay,
+} from '../../../utils/polishPhone.js'
 
 export const route = 'workerProfile'
 export const viewId = 'view-workerProfile'
@@ -1663,6 +1667,9 @@ export function createWorkerProfileFeature(ctx) {
     }
 
     configureWorkerProfileRoleOptions(roleInput, typeInput, mode, worker)
+    if (phoneInput instanceof HTMLInputElement) {
+      phoneInput.required = mode === 'add'
+    }
 
     if (mode === 'add') {
       const nextWorkerNumber = getNextWorkerProfileNumberPreview()
@@ -1698,7 +1705,7 @@ export function createWorkerProfileFeature(ctx) {
         emailInput.value = ''
         emailInput.placeholder = 'np. jan.kowalski@gmail.com'
       }
-      if (phoneInput) phoneInput.value = ''
+      if (phoneInput) phoneInput.value = `${POLISH_PHONE_PREFIX} `
       setWorkerProfilePhotoState({ photoUrl: '' })
     } else {
       if (modalTitle) modalTitle.textContent = canManageWorkers() ? 'Edytuj pracownika' : 'Podgląd pracownika'
@@ -1730,7 +1737,7 @@ export function createWorkerProfileFeature(ctx) {
         emailInput.value = worker?.email || ''
         emailInput.placeholder = ''
       }
-      if (phoneInput) phoneInput.value = worker?.phone || ''
+      if (phoneInput) phoneInput.value = polishPhoneForDisplay(worker?.phone)
       setWorkerProfilePhotoState({ photoUrl: workerProfilePhotoUrl(worker) })
     }
 
