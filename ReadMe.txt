@@ -5358,3 +5358,33 @@ Granice przed przełączeniem ruchu:
   uśpionym buildzie aż do poprawnego backfillu i postflightu bez dryfu.
 - Provider Phone pozostaje wyłączony podczas backfillu i aktywacji runtime;
   Email/Password pozostaje włączony.
+
+Data: 2026-09-15 CEST
+Autor: AI Codex
+Temat: Produkcyjny cutover tożsamości telefonu pracownika
+Zgoda: `OK PRODUKCJA CLZ-WORKER-PHONE-IDENTITY-CUTOVER-20260914-01`
+Wykonano:
+- Najpierw wdrożono uśpiony build `bld-20260915-phone-dormant-01`, a aktywny
+  build `bld-20260915-phone-active-01` przygotowano bez kierowania ruchu.
+- Wyłączono wyłącznie provider Phone, pozostawiając Email/Password aktywny,
+  po czym kontrolowany backfill z niezmienionego uśpionego obrazu zaktualizował
+  51 kont Firebase Auth. Nie wykonano automatycznych ponowień.
+- Postflight i niezależny audyt potwierdziły 0 konfliktów, 0 zaległych zmian,
+  51 wpisów `ALREADY_SYNCED`, 13 nieaktywnych i 8 bez numeru telefonu.
+- Ruch przełączono w 100% na aktywny build ze źródła
+  `027bdaf0bc0208224fda35a85cc57de4e0d900b3`; stan rolloutu `SUCCEEDED`,
+  bez trwającej rekoncyliacji ruchu.
+- Provider Phone ponownie włączono. Email/Password pozostał włączony.
+Weryfikacja produkcyjna:
+- Publiczne smoke testy: `/` = 200, niezalogowane `/api/auth/session-context`
+  i `/api/admin/workers` = 401.
+- Audyt aktywnego obrazu z włączoną flagą i providerem Phone: 0 konfliktów,
+  0 zaległych zmian, gotowy trigger oraz połączenie Cloud SQL Connector.
+- Konto dla uzgodnionego numeru testowego istnieje, jest aktywne i zachowało
+  metody `google.com`, `password` oraz `phone`.
+- W oknie migracyjnym nie zarejestrowano żądania zmiany danych pracownika.
+Granice:
+- SMS nie został dodany do portalu ani wersji webowej. Końcowy test otrzymania
+  kodu SMS i zalogowania pozostaje testem natywnej aplikacji APK.
+- Potwierdzonym rollbackiem pozostaje uśpiony build
+  `bld-20260915-phone-dormant-01` z flagą runtime `false`.
