@@ -5338,3 +5338,23 @@ Granice przed aktywacją:
 - Wdrożenie, backfill i aktywacja wymagają osobnych bramek produkcyjnych, zerowej
   liczby konfliktów i utrzymania logowania Email/Password.
 - SMS pozostaje poza portalem i webem; pełny test logowania wymaga natywnej aplikacji.
+
+Data: 2026-09-15 CEST
+Autor: AI Codex
+Temat: Kandydat aktywacji synchronizacji numeru pracownika z Firebase UID
+Zmieniono:
+- W osobnym kandydacie aktywacyjnym ustawiono
+  `WORKER_FIREBASE_PHONE_IDENTITY_ENABLED=true` dla runtime App Hosting.
+- Bramka backfillu nadal odczytuje rzeczywisty stan pliku App Hosting w ścieżce
+  wykonawczej, a testy przekazują jawny uśpiony kontekst do sprawdzenia pozostałych
+  blokad. Aktywny checkout pozostaje niedozwolonym źródłem backfillu.
+Weryfikacja:
+- Celowane testy telefonu i transakcji pracownika: 23/23 PASS.
+- Pełny zestaw: 1167/1167 PASS.
+- `npm run build` - PASS.
+- `git diff --check` - PASS przed zapisem commita.
+Granice przed przełączeniem ruchu:
+- Kandydat aktywacyjny ma zostać zbudowany bez rolloutu; produkcja pozostaje na
+  uśpionym buildzie aż do poprawnego backfillu i postflightu bez dryfu.
+- Provider Phone pozostaje wyłączony podczas backfillu i aktywacji runtime;
+  Email/Password pozostaje włączony.

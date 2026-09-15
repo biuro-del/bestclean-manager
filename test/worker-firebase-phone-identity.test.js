@@ -161,7 +161,7 @@ test('backend zachowuje UID i email haslo, a telefon dopina w create update i ro
   assert.match(envExample, /^WORKER_FIREBASE_PHONE_IDENTITY_ENABLED=false$/m)
   assert.match(
     appHosting,
-    /variable: WORKER_FIREBASE_PHONE_IDENTITY_ENABLED\r?\n\s+value: "false"/,
+    /variable: WORKER_FIREBASE_PHONE_IDENTITY_ENABLED\r?\n\s+value: "true"/,
   )
   assert.match(
     backend,

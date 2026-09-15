@@ -33,6 +33,7 @@ function validContext(overrides = {}) {
     },
     phoneTriggerReady: true,
     providerState: { state: 'DISABLED' },
+    appHostingFlagFalse: true,
     plan: {
       planHash: 'abc123',
       conflicts: 0,
@@ -59,8 +60,12 @@ test('apply wymaga kompletu potwierdzen i wylaczonego providera', () => {
   const previousFlag = process.env.WORKER_FIREBASE_PHONE_IDENTITY_ENABLED
   process.env.WORKER_FIREBASE_PHONE_IDENTITY_ENABLED = 'false'
   try {
-    assert.equal(appHostingFlagIsFalse(), true)
+    assert.equal(appHostingFlagIsFalse(), false)
     assert.equal(withArguments(validArguments(), () => assertApplyGate(validContext())), 2)
+    assert.throws(
+      () => withArguments(validArguments(), () => assertApplyGate(validContext({ appHostingFlagFalse: false }))),
+      /APPHOSTING_PHONE_IDENTITY_FLAG_MUST_BE_FALSE/,
+    )
     assert.throws(
       () => withArguments(validArguments({ 'confirm-plan': 'stary-plan' }), () => assertApplyGate(validContext())),
       /CONFIRM_PLAN_MISMATCH/,

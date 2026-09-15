@@ -253,7 +253,9 @@ function assertApplyGate(context) {
   if (isTrue(process.env.WORKER_FIREBASE_PHONE_IDENTITY_ENABLED)) {
     throw new Error('WORKER_FIREBASE_PHONE_IDENTITY_MUST_BE_DISABLED')
   }
-  if (!appHostingFlagIsFalse()) throw new Error('APPHOSTING_PHONE_IDENTITY_FLAG_MUST_BE_FALSE')
+  if (context.appHostingFlagFalse !== true) {
+    throw new Error('APPHOSTING_PHONE_IDENTITY_FLAG_MUST_BE_FALSE')
+  }
   if (!context.phoneTriggerReady) throw new Error('WORKER_PHONE_TRIGGER_REQUIRED')
   if (context.plan.conflicts > 0) throw new Error('PHONE_BACKFILL_CONFLICTS_PRESENT')
   const maxUpdates = Number(readOption('max-updates'))
@@ -307,6 +309,7 @@ async function main() {
       phoneTriggerReady: databaseState.phoneTriggerReady,
       databaseConnection,
       providerState,
+      appHostingFlagFalse: appHostingFlagIsFalse(),
       plan,
     }
 
@@ -318,7 +321,7 @@ async function main() {
         phoneTriggerReady: databaseState.phoneTriggerReady,
         databaseConnection,
         providerState,
-        appHostingFlagFalse: appHostingFlagIsFalse(),
+        appHostingFlagFalse: context.appHostingFlagFalse,
         runtimeFlagEnabled: isTrue(process.env.WORKER_FIREBASE_PHONE_IDENTITY_ENABLED),
         ...redactWorkerFirebasePhonePlan(plan),
       }, null, 2))
