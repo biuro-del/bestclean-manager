@@ -5316,3 +5316,25 @@ Granice:
   uwierzytelniony canary E2E na izolowanych danych testowych.
 - Zastany test Grafiku zależy od końców linii SQL (LF/CRLF) i wymaga osobnego
   hotfixu przenośności. Nie należy mieszać tej poprawki z Historia STOP P0.
+
+Data: 2026-09-15 CEST
+Autor: AI Codex
+Temat: Kandydat kontrolowanego powiązania numeru telefonu pracownika z Firebase UID
+Dodano:
+- Synchronizację numeru telefonu pracownika do istniejącego Firebase UID przy
+  tworzeniu, edycji i przywracaniu pracownika, chronioną flagą wydaniową
+  `WORKER_FIREBASE_PHONE_IDENTITY_ENABLED=false`.
+- Audyt i warunkowy backfill produkcyjny z blokadą konfliktów UID/numeru,
+  przypięciem projektu, bazy i instancji Cloud SQL, hashem planu oraz limitem
+  liczby aktualizacji.
+- Kontrolę wymagającą wyłączonego providera Phone podczas backfillu, blokady tabel
+  na czas operacji, redakcję danych osobowych w raporcie oraz postflight bez dryfu.
+Weryfikacja:
+- `npm test` - PASS.
+- `npm run build` - PASS.
+- Projekt nie definiuje osobnego skryptu `npm run lint`.
+Granice przed aktywacją:
+- Flaga App Hosting pozostaje `false`; sam kandydat nie uruchamia synchronizacji.
+- Wdrożenie, backfill i aktywacja wymagają osobnych bramek produkcyjnych, zerowej
+  liczby konfliktów i utrzymania logowania Email/Password.
+- SMS pozostaje poza portalem i webem; pełny test logowania wymaga natywnej aplikacji.
