@@ -34,6 +34,10 @@ env:
     value: "1080573912983-n4lpp41j8s7iff16s2ddadjvdjss3t95.apps.googleusercontent.com"
     availability:
       - BUILD
+  - variable: VITE_CENTRAL_REGISTRATION_TURNSTILE_SITE_KEY
+    value: "0x4AAAAAAE7sJSYBZh6kanPF"
+    availability:
+      - BUILD
   - variable: VITE_CENTRAL_REGISTRATION_ISSUER_READY
     value: "true"
     availability:

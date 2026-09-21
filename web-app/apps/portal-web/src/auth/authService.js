@@ -36,6 +36,7 @@ import {
 } from '../../../../../Cleanzi-admin/frontend/platformFirebaseClient'
 import { renderSubscriptionBadge } from '../ui/subscriptionBadge'
 import { resolveAuthEmailDeliveryPolicy } from './authEmailDeliveryPolicy'
+import { requestCentralRegistrationTurnstileToken } from './centralRegistrationTurnstile'
 
 const AUTH_STORAGE_KEY = 'iclean.portal.auth'
 const LAST_ORG_STORAGE_KEY = 'iclean.portal.lastOrgId'
@@ -50,6 +51,8 @@ const AUTH_EMAIL_MAX_LENGTH = 160
 const CENTRAL_REGISTRATION_FUNCTIONS_REGION = 'europe-west1'
 const CLEANING_COMPANY_REGISTRATION_ISSUER_NAME = 'issueCleaningCompanyRegistrationGrant'
 const FACILITY_MANAGER_REGISTRATION_ISSUER_NAME = 'issueFacilityManagerRegistrationGrant'
+const CLEANING_COMPANY_GOOGLE_CHALLENGE_NAME = 'beginCleaningCompanyGoogleRegistration'
+const FACILITY_MANAGER_GOOGLE_CHALLENGE_NAME = 'beginFacilityManagerGoogleRegistration'
 const FACILITY_MANAGER_REGISTRATION_ENDPOINT = '/api/registration/facility-manager'
 const CLEANING_COMPANY_EXISTING_ACCOUNT_ENROLLMENT_ENDPOINT = '/registration/cleaning-company/resume'
 const AUTH_EMAIL_DELIVERY_MODE = String(import.meta.env.VITE_AUTH_EMAIL_DELIVERY_MODE ?? '')
@@ -906,51 +909,42 @@ function mapCentralRegistrationIssuerError(error, { google = false } = {}) {
 }
 
 async function issueCleaningCompanyRegistrationGrant(firebase, payload) {
-  assertCentralRegistrationIssuerReady()
-  await requireRegistrationAppCheckToken()
-  if (!firebase?.app) {
-    throw createPublicAuthError('FIREBASE_AUTH_UNAVAILABLE', 'Rejestracja firmy jest chwilowo niedostępna.')
-  }
-
-  try {
-    const issuer = httpsCallable(
-      getFunctions(firebase.app, CENTRAL_REGISTRATION_FUNCTIONS_REGION),
-      CLEANING_COMPANY_REGISTRATION_ISSUER_NAME,
-    )
-    await issuer(payload)
-  } catch (error) {
-    throw mapCentralRegistrationIssuerError(error)
-  }
+  return callCentralRegistrationIssuer(firebase, CLEANING_COMPANY_REGISTRATION_ISSUER_NAME, payload)
 }
 
 async function issueFacilityManagerRegistrationGrant(firebase, payload) {
+  return callCentralRegistrationIssuer(firebase, FACILITY_MANAGER_REGISTRATION_ISSUER_NAME, payload, { google: true })
+}
+
+async function callCentralRegistrationIssuer(firebase, name, payload, { google = false } = {}) {
   assertCentralRegistrationIssuerReady()
   await requireRegistrationAppCheckToken()
   if (!firebase?.app) {
-    throw createPublicAuthError('FIREBASE_AUTH_UNAVAILABLE', 'Rejestracja panelu zarządcy jest chwilowo niedostępna.')
+    throw createPublicAuthError('FIREBASE_AUTH_UNAVAILABLE', 'Rejestracja jest chwilowo niedostępna.')
   }
 
   try {
     const issuer = httpsCallable(
       getFunctions(firebase.app, CENTRAL_REGISTRATION_FUNCTIONS_REGION),
-      FACILITY_MANAGER_REGISTRATION_ISSUER_NAME,
+      name,
     )
-    await issuer(payload)
+    const response = await issuer(payload)
+    return response?.data && typeof response.data === 'object' ? response.data : response
   } catch (error) {
-    throw mapCentralRegistrationIssuerError(error, { google: true })
+    throw mapCentralRegistrationIssuerError(error, { google })
   }
 }
 
-function createGoogleRegistrationNonce() {
-  if (typeof globalThis.crypto?.randomUUID === 'function') {
-    return globalThis.crypto.randomUUID()
+async function beginCentralRegistrationGoogleChallenge(firebase, name, action) {
+  const turnstileToken = await requestCentralRegistrationTurnstileToken(action)
+  const payload = await callCentralRegistrationIssuer(firebase, name, { turnstileToken }, { google: true })
+  const challengeToken = toText(payload?.challengeToken)
+  const googleNonce = toText(payload?.googleNonce)
+  const expiresAtMs = Number(payload?.expiresAtMs)
+  if (!challengeToken || !googleNonce || !Number.isInteger(expiresAtMs) || expiresAtMs <= Date.now()) {
+    throw createPublicAuthError('REGISTRATION_CHALLENGE_INVALID', 'Nie udało się bezpiecznie przygotować rejestracji. Spróbuj ponownie.')
   }
-  if (typeof globalThis.crypto?.getRandomValues !== 'function') {
-    throw createPublicAuthError('GOOGLE_IDENTITY_UNAVAILABLE', 'Rejestracja przez Google jest chwilowo niedostępna.')
-  }
-  const bytes = new Uint8Array(20)
-  globalThis.crypto.getRandomValues(bytes)
-  return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
+  return { challengeToken, googleNonce }
 }
 
 async function loadGoogleIdentityLibrary() {
@@ -997,22 +991,25 @@ async function loadGoogleIdentityLibrary() {
   return googleIdentityScriptPromise
 }
 
-async function requestGoogleRegistrationCredential() {
-  return requestGoogleIdentityCredential({ requireRegistrationIssuer: true })
+async function requestGoogleRegistrationCredential(googleNonce) {
+  return requestGoogleIdentityCredential({ requireRegistrationIssuer: true, nonce: googleNonce })
 }
 
 async function requestGoogleSignInCredential() {
   return requestGoogleIdentityCredential()
 }
 
-async function requestGoogleIdentityCredential({ requireRegistrationIssuer = false } = {}) {
+async function requestGoogleIdentityCredential({ requireRegistrationIssuer = false, nonce = '' } = {}) {
   if (requireRegistrationIssuer) {
     assertCentralRegistrationIssuerReady({ requiresGoogle: true })
   } else {
     assertGoogleRegistrationIdentityReady()
   }
   const googleIdentity = await loadGoogleIdentityLibrary()
-  const nonce = createGoogleRegistrationNonce()
+  const resolvedNonce = toText(nonce)
+  if (requireRegistrationIssuer && !resolvedNonce) {
+    throw createPublicAuthError('REGISTRATION_CHALLENGE_REQUIRED', 'Nie udało się bezpiecznie przygotować rejestracji. Spróbuj ponownie.')
+  }
 
   return new Promise((resolve, reject) => {
     let settled = false
@@ -1025,7 +1022,7 @@ async function requestGoogleIdentityCredential({ requireRegistrationIssuer = fal
     try {
       googleIdentity.initialize({
         client_id: CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID,
-        nonce,
+        ...(resolvedNonce ? { nonce: resolvedNonce } : {}),
         auto_select: false,
         cancel_on_tap_outside: true,
         callback: (response) => {
@@ -1037,7 +1034,7 @@ async function requestGoogleIdentityCredential({ requireRegistrationIssuer = fal
             )
             return
           }
-          settle(resolve, { idToken, nonce })
+          settle(resolve, { idToken })
         },
       })
       googleIdentity.prompt((notification) => {
@@ -1120,14 +1117,19 @@ export async function startCleaningCompanyGoogleSignIn() {
 
   await assertCleaningCompanyRegistrationAvailable()
   await ensureFirebaseAuthPersistence()
-  const { idToken, nonce } = await requestGoogleRegistrationCredential()
+  const challenge = await beginCentralRegistrationGoogleChallenge(
+    firebase,
+    CLEANING_COMPANY_GOOGLE_CHALLENGE_NAME,
+    'registration_cleaning_company',
+  )
+  const { idToken } = await requestGoogleRegistrationCredential(challenge.googleNonce)
   // The global Firebase beforeCreate gate consumes this grant during the next
   // operation. Do not replace this credential flow with a direct Firebase
   // popup: it would try to create the user before the issuer can grant it.
   await issueCleaningCompanyRegistrationGrant(firebase, {
     providerId: 'google.com',
     googleIdToken: idToken,
-    googleNonce: nonce,
+    googleChallengeToken: challenge.challengeToken,
   })
   const credential = await signInWithCredential(firebase.auth, GoogleAuthProvider.credential(idToken))
   const context = await resolveFreshAuthenticatedUser(credential.user)
@@ -1404,13 +1406,18 @@ export async function registerFacilityManagerWithGoogle({ organizationName, idem
   }
 
   await ensureFirebaseAuthPersistence()
-  const { idToken: googleIdToken, nonce } = await requestGoogleRegistrationCredential()
+  const challenge = await beginCentralRegistrationGoogleChallenge(
+    firebase,
+    FACILITY_MANAGER_GOOGLE_CHALLENGE_NAME,
+    'registration_facility_manager',
+  )
+  const { idToken: googleIdToken } = await requestGoogleRegistrationCredential(challenge.googleNonce)
   // The central beforeCreate gate consumes this manager grant when Firebase
   // creates the Google user. Do not move the sign-in before this call.
   await issueFacilityManagerRegistrationGrant(firebase, {
     providerId: 'google.com',
     googleIdToken,
-    googleNonce: nonce,
+    googleChallengeToken: challenge.challengeToken,
   })
   let user = null
 
@@ -1458,9 +1465,11 @@ export async function requestCleaningCompanyEmailLink(emailValue) {
   assertCleaningCompanyEmailDeliveryAllowed(firebase)
   // A valid grant must exist before the Firebase e-mail link can create a
   // first account. The issuer and the blocking gate keep the grant private.
+  const turnstileToken = await requestCentralRegistrationTurnstileToken('registration_cleaning_company')
   await issueCleaningCompanyRegistrationGrant(firebase, {
     providerId: 'emailLink',
     email,
+    turnstileToken,
   })
   try {
     await sendSignInLinkToEmail(firebase.auth, email, {

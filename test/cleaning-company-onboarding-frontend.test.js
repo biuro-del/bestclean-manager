@@ -14,6 +14,7 @@ function readPortalSource(...parts) {
 
 const layout = readPortalSource('ui', 'layoutTemplate.js')
 const auth = readPortalSource('auth', 'authService.js')
+const turnstile = readPortalSource('auth', 'centralRegistrationTurnstile.js')
 const app = readPortalSource('ui', 'portalApp.js')
 const appEntry = readPortalSource('App.jsx')
 const loginStyles = readPortalSource('ui', 'styles', 'login.css')
@@ -128,8 +129,9 @@ test('registration uses server-published, exact legal documents and a trusted on
   assert.match(app, /result\?\.status === 'CLEANING_COMPANY_ONBOARDING_REQUIRED'/)
 })
 
-test('company registration obtains the central gate grant before Firebase Auth and reuses the existing App Check provider', () => {
+test('company registration obtains a server challenge and a central gate grant before Firebase Auth', () => {
   const googleStart = auth.indexOf('export async function startCleaningCompanyGoogleSignIn')
+  const googleChallenge = auth.indexOf('await beginCentralRegistrationGoogleChallenge(', googleStart)
   const googleGrant = auth.indexOf('await issueCleaningCompanyRegistrationGrant(firebase, {', googleStart)
   const googleCredential = auth.indexOf('signInWithCredential(firebase.auth, GoogleAuthProvider.credential(idToken))', googleStart)
   const googleAvailability = auth.indexOf('await assertCleaningCompanyRegistrationAvailable()', googleStart)
@@ -138,7 +140,8 @@ test('company registration obtains the central gate grant before Firebase Auth a
   const emailLink = auth.indexOf('sendSignInLinkToEmail', emailStart)
   const emailAvailability = auth.indexOf('await assertCleaningCompanyRegistrationAvailable()', emailStart)
 
-  assert.ok(googleStart >= 0 && googleAvailability > googleStart && googleAvailability < googleGrant)
+  assert.ok(googleStart >= 0 && googleAvailability > googleStart && googleAvailability < googleChallenge)
+  assert.ok(googleChallenge > googleStart && googleChallenge < googleGrant)
   assert.ok(googleGrant > googleStart && googleGrant < googleCredential)
   assert.ok(emailStart >= 0 && emailAvailability > emailStart && emailAvailability < emailGrant)
   assert.ok(emailGrant > emailStart && emailGrant < emailLink)
@@ -146,6 +149,13 @@ test('company registration obtains the central gate grant before Firebase Auth a
   assert.match(auth, /getFunctions\(firebase\.app, CENTRAL_REGISTRATION_FUNCTIONS_REGION\)/)
   assert.match(auth, /providerId: 'google\.com'/)
   assert.match(auth, /providerId: 'emailLink'/)
+  assert.match(auth, /googleChallengeToken: challenge\.challengeToken/)
+  assert.doesNotMatch(auth, /googleNonce: nonce/)
+  assert.match(auth, /registration_cleaning_company/)
+  assert.match(auth, /registration_facility_manager/)
+  assert.match(turnstile, /VITE_CENTRAL_REGISTRATION_TURNSTILE_SITE_KEY/)
+  assert.match(turnstile, /execution: 'execute'/)
+  assert.match(turnstile, /appearance: 'interaction-only'/)
   assert.match(auth, /VITE_CENTRAL_REGISTRATION_ISSUER_READY/)
   assert.match(auth, /VITE_CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID/)
   assert.match(auth, /requireRegistrationAppCheckToken\(\)/)
