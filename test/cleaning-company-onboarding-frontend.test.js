@@ -154,6 +154,8 @@ test('company registration obtains a server challenge and a central gate grant b
   assert.match(auth, /registration_cleaning_company/)
   assert.match(auth, /registration_facility_manager/)
   assert.match(turnstile, /VITE_CENTRAL_REGISTRATION_TURNSTILE_SITE_KEY/)
+  assert.match(turnstile, /TURNSTILE_SCRIPT_LOAD_TIMEOUT_MS = 12000/)
+  assert.match(turnstile, /TURNSTILE_LOAD_TIMEOUT/)
   assert.match(turnstile, /execution: 'execute'/)
   assert.match(turnstile, /appearance: 'interaction-only'/)
   assert.match(auth, /VITE_CENTRAL_REGISTRATION_ISSUER_READY/)

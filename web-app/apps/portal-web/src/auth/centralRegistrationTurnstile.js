@@ -1,4 +1,5 @@
 const TURNSTILE_SCRIPT_URL = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+const TURNSTILE_SCRIPT_LOAD_TIMEOUT_MS = 12000
 
 let turnstileScriptPromise = null
 
@@ -24,14 +25,23 @@ async function loadTurnstile() {
   if (!turnstileScriptPromise) {
     turnstileScriptPromise = new Promise((resolve, reject) => {
       let attempts = 0
-      const unavailable = () => {
+      let script = null
+      let settled = false
+      let timeoutId = null
+      const unavailable = (error = null) => {
+        if (settled) return
+        settled = true
+        if (timeoutId) window.clearTimeout(timeoutId)
         turnstileScriptPromise = null
-        reject(publicError('TURNSTILE_UNAVAILABLE', 'Nie udało się uruchomić ochrony rejestracji.'))
+        if (script?.parentNode) script.parentNode.removeChild(script)
+        reject(error || publicError('TURNSTILE_UNAVAILABLE', 'Nie udało się uruchomić ochrony rejestracji.'))
       }
       // The script load event can precede the public API by a short moment.
       // Wait for the documented global instead of rejecting this normal race.
       const loaded = () => {
         if (window.turnstile?.render && window.turnstile?.execute) {
+          settled = true
+          if (timeoutId) window.clearTimeout(timeoutId)
           resolve(window.turnstile)
           return
         }
@@ -41,19 +51,23 @@ async function loadTurnstile() {
         }
         unavailable()
       }
-      const existing = document.querySelector(`script[src="${TURNSTILE_SCRIPT_URL}"]`)
-      if (existing) {
-        existing.addEventListener('load', loaded, { once: true })
-        existing.addEventListener('error', unavailable, { once: true })
-        return
+      script = document.querySelector(`script[src="${TURNSTILE_SCRIPT_URL}"]`)
+      if (script) {
+        script.addEventListener('load', loaded, { once: true })
+        script.addEventListener('error', () => unavailable(), { once: true })
+      } else {
+        script = document.createElement('script')
+        script.src = TURNSTILE_SCRIPT_URL
+        script.async = true
+        script.defer = true
+        script.addEventListener('load', loaded, { once: true })
+        script.addEventListener('error', () => unavailable(), { once: true })
+        document.head.appendChild(script)
       }
-      const script = document.createElement('script')
-      script.src = TURNSTILE_SCRIPT_URL
-      script.async = true
-      script.defer = true
-      script.addEventListener('load', loaded, { once: true })
-      script.addEventListener('error', unavailable, { once: true })
-      document.head.appendChild(script)
+      timeoutId = window.setTimeout(
+        () => unavailable(publicError('TURNSTILE_LOAD_TIMEOUT', 'Ładowanie ochrony rejestracji trwa zbyt długo. Sprawdź internet i spróbuj ponownie.')),
+        TURNSTILE_SCRIPT_LOAD_TIMEOUT_MS,
+      )
     })
   }
   return turnstileScriptPromise
@@ -104,7 +118,7 @@ export async function requestCentralRegistrationTurnstileToken(action) {
         sitekey: siteKey(),
         action: normalizedAction,
         execution: 'execute',
-        appearance: 'execute',
+        appearance: 'interaction-only',
         callback: (token) => {
           const proof = String(token ?? '').trim()
           finish(proof ? resolve : reject, proof || publicError('TURNSTILE_REJECTED', 'Weryfikacja rejestracji nie powiodła się.'))
