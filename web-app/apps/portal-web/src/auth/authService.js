@@ -59,6 +59,8 @@ const AUTH_EMAIL_DELIVERY_MODE = String(import.meta.env.VITE_AUTH_EMAIL_DELIVERY
   .trim()
   .toLowerCase()
 const GOOGLE_IDENTITY_SCRIPT_URL = 'https://accounts.google.com/gsi/client'
+const GOOGLE_IDENTITY_LOAD_TIMEOUT_MS = 12000
+const GOOGLE_ACCOUNT_SELECTION_TIMEOUT_MS = 60000
 const CENTRAL_REGISTRATION_ISSUER_READY = String(import.meta.env.VITE_CENTRAL_REGISTRATION_ISSUER_READY ?? '')
   .trim()
   .toLowerCase() === 'true'
@@ -956,36 +958,49 @@ async function loadGoogleIdentityLibrary() {
   }
   if (!googleIdentityScriptPromise) {
     googleIdentityScriptPromise = new Promise((resolve, reject) => {
-      const finish = () => {
+      let finished = false
+      let timer = null
+      let script = document.querySelector(`script[src="${GOOGLE_IDENTITY_SCRIPT_URL}"]`)
+      const finish = (error = null) => {
+        if (finished) return
+        finished = true
+        if (timer) window.clearTimeout(timer)
         const identity = window.google?.accounts?.id
         if (identity?.initialize && identity?.prompt) {
           resolve(identity)
           return
         }
-        reject(createPublicAuthError('GOOGLE_IDENTITY_UNAVAILABLE', 'Rejestracja przez Google jest chwilowo niedostępna.'))
+        if (script?.parentNode) script.parentNode.removeChild(script)
+        reject(error || createPublicAuthError('GOOGLE_IDENTITY_UNAVAILABLE', 'Rejestracja przez Google jest chwilowo niedostępna.'))
       }
-      const existing = document.querySelector(`script[src="${GOOGLE_IDENTITY_SCRIPT_URL}"]`)
-      if (existing) {
-        existing.addEventListener('load', finish, { once: true })
-        existing.addEventListener(
+      const fail = () => finish(createPublicAuthError('GOOGLE_IDENTITY_UNAVAILABLE', 'Nie udało się połączyć z Google. Sprawdź internet i spróbuj ponownie.'))
+      if (script) {
+        script.addEventListener('load', () => finish(), { once: true })
+        script.addEventListener(
           'error',
-          () => reject(createPublicAuthError('GOOGLE_IDENTITY_UNAVAILABLE', 'Rejestracja przez Google jest chwilowo niedostępna.')),
+          fail,
           { once: true },
         )
-        return
+      } else {
+        script = document.createElement('script')
+        script.src = GOOGLE_IDENTITY_SCRIPT_URL
+        script.async = true
+        script.defer = true
+        script.addEventListener('load', () => finish(), { once: true })
+        script.addEventListener(
+          'error',
+          fail,
+          { once: true },
+        )
+        document.head.appendChild(script)
       }
-
-      const script = document.createElement('script')
-      script.src = GOOGLE_IDENTITY_SCRIPT_URL
-      script.async = true
-      script.defer = true
-      script.addEventListener('load', finish, { once: true })
-      script.addEventListener(
-        'error',
-        () => reject(createPublicAuthError('GOOGLE_IDENTITY_UNAVAILABLE', 'Rejestracja przez Google jest chwilowo niedostępna.')),
-        { once: true },
+      timer = window.setTimeout(
+        () => finish(createPublicAuthError('GOOGLE_IDENTITY_LOAD_TIMEOUT', 'Ładowanie wyboru konta Google trwa zbyt długo. Spróbuj ponownie.')),
+        GOOGLE_IDENTITY_LOAD_TIMEOUT_MS,
       )
-      document.head.appendChild(script)
+    })
+    googleIdentityScriptPromise.catch(() => {
+      googleIdentityScriptPromise = null
     })
   }
   return googleIdentityScriptPromise
@@ -1013,11 +1028,20 @@ async function requestGoogleIdentityCredential({ requireRegistrationIssuer = fal
 
   return new Promise((resolve, reject) => {
     let settled = false
+    let selectionTimer = null
     const settle = (callback, value) => {
       if (settled) return
       settled = true
+      if (selectionTimer) window.clearTimeout(selectionTimer)
       callback(value)
     }
+
+    selectionTimer = window.setTimeout(() => {
+      settle(
+        reject,
+        createPublicAuthError('GOOGLE_ACCOUNT_SELECTION_TIMEOUT', 'Wybór konta Google nie został otwarty. Spróbuj ponownie.'),
+      )
+    }, GOOGLE_ACCOUNT_SELECTION_TIMEOUT_MS)
 
     try {
       googleIdentity.initialize({
