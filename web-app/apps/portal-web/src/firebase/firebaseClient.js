@@ -5,6 +5,8 @@ import { connectDataConnectEmulator, getDataConnect } from 'firebase/data-connec
 import { connectorConfig } from '@dataconnect/generated'
 import { connectorConfig as readGuardConnectorConfig } from '@dataconnect/read-guard-generated'
 
+const AUTH_PERSISTENCE_TIMEOUT_MS = 8000
+
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -117,9 +119,21 @@ function ensureAuthPersistence(auth) {
   }
 
   if (!authPersistencePromise) {
-    authPersistencePromise = setPersistence(auth, browserLocalPersistence).catch((error) => {
-      console.warn('[firebase] auth persistence setup failed', error)
+    let timer = null
+    const persistence = setPersistence(auth, browserLocalPersistence)
+    const timeout = new Promise((resolve) => {
+      timer = window.setTimeout(() => {
+        console.warn('[firebase] auth persistence setup timed out; continuing with the current session')
+        resolve()
+      }, AUTH_PERSISTENCE_TIMEOUT_MS)
     })
+    authPersistencePromise = Promise.race([persistence, timeout])
+      .catch((error) => {
+        console.warn('[firebase] auth persistence setup failed', error)
+      })
+      .finally(() => {
+        if (timer) window.clearTimeout(timer)
+      })
   }
 
   return authPersistencePromise
