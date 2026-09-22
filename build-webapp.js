@@ -47,12 +47,36 @@ function installWebAppDependencies(npmCmd) {
   run(npmCmd, ['ci', '--no-audit', '--no-fund'], { cwd: webAppDir })
 }
 
+function loadPublicBuildVariables() {
+  // App Hosting injects BUILD variables during its managed build. A Firebase
+  // Hosting preview runs this script directly, so copy only explicit public
+  // VITE_* BUILD values from the tracked configuration. Secret values are
+  // deliberately excluded and a caller-provided environment value wins.
+  const configPath = path.join(__dirname, 'apphosting.yaml')
+  const source = fs.readFileSync(configPath, 'utf8')
+  const entries = source.split(/^  - variable: /m).slice(1)
+
+  for (const entry of entries) {
+    const [nameLine] = entry.split(/\r?\n/, 1)
+    const name = String(nameLine || '').trim()
+    if (!name.startsWith('VITE_') || process.env[name]) continue
+
+    const valueMatch = entry.match(/^    value:\s*(.+)\s*$/m)
+    const hasBuildAvailability = /^      - BUILD\s*$/m.test(entry)
+    if (!valueMatch || !hasBuildAvailability) continue
+
+    process.env[name] = valueMatch[1].trim().replace(/^(["'])(.*)\1$/, '$2')
+    console.log(`[build-webapp] loaded public BUILD variable ${name}`)
+  }
+}
+
 function main() {
   const target = normalizeTarget(process.env.APP_TARGET)
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 
   console.log(`[build-webapp] APP_TARGET=${target}`)
   installWebAppDependencies(npmCmd)
+  loadPublicBuildVariables()
 
   run(npmCmd, ['run', 'build:portal'], { cwd: webAppDir })
 }
