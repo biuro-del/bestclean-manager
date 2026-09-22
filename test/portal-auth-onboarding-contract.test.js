@@ -149,6 +149,17 @@ test('produkcyjny build portalu ma jawnie konfigurowalny publiczny Registration 
   assert.match(envExample, /VITE_REGISTRATION_API_BASE_URL=https:\/\/registration-cleanzi\.web\.app/)
 })
 
+test('podgląd Central Auth buduje się wyłącznie z publiczną konfiguracją Firebase', () => {
+  const helper = fs.readFileSync(path.join(root, 'scripts', 'deploy-central-auth-preview.ps1'), 'utf8')
+  assert.match(helper, /\$Channel = 'central-auth-p0'/)
+  assert.match(helper, /\$Project = 'iclean-room'/)
+  assert.match(helper, /VITE_FIREBASE_API_KEY/)
+  assert.match(helper, /VITE_CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID/)
+  assert.match(helper, /VITE_CENTRAL_REGISTRATION_TURNSTILE_SITE_KEY/)
+  assert.match(helper, /Hosting preview build or this helper/)
+  assert.doesNotMatch(helper, /TURNSTILE_SECRET_KEY/)
+})
+
 test('backend dopuszcza wyłącznie stare niezweryfikowane konta po odczycie członkostw UID', () => {
   const backend = fs.readFileSync(path.join(root, 'index.js'), 'utf8')
   const handlerIndex = backend.indexOf('async function handleAuthSessionContextRequest')
