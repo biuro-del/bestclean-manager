@@ -53,7 +53,21 @@ export async function requestCentralRegistrationTurnstileToken(action) {
   if (!normalizedAction) throw publicError('TURNSTILE_ACTION_REQUIRED', 'Nie udało się bezpiecznie rozpocząć rejestracji.')
   const turnstile = await loadTurnstile()
   const container = document.createElement('div')
-  container.setAttribute('aria-hidden', 'true')
+  // Turnstile can require an interactive challenge. Its iframe must therefore
+  // be visible and reachable while the short-lived proof is being created.
+  container.setAttribute('role', 'status')
+  container.setAttribute('aria-label', 'Weryfikacja bezpieczeństwa rejestracji')
+  container.style.cssText = [
+    'position:fixed',
+    'z-index:2147483647',
+    'left:50%',
+    'top:50%',
+    'transform:translate(-50%,-50%)',
+    'padding:12px',
+    'background:#fff',
+    'border-radius:12px',
+    'box-shadow:0 12px 36px rgba(0,0,0,.28)',
+  ].join(';')
   document.body.appendChild(container)
 
   return new Promise((resolve, reject) => {
@@ -75,7 +89,7 @@ export async function requestCentralRegistrationTurnstileToken(action) {
         sitekey: siteKey(),
         action: normalizedAction,
         execution: 'execute',
-        appearance: 'interaction-only',
+        appearance: 'execute',
         callback: (token) => {
           const proof = String(token ?? '').trim()
           finish(proof ? resolve : reject, proof || publicError('TURNSTILE_REJECTED', 'Weryfikacja rejestracji nie powiodła się.'))
@@ -83,7 +97,13 @@ export async function requestCentralRegistrationTurnstileToken(action) {
         'error-callback': () => finish(reject, publicError('TURNSTILE_UNAVAILABLE', 'Nie udało się uruchomić ochrony rejestracji.')),
         'expired-callback': () => finish(reject, publicError('TURNSTILE_EXPIRED', 'Weryfikacja rejestracji wygasła. Spróbuj ponownie.')),
       })
-      void turnstile.execute(widgetId).catch(() => finish(reject, publicError('TURNSTILE_UNAVAILABLE', 'Nie udało się uruchomić ochrony rejestracji.')))
+      // Cloudflare's supported browser API may return void. Retain the
+      // rejection path for implementations that return a Promise, but do not
+      // turn the normal void result into a client-side error.
+      const execution = turnstile.execute(widgetId)
+      if (execution?.catch) {
+        void execution.catch(() => finish(reject, publicError('TURNSTILE_UNAVAILABLE', 'Nie udało się uruchomić ochrony rejestracji.')))
+      }
     } catch {
       finish(reject, publicError('TURNSTILE_UNAVAILABLE', 'Nie udało się uruchomić ochrony rejestracji.'))
     }
