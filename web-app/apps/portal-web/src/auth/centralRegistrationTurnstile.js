@@ -23,13 +23,28 @@ async function loadTurnstile() {
   if (window.turnstile?.render && window.turnstile?.execute) return window.turnstile
   if (!turnstileScriptPromise) {
     turnstileScriptPromise = new Promise((resolve, reject) => {
-      const loaded = () => window.turnstile?.render && window.turnstile?.execute
-        ? resolve(window.turnstile)
-        : reject(publicError('TURNSTILE_UNAVAILABLE', 'Nie udało się uruchomić ochrony rejestracji.'))
+      let attempts = 0
+      const unavailable = () => {
+        turnstileScriptPromise = null
+        reject(publicError('TURNSTILE_UNAVAILABLE', 'Nie udało się uruchomić ochrony rejestracji.'))
+      }
+      // The script load event can precede the public API by a short moment.
+      // Wait for the documented global instead of rejecting this normal race.
+      const loaded = () => {
+        if (window.turnstile?.render && window.turnstile?.execute) {
+          resolve(window.turnstile)
+          return
+        }
+        if (attempts++ < 20) {
+          window.setTimeout(loaded, 50)
+          return
+        }
+        unavailable()
+      }
       const existing = document.querySelector(`script[src="${TURNSTILE_SCRIPT_URL}"]`)
       if (existing) {
         existing.addEventListener('load', loaded, { once: true })
-        existing.addEventListener('error', () => reject(publicError('TURNSTILE_UNAVAILABLE', 'Nie udało się uruchomić ochrony rejestracji.')), { once: true })
+        existing.addEventListener('error', unavailable, { once: true })
         return
       }
       const script = document.createElement('script')
@@ -37,7 +52,7 @@ async function loadTurnstile() {
       script.async = true
       script.defer = true
       script.addEventListener('load', loaded, { once: true })
-      script.addEventListener('error', () => reject(publicError('TURNSTILE_UNAVAILABLE', 'Nie udało się uruchomić ochrony rejestracji.')), { once: true })
+      script.addEventListener('error', unavailable, { once: true })
       document.head.appendChild(script)
     })
   }
