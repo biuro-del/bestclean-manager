@@ -60,7 +60,7 @@ const AUTH_EMAIL_DELIVERY_MODE = String(import.meta.env.VITE_AUTH_EMAIL_DELIVERY
   .toLowerCase()
 const GOOGLE_IDENTITY_SCRIPT_URL = 'https://accounts.google.com/gsi/client'
 const GOOGLE_IDENTITY_LOAD_TIMEOUT_MS = 12000
-const GOOGLE_ACCOUNT_SELECTION_TIMEOUT_MS = 60000
+const GOOGLE_ACCOUNT_SELECTION_TIMEOUT_MS = 120000
 const CENTRAL_REGISTRATION_ISSUER_READY = String(import.meta.env.VITE_CENTRAL_REGISTRATION_ISSUER_READY ?? '')
   .trim()
   .toLowerCase() === 'true'
@@ -966,7 +966,7 @@ async function loadGoogleIdentityLibrary() {
         finished = true
         if (timer) window.clearTimeout(timer)
         const identity = window.google?.accounts?.id
-        if (identity?.initialize && identity?.prompt) {
+        if (identity?.initialize && identity?.renderButton) {
           resolve(identity)
           return
         }
@@ -1014,6 +1014,71 @@ async function requestGoogleSignInCredential() {
   return requestGoogleIdentityCredential()
 }
 
+function createGoogleIdentityButtonDialog() {
+  const overlay = document.createElement('div')
+  overlay.setAttribute('role', 'dialog')
+  overlay.setAttribute('aria-modal', 'true')
+  overlay.setAttribute('aria-label', 'Wybierz konto Google')
+  Object.assign(overlay.style, {
+    position: 'fixed',
+    inset: '0',
+    zIndex: '2147483000',
+    display: 'grid',
+    placeItems: 'center',
+    padding: '24px',
+    background: 'rgba(6, 22, 65, 0.56)',
+  })
+
+  const panel = document.createElement('div')
+  Object.assign(panel.style, {
+    width: 'min(400px, 100%)',
+    padding: '24px',
+    borderRadius: '20px',
+    background: '#fff',
+    boxShadow: '0 24px 70px rgba(6, 22, 65, 0.28)',
+    color: '#061641',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    textAlign: 'center',
+  })
+
+  const heading = document.createElement('h2')
+  heading.textContent = 'Wybierz konto Google'
+  Object.assign(heading.style, { margin: '0 0 8px', fontSize: '22px' })
+
+  const description = document.createElement('p')
+  description.textContent = 'Kliknij bezpieczny przycisk Google, aby kontynuować.'
+  Object.assign(description.style, { margin: '0 0 20px', color: '#52627c', lineHeight: '1.45' })
+
+  const buttonHost = document.createElement('div')
+  buttonHost.setAttribute('data-testid', 'google-identity-button-host')
+  Object.assign(buttonHost.style, { display: 'flex', justifyContent: 'center', minHeight: '44px' })
+
+  const cancelButton = document.createElement('button')
+  cancelButton.type = 'button'
+  cancelButton.textContent = 'Anuluj'
+  Object.assign(cancelButton.style, {
+    width: '100%',
+    marginTop: '16px',
+    padding: '11px 16px',
+    border: '1px solid #dbe6f5',
+    borderRadius: '12px',
+    background: '#fff',
+    color: '#061641',
+    fontWeight: '700',
+    cursor: 'pointer',
+  })
+
+  panel.append(heading, description, buttonHost, cancelButton)
+  overlay.append(panel)
+  document.body.append(overlay)
+
+  return {
+    buttonHost,
+    cancelButton,
+    remove: () => overlay.remove(),
+  }
+}
+
 async function requestGoogleIdentityCredential({ requireRegistrationIssuer = false, nonce = '' } = {}) {
   if (requireRegistrationIssuer) {
     assertCentralRegistrationIssuerReady({ requiresGoogle: true })
@@ -1029,21 +1094,30 @@ async function requestGoogleIdentityCredential({ requireRegistrationIssuer = fal
   return new Promise((resolve, reject) => {
     let settled = false
     let selectionTimer = null
+    let dialog = null
     const settle = (callback, value) => {
       if (settled) return
       settled = true
       if (selectionTimer) window.clearTimeout(selectionTimer)
+      dialog?.remove()
       callback(value)
     }
 
     selectionTimer = window.setTimeout(() => {
       settle(
         reject,
-        createPublicAuthError('GOOGLE_ACCOUNT_SELECTION_TIMEOUT', 'Wybór konta Google nie został otwarty. Spróbuj ponownie.'),
+        createPublicAuthError('GOOGLE_ACCOUNT_SELECTION_TIMEOUT', 'Wybór konta Google nie został zakończony. Spróbuj ponownie.'),
       )
     }, GOOGLE_ACCOUNT_SELECTION_TIMEOUT_MS)
 
     try {
+      dialog = createGoogleIdentityButtonDialog()
+      dialog.cancelButton.addEventListener('click', () => {
+        settle(
+          reject,
+          createPublicAuthError('GOOGLE_ACCOUNT_SELECTION_CANCELLED', 'Wybór konta Google został anulowany.'),
+        )
+      }, { once: true })
       googleIdentity.initialize({
         client_id: CENTRAL_REGISTRATION_GOOGLE_CLIENT_ID,
         ...(resolvedNonce ? { nonce: resolvedNonce } : {}),
@@ -1061,15 +1135,14 @@ async function requestGoogleIdentityCredential({ requireRegistrationIssuer = fal
           settle(resolve, { idToken })
         },
       })
-      googleIdentity.prompt((notification) => {
-        const cancelled = notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()
-        const dismissed = notification?.isDismissedMoment?.() && notification?.getDismissedReason?.() !== 'credential_returned'
-        if (cancelled || dismissed) {
-          settle(
-            reject,
-            createPublicAuthError('GOOGLE_ACCOUNT_SELECTION_CANCELLED', 'Wybór konta Google został anulowany. Spróbuj ponownie lub zarejestruj się e-mailem.'),
-          )
-        }
+      googleIdentity.renderButton(dialog.buttonHost, {
+        type: 'standard',
+        theme: 'outline',
+        size: 'large',
+        text: requireRegistrationIssuer ? 'signup_with' : 'signin_with',
+        shape: 'rectangular',
+        logo_alignment: 'left',
+        width: 320,
       })
     } catch {
       settle(
