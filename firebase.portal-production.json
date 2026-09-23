@@ -1,0 +1,104 @@
+{
+  "hosting": {
+    "site": "cleanzi-01",
+    "public": "web-app/dist",
+    "ignore": ["firebase.portal-production.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "/authBootstrapMembership",
+        "run": {
+          "serviceId": "authbootstrapmembership",
+          "region": "europe-west3"
+        }
+      },
+      {
+        "source": "/authProvisionWorker",
+        "function": {
+          "functionId": "workerAdminApi",
+          "region": "europe-central2"
+        }
+      },
+      {
+        "source": "/authRollbackWorker",
+        "function": {
+          "functionId": "workerAdminApi",
+          "region": "europe-central2"
+        }
+      },
+      {
+        "source": "/adminWorkerProfileUpdate",
+        "function": {
+          "functionId": "workerAdminApi",
+          "region": "europe-central2"
+        }
+      },
+      {
+        "source": "/adminWorkerProfileDelete",
+        "function": {
+          "functionId": "workerAdminApi",
+          "region": "europe-central2"
+        }
+      },
+      {
+        "source": "/adminWorkerPasswordReveal",
+        "function": {
+          "functionId": "workerAdminApi",
+          "region": "europe-central2"
+        }
+      },
+      {
+        "source": "/adminWorkerPasswordSet",
+        "function": {
+          "functionId": "workerAdminApi",
+          "region": "europe-central2"
+        }
+      },
+      {
+        "source": "/api/worker-admin/**",
+        "function": {
+          "functionId": "workerAdminApi",
+          "region": "europe-central2"
+        }
+      },
+      {
+        "source": "/api/auth/provision-worker",
+        "function": {
+          "functionId": "workerAdminApi",
+          "region": "europe-central2"
+        }
+      },
+      {
+        "source": "/api/auth/rollback-worker",
+        "function": {
+          "functionId": "workerAdminApi",
+          "region": "europe-central2"
+        }
+      },
+      {
+        "source": "/api/admin/worker-profile/**",
+        "function": {
+          "functionId": "workerAdminApi",
+          "region": "europe-central2"
+        }
+      },
+      {
+        "source": "/api/admin/worker-password/**",
+        "function": {
+          "functionId": "workerAdminApi",
+          "region": "europe-central2"
+        }
+      },
+      {
+        "source": "/api/**",
+        "run": {
+          "serviceId": "api",
+          "region": "europe-central2"
+        }
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
