@@ -74,6 +74,11 @@ const { createFacilityManagerObjectService } = require('./facility-manager-objec
 const { createFacilityManagerObjectApi } = require('./facility-manager-object-api')
 const { createPortalZoneApi } = require('./portal-zone-api')
 const {
+  AccountLinkingError,
+  assertNoAccountLinkingRequired,
+  getAccountLinkingRequirement,
+} = require('./account-linking-policy')
+const {
   CLEANING_COMPANY_ONBOARDING_REQUIRED,
   CleaningCompanyOnboardingError,
   findActiveExistingAccountEnrollment,
@@ -8398,6 +8403,8 @@ async function handleCleaningCompanyExistingAccountEnrollmentRequest(req, res) {
       return
     }
 
+    await assertNoAccountLinkingRequired(client, decodedToken)
+
     const enrollment = await startExistingGoogleAccountEnrollment(client, { decodedToken })
     sendJson(res, 200, {
       ok: true,
@@ -8409,7 +8416,7 @@ async function handleCleaningCompanyExistingAccountEnrollmentRequest(req, res) {
       },
     })
   } catch (error) {
-    if (error instanceof CleaningCompanyOnboardingError) {
+    if (error instanceof CleaningCompanyOnboardingError || error instanceof AccountLinkingError) {
       sendApiError(res, error.statusCode, error.code, error.message, error.details)
       return
     }
@@ -8512,6 +8519,8 @@ async function handleCleaningCompanyProvisionRequest(req, res) {
       return
     }
 
+    await assertNoAccountLinkingRequired(client, decodedToken)
+
     const hasRegistrationProvenance = hasCleaningCompanyRegistrationProvenance(decodedToken)
     const existingAccountEnrollment = hasRegistrationProvenance
       ? null
@@ -8556,7 +8565,7 @@ async function handleCleaningCompanyProvisionRequest(req, res) {
       },
     })
   } catch (error) {
-    if (error instanceof CleaningCompanyOnboardingError) {
+    if (error instanceof CleaningCompanyOnboardingError || error instanceof AccountLinkingError) {
       sendApiError(res, error.statusCode, error.code, error.message, error.details)
       return
     }
@@ -8901,6 +8910,19 @@ async function handleAuthSessionContextRequest(req, res, requestUrl) {
     }
 
     if (!accessibleOrganizations.length) {
+      const accountLinking = await getAccountLinkingRequirement(client, decodedToken)
+      if (accountLinking) {
+        sendJson(res, 200, {
+          ok: true,
+          status: accountLinking.status,
+          context: {
+            uid: requesterUid,
+            email: normalizeEmail(decodedToken?.email),
+            actorType: 'ORGANIZATION',
+          },
+        })
+        return
+      }
       if (await canStartCleaningCompanyOnboarding(client, decodedToken)) {
         sendJson(res, 200, {
           ok: true,

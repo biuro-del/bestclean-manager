@@ -83,6 +83,7 @@ let pendingMfaResolver = null
 let pendingMfaEnrollment = null
 let pendingRecaptchaVerifier = null
 let pendingAuthScope = ''
+let pendingGoogleAccountLink = null
 let googleIdentityScriptPromise = null
 const PASSWORD_PROVIDER_ID = 'password'
 const GOOGLE_PROVIDER_ID = 'google.com'
@@ -136,6 +137,49 @@ function createPublicAuthError(code, message) {
 function normalizeAuthEmail(value) {
   const email = toText(value).toLowerCase()
   return email.length <= AUTH_EMAIL_MAX_LENGTH && AUTH_EMAIL_PATTERN.test(email) ? email : ''
+}
+
+function clearPendingGoogleAccountLink() {
+  pendingGoogleAccountLink = null
+}
+
+async function completePendingGoogleAccountLink(user) {
+  if (!pendingGoogleAccountLink) return user
+
+  const expectedEmail = normalizeAuthEmail(pendingGoogleAccountLink.email)
+  const authenticatedEmail = normalizeAuthEmail(user?.email)
+  if (!expectedEmail || authenticatedEmail !== expectedEmail || user?.emailVerified !== true) {
+    clearPendingGoogleAccountLink()
+    throw createPublicAuthError(
+      'ACCOUNT_LINKING_IDENTITY_MISMATCH',
+      'Zalogowano inne konto. Logowanie Google nie zostało połączone.',
+    )
+  }
+
+  const originalUid = toText(user?.uid)
+  try {
+    const result = await linkWithCredential(user, pendingGoogleAccountLink.credential)
+    if (!originalUid || toText(result?.user?.uid) !== originalUid) {
+      throw createPublicAuthError(
+        'ACCOUNT_LINKING_UID_CHANGED',
+        'Nie potwierdziliśmy tego samego konta. Logowanie Google nie zostało połączone.',
+      )
+    }
+    clearPendingGoogleAccountLink()
+    await reload(result.user)
+    return result.user
+  } catch (error) {
+    const code = toText(error?.code).toLowerCase()
+    clearPendingGoogleAccountLink()
+    if (code === 'auth/provider-already-linked') return user
+    if (code === 'auth/credential-already-in-use') {
+      throw createPublicAuthError(
+        'ACCOUNT_LINKING_DUPLICATE_REVIEW_REQUIRED',
+        'Logowanie Google jest już przypisane do drugiego konta. Dostęp został bezpiecznie zatrzymany do czasu scalenia kont.',
+      )
+    }
+    throw error
+  }
 }
 
 function assertCleaningCompanyEmailDeliveryAllowed(firebase) {
@@ -384,6 +428,13 @@ async function requestSessionContext(firebaseUser, { orgId = '', method = 'GET' 
     return { status: 'ORGANIZATION_ONBOARDING_REQUIRED', organizations: [] }
   }
 
+  if (status === 'ACCOUNT_LINKING_REQUIRED' || status === 'ACCOUNT_LINKING_REVIEW_REQUIRED') {
+    return {
+      status,
+      context: payload?.context && typeof payload.context === 'object' ? payload.context : {},
+    }
+  }
+
   if (status === 'EMAIL_VERIFICATION_REQUIRED') {
     return {
       status: 'EMAIL_VERIFICATION_REQUIRED',
@@ -456,7 +507,9 @@ async function resolveAuthenticatedContext(firebaseUser, options = {}) {
   localStorage.removeItem(AUTH_STORAGE_KEY)
   if (
     result.status === 'PLATFORM_SELECTION_REQUIRED' ||
-    result.status === 'CLEANING_COMPANY_ONBOARDING_REQUIRED'
+    result.status === 'CLEANING_COMPANY_ONBOARDING_REQUIRED' ||
+    result.status === 'ACCOUNT_LINKING_REQUIRED' ||
+    result.status === 'ACCOUNT_LINKING_REVIEW_REQUIRED'
   ) {
     localStorage.removeItem(LAST_ORG_STORAGE_KEY)
     localStorage.removeItem(PLATFORM_CONTEXT_STORAGE_KEY)
@@ -564,7 +617,13 @@ export async function login({
   try {
     credential = await signInWithEmailAndPassword(firebase.auth, normalizedLogin, normalizedPassword)
   } catch (error) {
-    if (toText(error?.code).toLowerCase() !== 'auth/multi-factor-auth-required') throw error
+    if (toText(error?.code).toLowerCase() !== 'auth/multi-factor-auth-required') {
+      if (pendingGoogleAccountLink) {
+        error.preserveAccountLinking = true
+        error.accountLinkingEmail = pendingGoogleAccountLink.email
+      }
+      throw error
+    }
     pendingMfaResolver = getMultiFactorResolver(firebase.auth, error)
     return {
       status: 'MFA_CHALLENGE_REQUIRED',
@@ -582,11 +641,14 @@ export async function login({
   try {
     // Provisioning or role changes update custom claims outside the browser.
     // Always obtain a fresh token before resolving the backend session.
-    await credential.user.getIdToken(true)
+    const linkedUser = normalizedAuthScope === AUTH_SCOPE_ORGANIZATION
+      ? await completePendingGoogleAccountLink(credential.user)
+      : credential.user
+    await linkedUser.getIdToken(true)
     if (deferContext && normalizedAuthScope === AUTH_SCOPE_ORGANIZATION) {
       return { status: 'AUTHENTICATED' }
     }
-    return await resolveAuthenticatedContext(credential.user)
+    return await resolveAuthenticatedContext(linkedUser)
   } catch (error) {
     await signOut(firebase.auth)
     localStorage.removeItem(AUTH_STORAGE_KEY)
@@ -787,7 +849,28 @@ export async function loginWithGoogle({ deferContext = false, forceRedirect = fa
   // result. Use the already-configured Google Identity Services credential
   // flow instead, then exchange its ID token with Firebase in this document.
   const { idToken } = await requestGoogleSignInCredential()
-  const credential = await signInWithCredential(firebase.auth, GoogleAuthProvider.credential(idToken))
+  const googleCredential = GoogleAuthProvider.credential(idToken)
+  let credential
+  try {
+    credential = await signInWithCredential(firebase.auth, googleCredential)
+  } catch (error) {
+    if (toText(error?.code).toLowerCase() !== 'auth/account-exists-with-different-credential') throw error
+    const conflictEmail = normalizeAuthEmail(error?.customData?.email)
+    if (!conflictEmail) {
+      throw createPublicAuthError(
+        'ACCOUNT_LINKING_EMAIL_MISSING',
+        'Google nie zwrócił adresu istniejącego konta. Logowanie zostało zatrzymane.',
+      )
+    }
+    pendingGoogleAccountLink = { credential: googleCredential, email: conflictEmail }
+    const conflict = createPublicAuthError(
+      'ACCOUNT_LINKING_PASSWORD_REQUIRED',
+      'Ten e-mail ma już konto Cleanzi. Zaloguj się dotychczasowym hasłem, a logowanie Google zostanie bezpiecznie dodane do tego samego konta.',
+    )
+    conflict.email = conflictEmail
+    conflict.preserveAccountLinking = true
+    throw conflict
+  }
   localStorage.removeItem(AUTH_STORAGE_KEY)
   sessionStorage.removeItem(PLATFORM_EMAIL_MFA_TOKEN_KEY)
   await credential.user.getIdToken(true)
@@ -1806,11 +1889,14 @@ export async function completeMfaSignIn({ factorUid, verificationCode, verificat
   const credential = await pendingMfaResolver.resolveSignIn(assertion)
   pendingMfaResolver = null
   clearRecaptchaVerifier()
-  await credential.user.getIdToken(true)
+  const linkedUser = normalizeAuthScope(pendingAuthScope) === AUTH_SCOPE_ORGANIZATION
+    ? await completePendingGoogleAccountLink(credential.user)
+    : credential.user
+  await linkedUser.getIdToken(true)
   if (deferContext && normalizeAuthScope(pendingAuthScope) === AUTH_SCOPE_ORGANIZATION) {
     return { status: 'AUTHENTICATED' }
   }
-  return resolveAuthenticatedContext(credential.user)
+  return resolveAuthenticatedContext(linkedUser)
 }
 
 export async function beginTotpEnrollment() {
@@ -2010,7 +2096,7 @@ export function clearPlatformContextSession() {
   renderSubscriptionBadge(null)
 }
 
-export function logout() {
+export function logout({ preserveAccountLinking = false } = {}) {
   const firebase = ensureFirebaseForScope(resolveAuthScope(getSession()))
 
   if (firebase?.auth?.currentUser) {
@@ -2026,6 +2112,7 @@ export function logout() {
   pendingMfaResolver = null
   pendingMfaEnrollment = null
   pendingAuthScope = ''
+  if (!preserveAccountLinking) clearPendingGoogleAccountLink()
   clearRecaptchaVerifier()
   renderSubscriptionBadge(null)
 }

@@ -138,6 +138,12 @@ export const portalLayoutTemplate = `
         <button class="login-organization-cancel" id="loginOrganizationCancel" type="button">Anuluj i wyloguj</button>
       </div>
 
+      <div class="login-organization-panel" id="loginAccountLinkingPanel" hidden>
+        <p class="login-company-note" id="loginAccountLinkingMessage">Ten adres e-mail nale&#380;y ju&#380; do istniej&#261;cego konta Cleanzi. Nie utworzymy drugiej organizacji.</p>
+        <button class="btn primary login-submit" id="loginAccountLinkingContinue" type="button">Zaloguj si&#281; dotychczasow&#261; metod&#261;</button>
+        <button class="login-organization-cancel" id="loginAccountLinkingCancel" type="button">Anuluj i wyloguj</button>
+      </div>
+
       <div class="login-registration-panel" id="loginRegistrationConsentsPanel" hidden>
         <p class="login-registration-plan" id="loginRegistrationPlan"></p>
         <label class="login-registration-consent">

@@ -20,6 +20,8 @@
     "migrate:facility-manager-object": "node scripts/migrate-facility-manager-object.js",
     "worker-phone-identity:audit": "node scripts/backfill-worker-firebase-phone.js --audit",
     "worker-phone-identity:apply": "node scripts/backfill-worker-firebase-phone.js --apply",
+    "account-linking:audit": "node scripts/account-linking-p0.js --project=iclean-room --org=bestclean",
+    "account-linking:link-membership": "node scripts/account-linking-p0.js --link-membership --project=iclean-room",
     "platform-admin": "node scripts/platform-admin.js",
     "smoke:workforce-schedule:bootstrap": "node scripts/smoke-workforce-schedule-bootstrap.js"
   },

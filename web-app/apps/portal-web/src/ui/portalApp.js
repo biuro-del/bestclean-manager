@@ -3908,6 +3908,7 @@ function setLoginGooglePasswordHintVisible(isVisible) {
 
 function hideLoginTenantFlowPanels() {
   for (const id of [
+    'loginAccountLinkingPanel',
     'loginOrganizationCreatePanel',
     'loginEmailVerificationPanel',
     'loginRegistrationConsentsPanel',
@@ -3962,6 +3963,7 @@ function hideLoginStandardPanels() {
     'loginCredentialsPanel',
     'loginResetPanel',
     'loginOrganizationPanel',
+    'loginAccountLinkingPanel',
     'loginMfaChallengePanel',
     'loginMfaEnrollmentPanel',
   ].forEach((id) => {
@@ -4196,6 +4198,30 @@ function showLoginOrganizationSelection(organizations = []) {
     button.append(copy, arrow)
     organizationList.append(button)
   })
+}
+
+function showLoginAccountLinkingRequired(context = {}, reviewRequired = false) {
+  hideLoginTenantFlowPanels()
+  hideLoginStandardPanels()
+  hideLoginCompanyPanels()
+  const panel = document.getElementById('loginAccountLinkingPanel')
+  const message = document.getElementById('loginAccountLinkingMessage')
+  const title = document.getElementById('loginTitle')
+  const copy = document.getElementById('loginCopy')
+  const normalizedEmail = String(context?.email ?? '').trim().toLowerCase()
+
+  if (panel) {
+    panel.hidden = false
+    panel.dataset.email = normalizedEmail
+  }
+  if (title) title.textContent = reviewRequired ? 'Wymagana weryfikacja konta' : 'Połącz istniejące konto'
+  if (copy) copy.textContent = 'Nie utworzymy drugiej organizacji dla tego samego adresu e-mail.'
+  if (message) {
+    message.textContent = reviewRequired
+      ? 'Dla tego adresu znaleziono kilka powiązań. Dostęp i rejestracja są bezpiecznie wstrzymane do czasu weryfikacji.'
+      : 'Ten adres e-mail należy już do konta Cleanzi. Zaloguj się dotychczasowym hasłem; organizacja pozostanie przypisana do obecnego konta.'
+  }
+  setLoginResetActionVisible(false)
 }
 
 function showLoginOrganizationCreate() {
@@ -4539,6 +4565,7 @@ function setLoginControlsBusy(isBusy, label = '') {
   })
   ;[
     'loginGoogleBtn', 'loginOrganizationCreateOpen', 'loginOrganizationCreateBack',
+    'loginAccountLinkingContinue', 'loginAccountLinkingCancel',
     'loginOrganizationCreate',
     'loginRegistrationTerms', 'loginRegistrationPrivacy', 'loginRegistrationMarketing',
     'loginRegistrationConsentsSave', 'loginRegistrationChooseExisting', 'loginRegistrationCancel',
@@ -7649,6 +7676,9 @@ function bindPlatformLogin(router) {
   const resetOpen = byId('loginResetOpen')
   const organizationList = byId('loginOrganizationList')
   const organizationCancel = byId('loginOrganizationCancel')
+  const accountLinkingPanel = byId('loginAccountLinkingPanel')
+  const accountLinkingContinue = byId('loginAccountLinkingContinue')
+  const accountLinkingCancel = byId('loginAccountLinkingCancel')
   const googleButton = byId('loginGoogleBtn')
   const googleDivider = byId('loginProviderDivider')
   const createOpen = byId('loginOrganizationCreateOpen')
@@ -7777,6 +7807,14 @@ function bindPlatformLogin(router) {
       showLoginOrganizationSelection([])
       return
     }
+    if (result?.status === 'ACCOUNT_LINKING_REQUIRED' || result?.status === 'ACCOUNT_LINKING_REVIEW_REQUIRED') {
+      resetPortalState()
+      showLoginAccountLinkingRequired(
+        result.context,
+        result.status === 'ACCOUNT_LINKING_REVIEW_REQUIRED',
+      )
+      return
+    }
     if (result?.status === 'EMAIL_VERIFICATION_REQUIRED') {
       showLoginEmailVerification()
       return
@@ -7827,6 +7865,19 @@ function bindPlatformLogin(router) {
     passwordInput.value = ''
     loginInput.focus()
   }
+  const continueAccountLinking = () => {
+    const email = String(accountLinkingPanel?.dataset?.email ?? '').trim().toLowerCase()
+    logout()
+    resetPortalState()
+    showLoginScreen()
+    showLoginCredentials({ showResetAction: true })
+    if (email) loginInput.value = email
+    const loginTitle = byId('loginTitle')
+    const loginCopy = byId('loginCopy')
+    if (loginTitle) loginTitle.textContent = 'Potwierdź istniejące konto'
+    if (loginCopy) loginCopy.textContent = 'Zaloguj się dotychczasowym hasłem. Nie zakładaj drugiej organizacji.'
+    loginInput.focus()
+  }
   const handleLogin = async (event) => {
     event?.preventDefault?.()
     setLoginControlsBusy(true, 'Logowanie...')
@@ -7839,7 +7890,7 @@ function bindPlatformLogin(router) {
         deferContext: selectedAuthScope() === 'organization' && Boolean(pendingRegistration?.registrationId),
       }))
     } catch (error) {
-      logout()
+      logout({ preserveAccountLinking: error?.preserveAccountLinking === true })
       resetPortalState()
       showLoginScreen()
       const passwordResetEligible = isPasswordResetEligibleLoginError(error)
@@ -7847,6 +7898,7 @@ function bindPlatformLogin(router) {
         showResetAction: passwordResetEligible,
         showGooglePasswordHint: selectedAuthScope() === 'organization' && passwordResetEligible,
       })
+      if (error?.accountLinkingEmail) loginInput.value = error.accountLinkingEmail
       setLoginError(formatLoginError(error))
     } finally {
       setLoginControlsBusy(false)
@@ -7861,6 +7913,14 @@ function bindPlatformLogin(router) {
       })
       if (result?.status !== 'REDIRECTING') await continueResult(result)
     } catch (error) {
+      if (error?.code === 'ACCOUNT_LINKING_PASSWORD_REQUIRED') {
+        showLoginCredentials({ showResetAction: true })
+        if (error?.email) loginInput.value = error.email
+        const loginTitle = byId('loginTitle')
+        const loginCopy = byId('loginCopy')
+        if (loginTitle) loginTitle.textContent = 'Połącz logowanie Google'
+        if (loginCopy) loginCopy.textContent = 'Potwierdź dotychczasowe konto hasłem. Zachowamy obecne dane i organizację.'
+      }
       setLoginError(formatLoginError(error))
     } finally {
       setLoginControlsBusy(false)
@@ -8451,6 +8511,8 @@ function bindPlatformLogin(router) {
   resetBack.addEventListener('click', closeReset)
   organizationList?.addEventListener('click', handleOrganization)
   organizationCancel?.addEventListener('click', cancelFlow)
+  accountLinkingContinue?.addEventListener('click', continueAccountLinking)
+  accountLinkingCancel?.addEventListener('click', cancelFlow)
   createOpen?.addEventListener('click', openOrganizationCreate)
   createBack?.addEventListener('click', closeOrganizationCreate)
   createButton?.addEventListener('click', handleOrganizationCreate)
@@ -8501,6 +8563,8 @@ function bindPlatformLogin(router) {
     resetBack.removeEventListener('click', closeReset)
     organizationList?.removeEventListener('click', handleOrganization)
     organizationCancel?.removeEventListener('click', cancelFlow)
+    accountLinkingContinue?.removeEventListener('click', continueAccountLinking)
+    accountLinkingCancel?.removeEventListener('click', cancelFlow)
     createOpen?.removeEventListener('click', openOrganizationCreate)
     createBack?.removeEventListener('click', closeOrganizationCreate)
     createButton?.removeEventListener('click', handleOrganizationCreate)
@@ -9061,6 +9125,15 @@ export function mountPortalApp() {
         if (result?.status === 'ORGANIZATION_ONBOARDING_REQUIRED') {
           resetPortalState()
           showLoginOrganizationSelection([])
+          setLoginControlsBusy(false)
+          return
+        }
+        if (result?.status === 'ACCOUNT_LINKING_REQUIRED' || result?.status === 'ACCOUNT_LINKING_REVIEW_REQUIRED') {
+          resetPortalState()
+          showLoginAccountLinkingRequired(
+            result.context,
+            result.status === 'ACCOUNT_LINKING_REVIEW_REQUIRED',
+          )
           setLoginControlsBusy(false)
           return
         }
