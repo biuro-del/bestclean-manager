@@ -11,7 +11,9 @@ const { AuthTypes, Connector, IpAddressTypes } = require('@google-cloud/cloud-sq
 const { resolvePgPassword } = require('./cloud-sql-pg-auth')
 const { resolveWorkforceScheduleDbAuthType } = require('./workforce-schedule-db-auth')
 const {
+  isWorkforceScheduleDeliveryAllowed,
   isWorkforceScheduleOrganizationAllowed,
+  resolveWorkforceScheduleDeliveryPolicy,
   resolveWorkforceScheduleRollout,
 } = require('./workforce-schedule-rollout-policy')
 const { Compute, GoogleAuth, OAuth2Client } = require('google-auth-library')
@@ -99,6 +101,7 @@ const {
   WORKFORCE_SCHEDULE_SESSION_ROLE: WORKFORCE_SCHEDULE_DB_SESSION_ROLE,
   createWorkforceScheduleApi,
 } = require('./workforce-schedule-api')
+const { createMobileWorkforceScheduleApi } = require('./mobile-workforce-schedule-api')
 const { mapProposal } = require('./workday-stop-proposal-repository')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
@@ -162,6 +165,12 @@ function isWorkforceScheduleOrganizationEnabled(orgId) {
     resolveWorkforceScheduleRollout(process.env),
     orgId,
   )
+}
+
+function isWorkforceScheduleDeliveryEnabled(orgId = '') {
+  const policy = resolveWorkforceScheduleDeliveryPolicy(process.env)
+  if (!String(orgId ?? '').trim()) return policy.enabled
+  return isWorkforceScheduleDeliveryAllowed(policy, orgId)
 }
 
 function normalizeApiProxyTarget(value) {
@@ -3171,6 +3180,22 @@ async function resolveMobileWorker(client, orgId, body, decodedToken, membership
   }
 }
 
+async function resolveMobileWorkforceScheduleSession(decodedToken, verifiedUid) {
+  let client
+  try {
+    client = await connectDbClient()
+    const tokenIdentity = {
+      ...(decodedToken && typeof decodedToken === 'object' ? decodedToken : {}),
+      uid: normalizeText(verifiedUid || decodedToken?.uid || decodedToken?.sub),
+    }
+    const { orgId, membership } = await resolveMobileOrganizationFromToken(client, tokenIdentity, '')
+    const worker = await resolveMobileWorker(client, orgId, {}, tokenIdentity, membership)
+    return { orgId, workerId: worker.workerId }
+  } finally {
+    client?.release?.()
+  }
+}
+
 async function readPublishedMobileJobCards(client, orgId, worker) {
   const schemaResult = await client.query(
     `select to_regclass('public.job_card_revision') is not null as revision_ready`,
@@ -4953,6 +4978,49 @@ async function authorizeWorkforceSchedule(client, { orgId, uid, action }) {
     )
   }
   return { role, scope: 'ALL', personId: workerId, uid }
+}
+
+async function authorizeMobileWorkforceSchedule(client, { orgId, uid, workerId: resolvedWorkerId }) {
+  if (!isWorkforceScheduleOrganizationEnabled(orgId)) {
+    throw workforceScheduleAccessError(
+      404,
+      'WORKFORCE_SCHEDULE_DISABLED',
+      'Grafik nie jest aktywny w tym środowisku.',
+    )
+  }
+
+  const membership = await getWorkforceScheduleRequesterMembership(client, orgId, uid)
+  if (normalizeText(membership?.role).toUpperCase() === PLATFORM_ROLE) {
+    throw workforceScheduleAccessError(
+      403,
+      'WORKFORCE_SCHEDULE_PLATFORM_CONTEXT_FORBIDDEN',
+      'Grafik wymaga bezpośredniej sesji organizacji.',
+    )
+  }
+  assertMembershipPlanCapability(membership, 'workforceScheduling')
+  if (!isWorkforceScheduleOrganizationKindAllowed(membership?.organization_kind)) {
+    throw workforceScheduleAccessError(
+      403,
+      'WORKFORCE_SCHEDULE_ORGANIZATION_KIND_FORBIDDEN',
+      'Grafik jest dostępny wyłącznie dla firmy sprzątającej.',
+    )
+  }
+
+  const workerId = normalizeText(membership?.worker_id)
+  const activeWorkerId = normalizeText(membership?.active_worker_id)
+  const resolved = normalizeText(resolvedWorkerId)
+  if (
+    !workerId
+    || activeWorkerId.toLowerCase() !== workerId.toLowerCase()
+    || resolved.toLowerCase() !== workerId.toLowerCase()
+  ) {
+    throw workforceScheduleAccessError(
+      403,
+      'WORKFORCE_SCHEDULE_ACTIVE_WORKER_REQUIRED',
+      'Grafik wymaga aktywnego, jednoznacznie powiązanego profilu pracownika.',
+    )
+  }
+  return { role: normalizeRequesterRole(membership.role), scope: 'OWN', workerId, uid }
 }
 
 function assertMembershipPlanCapability(membership, capability) {
@@ -11498,6 +11566,19 @@ const workforceScheduleApi = createWorkforceScheduleApi({
   verifyFirebaseIdToken,
 })
 
+const mobileWorkforceScheduleApi = createMobileWorkforceScheduleApi({
+  authorize: authorizeMobileWorkforceSchedule,
+  connectDbClient: connectWorkforceScheduleDbClient,
+  getRequestId: () => getPlatformRequestContext()?.requestId,
+  isDeliveryEnabled: isWorkforceScheduleDeliveryEnabled,
+  logHandledError: (entry) => console.error(JSON.stringify(entry)),
+  parseBearerToken,
+  resolveSession: resolveMobileWorkforceScheduleSession,
+  sendMobileApiError,
+  sendMobileJson,
+  verifyFirebaseIdToken,
+})
+
 const portalZoneApi = createPortalZoneApi({
   authorize: requirePortalZoneAccess,
   connectDbClient,
@@ -11566,6 +11647,12 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   if (workforceScheduleApi.matches(requestUrl.pathname)) {
     workforceScheduleApi.handle(req, res, requestUrl).catch(() => {
       sendApiError(res, 500, 'WORKFORCE_SCHEDULE_ERROR', 'Nie udalo sie bezpiecznie obsluzyc Grafiku.')
+    })
+    return
+  }
+  if (mobileWorkforceScheduleApi.matches(requestUrl.pathname)) {
+    mobileWorkforceScheduleApi.handle(req, res, requestUrl).catch(() => {
+      sendMobileApiError(res, 500, 'MOBILE_WORKFORCE_SCHEDULE_ERROR', 'Nie udało się bezpiecznie pobrać Grafiku.')
     })
     return
   }

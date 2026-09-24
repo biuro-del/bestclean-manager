@@ -6,8 +6,10 @@ const path = require('node:path')
 const test = require('node:test')
 const {
   WORKFORCE_SCHEDULE_ROLLOUT_MODES,
+  isWorkforceScheduleDeliveryAllowed,
   isWorkforceScheduleOrganizationAllowed,
   parseWorkforceScheduleAllowedOrganizationIds,
+  resolveWorkforceScheduleDeliveryPolicy,
   resolveWorkforceScheduleRollout,
   resolveWorkforceScheduleRolloutMode,
 } = require('../workforce-schedule-rollout-policy')
@@ -44,7 +46,6 @@ test('nieznany tryb jest mapowany do OFF', () => {
 
 test('każda flaga efektu zewnętrznego zamyka rollout niezależnie od trybu', () => {
   for (const variable of [
-    'WORKFORCE_SCHEDULE_DELIVERY_ENABLED',
     'WORKFORCE_SCHEDULE_NOTIFICATIONS_ENABLED',
     'WORKFORCE_SCHEDULE_DOWNSTREAM_ENABLED',
   ]) {
@@ -52,6 +53,12 @@ test('każda flaga efektu zewnętrznego zamyka rollout niezależnie od trybu', (
     assert.equal(policy.enabled, false, variable)
     assert.equal(isWorkforceScheduleOrganizationAllowed(policy, 'bestclean'), false, variable)
   }
+  const deliveryPolicy = resolveWorkforceScheduleRollout(safeEnvironment({
+    WORKFORCE_SCHEDULE_DELIVERY_ENABLED: 'true',
+  }))
+  assert.equal(deliveryPolicy.enabled, true)
+  assert.equal(deliveryPolicy.internalOnly, false)
+  assert.equal(deliveryPolicy.safeExternalEffects, true)
   assert.equal(
     resolveWorkforceScheduleRollout(safeEnvironment({ WORKFORCE_SCHEDULE_ENABLED: 'false' })).enabled,
     false,
@@ -80,6 +87,40 @@ test('pusta lub nieprawidłowa allowlista CANARY jest fail-closed', () => {
     assert.equal(isWorkforceScheduleOrganizationAllowed(policy, 'bestclean'), false, value)
   }
   assert.deepEqual(parseWorkforceScheduleAllowedOrganizationIds('org-1,org_2'), ['org-1', 'org_2'])
+})
+
+test('delivery jest fail-closed i wymaga osobnej dokladnej allowlisty', () => {
+  const disabled = resolveWorkforceScheduleDeliveryPolicy(safeEnvironment())
+  assert.equal(disabled.enabled, false)
+  assert.equal(isWorkforceScheduleDeliveryAllowed(disabled, 'bestclean'), false)
+
+  const missingAllowlist = resolveWorkforceScheduleDeliveryPolicy(safeEnvironment({
+    WORKFORCE_SCHEDULE_DELIVERY_ENABLED: 'true',
+  }))
+  assert.equal(missingAllowlist.enabled, false)
+
+  const enabled = resolveWorkforceScheduleDeliveryPolicy(safeEnvironment({
+    WORKFORCE_SCHEDULE_DELIVERY_ENABLED: 'true',
+    WORKFORCE_SCHEDULE_DELIVERY_ALLOWED_ORG_IDS: 'bestclean',
+  }))
+  assert.equal(enabled.enabled, true)
+  assert.deepEqual(enabled.allowedOrganizationIds, ['bestclean'])
+  assert.equal(isWorkforceScheduleDeliveryAllowed(enabled, 'bestclean'), true)
+  assert.equal(isWorkforceScheduleDeliveryAllowed(enabled, 'BESTCLEAN'), false)
+  assert.equal(isWorkforceScheduleDeliveryAllowed(enabled, 'other-org'), false)
+
+  for (const overrides of [
+    { WORKFORCE_SCHEDULE_ENABLED: 'false' },
+    { WORKFORCE_SCHEDULE_NOTIFICATIONS_ENABLED: 'true' },
+    { WORKFORCE_SCHEDULE_DOWNSTREAM_ENABLED: 'true' },
+  ]) {
+    const policy = resolveWorkforceScheduleDeliveryPolicy(safeEnvironment({
+      WORKFORCE_SCHEDULE_DELIVERY_ENABLED: 'true',
+      WORKFORCE_SCHEDULE_DELIVERY_ALLOWED_ORG_IDS: 'bestclean',
+      ...overrides,
+    }))
+    assert.equal(policy.enabled, false)
+  }
 })
 
 test('ALL wymaga jawnego trybu i nadal respektuje master oraz bezpieczne flagi', () => {
@@ -115,6 +156,26 @@ test('konfiguracja produkcyjna ogranicza backend canary do jednej organizacji', 
     /variable: WORKFORCE_SCHEDULE_ALLOWED_ORG_IDS\r?\n\s+value: bestclean\r?\n\s+availability:\r?\n\s+- RUNTIME/,
   )
   assert.equal((appHosting.match(/variable: WORKFORCE_SCHEDULE_ALLOWED_ORG_IDS/g) || []).length, 1)
+  assert.match(
+    appHosting,
+    /variable: WORKFORCE_SCHEDULE_DELIVERY_ENABLED[\s\S]{0,100}value: "true"[\s\S]{0,100}- RUNTIME/,
+  )
+  assert.match(
+    appHosting,
+    /variable: WORKFORCE_SCHEDULE_DELIVERY_ALLOWED_ORG_IDS\r?\n\s+value: bestclean\r?\n\s+availability:\r?\n\s+- RUNTIME/,
+  )
+  assert.match(
+    appHosting,
+    /variable: WORKFORCE_SCHEDULE_NOTIFICATIONS_ENABLED[\s\S]{0,100}value: "false"[\s\S]{0,100}- RUNTIME/,
+  )
+  assert.match(
+    appHosting,
+    /variable: WORKFORCE_SCHEDULE_DOWNSTREAM_ENABLED[\s\S]{0,100}value: "false"[\s\S]{0,100}- RUNTIME/,
+  )
+  assert.match(
+    appHosting,
+    /variable: WORKER_FIREBASE_PHONE_IDENTITY_ENABLED[\s\S]{0,100}value: "true"[\s\S]{0,100}- RUNTIME/,
+  )
   assert.match(rootEnv, /^WORKFORCE_SCHEDULE_ROLLOUT_MODE=OFF$/m)
   assert.match(rootEnv, /^# WORKFORCE_SCHEDULE_ALLOWED_ORG_IDS=bestclean$/m)
   assert.match(webEnv, /^# WORKFORCE_SCHEDULE_ROLLOUT_MODE=OFF$/m)

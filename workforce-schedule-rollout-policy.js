@@ -42,12 +42,13 @@ function resolveWorkforceScheduleRollout(environment = {}) {
   const allowedOrganizationIds = parseWorkforceScheduleAllowedOrganizationIds(
     environment.WORKFORCE_SCHEDULE_ALLOWED_ORG_IDS,
   )
-  const internalOnly = !isTrue(environment.WORKFORCE_SCHEDULE_DELIVERY_ENABLED)
-    && !isTrue(environment.WORKFORCE_SCHEDULE_NOTIFICATIONS_ENABLED)
+  const deliveryEnabled = isTrue(environment.WORKFORCE_SCHEDULE_DELIVERY_ENABLED)
+  const safeExternalEffects = !isTrue(environment.WORKFORCE_SCHEDULE_NOTIFICATIONS_ENABLED)
     && !isTrue(environment.WORKFORCE_SCHEDULE_DOWNSTREAM_ENABLED)
+  const internalOnly = safeExternalEffects && !deliveryEnabled
   const masterEnabled = isTrue(environment.WORKFORCE_SCHEDULE_ENABLED)
   const enabled = masterEnabled
-    && internalOnly
+    && safeExternalEffects
     && mode !== WORKFORCE_SCHEDULE_ROLLOUT_MODES.OFF
 
   return Object.freeze({
@@ -56,7 +57,37 @@ function resolveWorkforceScheduleRollout(environment = {}) {
     internalOnly,
     masterEnabled,
     mode,
+    safeExternalEffects,
   })
+}
+
+function resolveWorkforceScheduleDeliveryPolicy(environment = {}) {
+  const rollout = resolveWorkforceScheduleRollout(environment)
+  const allowedOrganizationIds = parseWorkforceScheduleAllowedOrganizationIds(
+    environment.WORKFORCE_SCHEDULE_DELIVERY_ALLOWED_ORG_IDS,
+  )
+  const masterEnabled = isTrue(environment.WORKFORCE_SCHEDULE_DELIVERY_ENABLED)
+  const hasAllowedOrganization = allowedOrganizationIds.some((organizationId) => (
+    isWorkforceScheduleOrganizationAllowed(rollout, organizationId)
+  ))
+  return Object.freeze({
+    allowedOrganizationIds,
+    enabled: rollout.enabled && masterEnabled && hasAllowedOrganization,
+    masterEnabled,
+    rollout,
+  })
+}
+
+function isWorkforceScheduleDeliveryAllowed(policy, organizationIdValue) {
+  const organizationId = text(organizationIdValue)
+  return Boolean(
+    policy?.enabled
+      && organizationId
+      && ORGANIZATION_ID_PATTERN.test(organizationId)
+      && Array.isArray(policy.allowedOrganizationIds)
+      && policy.allowedOrganizationIds.includes(organizationId)
+      && isWorkforceScheduleOrganizationAllowed(policy.rollout, organizationId),
+  )
 }
 
 function isWorkforceScheduleOrganizationAllowed(policy, organizationIdValue) {
@@ -72,8 +103,10 @@ function isWorkforceScheduleOrganizationAllowed(policy, organizationIdValue) {
 
 module.exports = {
   WORKFORCE_SCHEDULE_ROLLOUT_MODES,
+  isWorkforceScheduleDeliveryAllowed,
   isWorkforceScheduleOrganizationAllowed,
   parseWorkforceScheduleAllowedOrganizationIds,
+  resolveWorkforceScheduleDeliveryPolicy,
   resolveWorkforceScheduleRollout,
   resolveWorkforceScheduleRolloutMode,
 }

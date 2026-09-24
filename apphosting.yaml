@@ -172,7 +172,8 @@ env:
       - RUNTIME
   # Dedicated Grafik credentials are isolated from the legacy portal pool.
   # Both the backend and frontend canary remain limited to one organization.
-  # Delivery stays internal-only; notifications and downstream effects stay off.
+  # Worker delivery is enabled only for the exact Best Clean canary;
+  # notifications and downstream effects stay off.
   - variable: WORKFORCE_SCHEDULE_ENABLED
     value: "true"
     availability:
@@ -186,7 +187,11 @@ env:
     availability:
       - RUNTIME
   - variable: WORKFORCE_SCHEDULE_DELIVERY_ENABLED
-    value: "false"
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: WORKFORCE_SCHEDULE_DELIVERY_ALLOWED_ORG_IDS
+    value: bestclean
     availability:
       - RUNTIME
   - variable: WORKFORCE_SCHEDULE_NOTIFICATIONS_ENABLED

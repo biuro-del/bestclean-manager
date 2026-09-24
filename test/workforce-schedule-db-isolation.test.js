@@ -185,8 +185,11 @@ test('App Hosting enables the capability-gated frontend and isolated backend can
     appHostingVariableBlock('WORKFORCE_SCHEDULE_ENABLED'),
     /value: "true"[\s\S]*- RUNTIME/,
   )
+  assert.match(
+    appHostingVariableBlock('WORKFORCE_SCHEDULE_DELIVERY_ENABLED'),
+    /value: "true"[\s\S]*- RUNTIME/,
+  )
   for (const name of [
-    'WORKFORCE_SCHEDULE_DELIVERY_ENABLED',
     'WORKFORCE_SCHEDULE_NOTIFICATIONS_ENABLED',
     'WORKFORCE_SCHEDULE_DOWNSTREAM_ENABLED',
   ]) {
@@ -199,6 +202,11 @@ test('App Hosting enables the capability-gated frontend and isolated backend can
   const allowedOrganizationBlock = appHostingVariableBlock('WORKFORCE_SCHEDULE_ALLOWED_ORG_IDS')
   assert.match(allowedOrganizationBlock, /^    value: bestclean\r?$/m)
   assert.match(allowedOrganizationBlock, /availability:[\s\S]*- RUNTIME/)
+  const deliveryAllowedOrganizationBlock = appHostingVariableBlock(
+    'WORKFORCE_SCHEDULE_DELIVERY_ALLOWED_ORG_IDS',
+  )
+  assert.match(deliveryAllowedOrganizationBlock, /^    value: bestclean\r?$/m)
+  assert.match(deliveryAllowedOrganizationBlock, /availability:[\s\S]*- RUNTIME/)
   assert.match(
     appHostingVariableBlock('WORKFORCE_SCHEDULE_DB_AUTH_TYPE'),
     /value: PASSWORD[\s\S]*- RUNTIME/,
