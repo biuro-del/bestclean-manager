@@ -43,9 +43,23 @@ test('POST /api/mobile/state odpowiada HTTP 200 ze snapshotem mimo wielu history
     { workdayId: 'WD-HISTORY-2', status: 'RUNNING', endAt: null, stopProposal: null },
   ]
   const queries = []
+  let transactionActive = false
   const client = {
     query: async (...args) => {
       queries.push(args)
+      const sql = String(args[0] || '').trim().toLowerCase()
+      if (sql === 'begin transaction read only') {
+        transactionActive = true
+      } else if (sql.startsWith('savepoint ')) {
+        if (!transactionActive) {
+          const error = new Error('SAVEPOINT can only be used in transaction blocks')
+          error.code = '25P01'
+          throw error
+        }
+      } else if (sql === 'commit' || sql === 'rollback') {
+        assert.equal(transactionActive, true)
+        transactionActive = false
+      }
       return { rows: [] }
     },
     release: () => {},
@@ -77,6 +91,8 @@ test('POST /api/mobile/state odpowiada HTTP 200 ze snapshotem mimo wielu history
     buildMobileSnapshotFromDb: async (_client, orgId, worker) => {
       assert.equal(orgId, 'ORG-ONE')
       assert.equal(worker.login, 'worker.one')
+      await _client.query('savepoint mobile_pause_lookup')
+      await _client.query('release savepoint mobile_pause_lookup')
       return { orgId, worker, workdays: historicalWorkdays }
     },
     sendMobileJson: (res, status, payload) => { res.result = { status, payload } },
@@ -94,7 +110,13 @@ test('POST /api/mobile/state odpowiada HTTP 200 ze snapshotem mimo wielu history
 
   assert.equal(response.result.status, 200)
   assert.deepEqual(response.result.payload.snapshot.workdays, historicalWorkdays)
-  assert.equal(queries.length, 0)
+  assert.deepEqual(queries.map(([sql]) => sql), [
+    'begin transaction read only',
+    'savepoint mobile_pause_lookup',
+    'release savepoint mobile_pause_lookup',
+    'commit',
+  ])
+  assert.equal(transactionActive, false)
 })
 
 test('POST /api/mobile/state nie używa blokady QR dla historii i nie blokuje wielu historycznych RUNNING', async () => {

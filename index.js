@@ -4604,8 +4604,8 @@ async function handleMobileWorkflowRequest(req, res, requestUrl) {
   let transactionStarted = false
   try {
     const isMobileScanRequest = requestUrl.pathname === MOBILE_SCAN_PATH
-    if (isMobileScanRequest) {
-      await client.query('begin')
+    if (isMobileStateRequest || isMobileScanRequest) {
+      await client.query(isMobileStateRequest ? 'begin transaction read only' : 'begin')
       transactionStarted = true
     }
     const organization = isMobileStateRequest

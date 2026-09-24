@@ -57,11 +57,12 @@ test('odczyt /api/mobile/state nie aktualizuje worker_runtime_state', () => {
   assert.match(scan, /buildMobileSnapshotFromDb\(client, orgId, worker, \{ persistRuntimeState: true \}\)/)
 })
 
-test('tylko skan QR uruchamia transakcje i blokade doradcza', () => {
+test('stan mobilny uruchamia transakcje read-only, a skan QR zachowuje transakcje zapisu i blokade doradcza', () => {
   const request = functionSource('handleMobileWorkflowRequest', 'databaseRelationExists')
 
   assert.match(request, /const isMobileScanRequest = requestUrl\.pathname === MOBILE_SCAN_PATH/)
-  assert.match(request, /if \(isMobileScanRequest\) \{\s*await client\.query\('begin'\)/s)
+  assert.match(request, /if \(isMobileStateRequest \|\| isMobileScanRequest\) \{/)
+  assert.match(request, /await client\.query\(isMobileStateRequest \? 'begin transaction read only' : 'begin'\)/)
   assert.match(request, /if \(isMobileScanRequest\) \{\s*await client\.query\('select pg_advisory_xact_lock/s)
   assert.match(request, /if \(transactionStarted\) \{\s*await client\.query\('commit'\)/s)
   assert.match(request, /if \(transactionStarted\) \{\s*try \{\s*await client\.query\('rollback'\)/s)
