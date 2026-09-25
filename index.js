@@ -102,6 +102,11 @@ const {
   createWorkforceScheduleApi,
 } = require('./workforce-schedule-api')
 const { createMobileWorkforceScheduleApi } = require('./mobile-workforce-schedule-api')
+const { createMobileCoordinatorZoneApi } = require('./mobile-coordinator-zone-api')
+const {
+  isMobileCoordinatorZoneOrganizationAllowed,
+  resolveMobileCoordinatorZonePolicy,
+} = require('./mobile-coordinator-zone-policy')
 const { mapProposal } = require('./workday-stop-proposal-repository')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
@@ -234,6 +239,7 @@ const MOBILE_SCAN_PATH = '/api/mobile/scan'
 const MOBILE_SCAN_STATUS_PATH = '/api/mobile/scan/status'
 const MOBILE_JOB_CARDS_PATH = '/api/mobile/job-cards'
 const MOBILE_WORKDAY_STOP_PROPOSALS_PATH = '/api/mobile/workday-stop-proposals'
+const MOBILE_COORDINATOR_ZONES_PATH = '/api/mobile/coordinator/zones'
 const DATACONNECT_LOCATION = String(process.env.FIREBASE_DATACONNECT_LOCATION || process.env.DATACONNECT_LOCATION || '').trim()
 const DATACONNECT_SERVICE = String(process.env.FIREBASE_DATACONNECT_SERVICE || process.env.DATACONNECT_SERVICE || '').trim()
 const DATACONNECT_CONNECTOR = String(process.env.FIREBASE_DATACONNECT_CONNECTOR || process.env.DATACONNECT_CONNECTOR || '').trim()
@@ -3194,6 +3200,16 @@ async function resolveMobileWorkforceScheduleSession(decodedToken, verifiedUid) 
   } finally {
     client?.release?.()
   }
+}
+
+async function resolveMobileCoordinatorZoneSession(client, decodedToken) {
+  const tokenIdentity = {
+    ...(decodedToken && typeof decodedToken === 'object' ? decodedToken : {}),
+    uid: normalizeText(decodedToken?.uid || decodedToken?.sub),
+  }
+  const { orgId, membership } = await resolveMobileOrganizationFromToken(client, tokenIdentity, '')
+  const worker = await resolveMobileWorker(client, orgId, {}, tokenIdentity, membership)
+  return { orgId, membership, worker }
 }
 
 async function readPublishedMobileJobCards(client, orgId, worker) {
@@ -11591,6 +11607,27 @@ const portalZoneApi = createPortalZoneApi({
   verifyFirebaseIdToken: verifySessionContextFirebaseIdToken,
 })
 
+const mobileCoordinatorZoneApi = createMobileCoordinatorZoneApi({
+  connectDbClient,
+  isEnabled() {
+    return resolveMobileCoordinatorZonePolicy(process.env).enabled
+  },
+  isOrganizationAllowed(orgId) {
+    return isMobileCoordinatorZoneOrganizationAllowed(
+      resolveMobileCoordinatorZonePolicy(process.env),
+      orgId,
+    )
+  },
+  mapDatabaseConnectionError,
+  mapFirebaseAdminError,
+  parseBearerToken,
+  readJsonBody,
+  resolveSession: resolveMobileCoordinatorZoneSession,
+  sendMobileApiError,
+  sendMobileJson,
+  verifyFirebaseIdToken: verifySessionContextFirebaseIdToken,
+})
+
 const server = http.createServer((req, res) => runWithPlatformRequest(req, () => {
   const scopedRequest = getPlatformRequestContext()
   res.once('finish', () => {
@@ -11709,6 +11746,13 @@ const server = http.createServer((req, res) => runWithPlatformRequest(req, () =>
   ) {
     handleMobileWorkflowRequest(req, res, requestUrl).catch((error) => {
       sendMobileApiError(res, 500, 'MOBILE_WORKFLOW_ERROR', error?.message || 'Unexpected mobile workflow error.')
+    })
+    return
+  }
+
+  if (requestUrl.pathname === MOBILE_COORDINATOR_ZONES_PATH) {
+    mobileCoordinatorZoneApi.handle(req, res).catch((error) => {
+      sendMobileApiError(res, 500, 'MOBILE_COORDINATOR_QR_ERROR', error?.message || 'Unexpected mobile coordinator QR error.')
     })
     return
   }

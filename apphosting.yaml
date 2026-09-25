@@ -276,3 +276,13 @@ env:
     value: "OFF"
     availability:
       - RUNTIME
+  # Backend-first Best Clean canary. The endpoint still requires a verified
+  # Firebase token and an active coordinator/manager/admin identity.
+  - variable: MOBILE_COORDINATOR_QR_ENABLED
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: MOBILE_COORDINATOR_QR_ALLOWED_ORG_IDS
+    value: "bestclean"
+    availability:
+      - RUNTIME
