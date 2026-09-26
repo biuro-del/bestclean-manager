@@ -18,18 +18,19 @@ function functionSource(name, nextName) {
   return source.slice(start, end)
 }
 
-test('odczyt QR START blokuje tylko dzisiejsze lub niejednoznaczne Workday pod LIMIT 2 i FOR UPDATE', () => {
+test('odczyt QR START blokuje tylko Workday z dnia skanu pod LIMIT 2 i FOR UPDATE', () => {
   const body = functionSource('fetchMobileOpenWorkdayState', 'fetchMobileWorkdays')
   assert.match(body, /start_at at time zone 'Europe\/Warsaw'/i)
   assert.match(body, /business_day_relation/i)
   assert.match(body, /then 'TODAY'/i)
   assert.match(body, /then 'PRIOR'/i)
   assert.match(body, /else 'FUTURE'/i)
-  assert.match(body, /now\(\) at time zone 'Europe\/Warsaw'/i)
+  assert.match(body, /\$3::timestamptz at time zone 'Europe\/Warsaw'/i)
   assert.match(
     body,
-    /and\s*\(\s*\(\(w\.start_at at time zone 'Europe\/Warsaw'\)::date\s*=\s*\(now\(\) at time zone 'Europe\/Warsaw'\)::date\)\s*or w\.start_at is null\s*\)/i,
+    /and\s*\(\s*\(\(w\.start_at at time zone 'Europe\/Warsaw'\)::date\s*=\s*\(\$3::timestamptz at time zone 'Europe\/Warsaw'\)::date\)\s*or w\.start_at is null\s*\)/i,
   )
+  assert.match(body, /\[orgId, workerLogin, referenceAt\]/)
   assert.match(body, /limit 2\s*for update/i)
   assert.match(body, /for update/i)
   assert.match(body, /resolveOpenWorkdayState\(result\.rows\)/)
@@ -102,7 +103,7 @@ test('snapshot wybiera tylko dzisiejszy Workday i raportuje stare rekordy bez ic
 
 test('scan opiera START CLEAN i STOP wylacznie na dzisiejszym Workday', () => {
   const body = functionSource('processMobileWorkflowScan', 'handleMobileWorkflowRequest')
-  assert.match(body, /const openWorkdayState = await fetchMobileOpenWorkdayState/)
+  assert.match(body, /fetchMobileOpenWorkdayState\(client, orgId, worker\.login, scannedAt\)/)
   assert.match(body, /let activeWorkday = openWorkdayState\.activeWorkday/)
   assert.match(body, /resolveOpenCycleState\(openCycleRows, activeWorkday\?\.workday_id\)\.activeCycle/)
   assert.doesNotMatch(body, /openWorkdayState\.staleWorkdays\[[^\]]+\]/)

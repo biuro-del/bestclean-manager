@@ -145,7 +145,7 @@ test('brak UID w zweryfikowanym kontekście ma stabilny blad', () => {
   )
 })
 
-test('dowolny backdate i future z klienta nie zmieniaja autorytatywnego czasu serwera', () => {
+test('online zawsze uzywa czasu serwera niezaleznie od czasu klienta', () => {
   const serverNow = new Date('2026-07-23T10:15:30.000Z')
 
   for (const clientScannedAt of [
@@ -155,9 +155,38 @@ test('dowolny backdate i future z klienta nie zmieniaja autorytatywnego czasu se
   ]) {
     const resolved = resolveAuthoritativeMobileScanAt({
       serverNow,
-      clientScannedAt,
+      clientOccurredAt: clientScannedAt,
     })
     assert.equal(resolved.toISOString(), serverNow.toISOString())
     assert.notEqual(resolved, serverNow)
   }
+})
+
+test('offline akceptuje czas klienta tylko w ograniczonym oknie siedmiu dni', () => {
+  const serverNow = new Date('2026-09-26T10:00:00.000Z')
+  assert.equal(
+    resolveAuthoritativeMobileScanAt({
+      serverNow,
+      offline: true,
+      clientOccurredAt: '2026-09-26T08:30:00.000Z',
+    }).toISOString(),
+    '2026-09-26T08:30:00.000Z',
+  )
+  assertPolicyCode(MOBILE_WORKER_ERROR.OFFLINE_TIME_INVALID, () =>
+    resolveAuthoritativeMobileScanAt({ serverNow, offline: true, clientOccurredAt: 'invalid' }),
+  )
+  assertPolicyCode(MOBILE_WORKER_ERROR.OFFLINE_TIME_TOO_OLD, () =>
+    resolveAuthoritativeMobileScanAt({
+      serverNow,
+      offline: true,
+      clientOccurredAt: '2026-09-18T09:59:59.000Z',
+    }),
+  )
+  assertPolicyCode(MOBILE_WORKER_ERROR.OFFLINE_TIME_IN_FUTURE, () =>
+    resolveAuthoritativeMobileScanAt({
+      serverNow,
+      offline: true,
+      clientOccurredAt: '2026-09-26T10:05:01.000Z',
+    }),
+  )
 })

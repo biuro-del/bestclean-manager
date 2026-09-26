@@ -137,6 +137,10 @@ const {
   resolveAuthoritativeMobileScanAt,
 } = require('./mobile-workflow-security-policy')
 const {
+  assertMobileScanReplayFingerprint,
+  fingerprintMobileScanRequest,
+} = require('./mobile-scan-command-policy')
+const {
   assertNoUnresolvedOpenEvents,
   resolveOpenCycleState,
 } = require('./mobile-open-cycle-policy')
@@ -3013,50 +3017,32 @@ async function ensureMobileWorkflowTables(client) {
   if (mobileWorkflowTablesReady) return true
   if (mobileWorkflowTablesAttempted && !mobileWorkflowTablesReady) return false
   mobileWorkflowTablesAttempted = true
-  let savepointCreated = false
   try {
-    await client.query('savepoint mobile_workflow_tables')
-    savepointCreated = true
-    await client.query(`
-      create table if not exists public.worker_runtime_state (
-        org_id varchar(64) not null,
-        worker_login varchar(80) not null,
-        worker_name text,
-        active_workday_id varchar(64),
-        workday_start_at timestamptz,
-        active_event_id varchar(64),
-        active_zone_id varchar(64),
-        zone_start_at timestamptz,
-        status varchar(32),
-        version integer not null default 1,
-        updated_at timestamptz not null default now(),
-        primary key (org_id, worker_login)
-      )
+    const result = await client.query(`
+      select
+        to_regclass('public.worker_runtime_state') is not null as runtime_ready,
+        to_regclass('public.mobile_scan_command') is not null as command_ready,
+        (
+          select count(*) = 5
+            from information_schema.columns
+           where table_schema = 'public'
+             and table_name = 'mobile_scan_command'
+             and column_name in (
+               'request_fingerprint',
+               'occurred_at',
+               'received_at',
+               'offline',
+               'result'
+             )
+        ) as command_shape_ready
     `)
-    await client.query(`
-      create table if not exists public.mobile_scan_command (
-        org_id varchar(64) not null,
-        worker_login varchar(80) not null,
-        client_action_id varchar(128) not null,
-        qr_code varchar(128),
-        action varchar(40),
-        result jsonb,
-        created_at timestamptz not null default now(),
-        primary key (org_id, worker_login, client_action_id)
-      )
-    `)
-    await client.query('release savepoint mobile_workflow_tables')
-    mobileWorkflowTablesReady = true
+    mobileWorkflowTablesReady = Boolean(
+      result.rows[0]?.runtime_ready &&
+      result.rows[0]?.command_ready &&
+      result.rows[0]?.command_shape_ready,
+    )
   } catch (error) {
-    if (savepointCreated) {
-      try {
-        await client.query('rollback to savepoint mobile_workflow_tables')
-        await client.query('release savepoint mobile_workflow_tables')
-      } catch {
-        // Ignore optional-table cleanup errors.
-      }
-    }
-    console.warn(`[mobile/workflow] optional runtime tables unavailable: ${normalizeText(error?.message).slice(0, 200)}`)
+    console.warn(`[mobile/workflow] runtime schema unavailable: ${normalizeText(error?.message).slice(0, 200)}`)
     mobileWorkflowTablesReady = false
   }
   return mobileWorkflowTablesReady
@@ -3657,28 +3643,28 @@ async function assertMobileRequiredZoneObjectTransitionAllowed(
   throw error
 }
 
-async function fetchMobileOpenWorkdayState(client, orgId, workerLogin) {
+async function fetchMobileOpenWorkdayState(client, orgId, workerLogin, referenceAt = new Date()) {
   const result = await client.query(
     `select w.*,
             case
-              when (w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date then 'TODAY'
-              when (w.start_at at time zone 'Europe/Warsaw')::date < (now() at time zone 'Europe/Warsaw')::date then 'PRIOR'
+              when (w.start_at at time zone 'Europe/Warsaw')::date = ($3::timestamptz at time zone 'Europe/Warsaw')::date then 'TODAY'
+              when (w.start_at at time zone 'Europe/Warsaw')::date < ($3::timestamptz at time zone 'Europe/Warsaw')::date then 'PRIOR'
               else 'FUTURE'
             end as business_day_relation,
-            ((w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date) as is_today_warsaw
+            ((w.start_at at time zone 'Europe/Warsaw')::date = ($3::timestamptz at time zone 'Europe/Warsaw')::date) as is_today_warsaw
        from public.workday w
       where org_id = $1
        and lower(btrim(worker_login)) = lower(btrim($2))
        and upper(btrim(coalesce(status, 'RUNNING'))) <> 'CLOSED'
        and end_at is null
         and (
-          ((w.start_at at time zone 'Europe/Warsaw')::date = (now() at time zone 'Europe/Warsaw')::date)
+          ((w.start_at at time zone 'Europe/Warsaw')::date = ($3::timestamptz at time zone 'Europe/Warsaw')::date)
           or w.start_at is null
         )
       order by start_at desc nulls last, updated_at desc nulls last
       limit 2
       for update`,
-    [orgId, workerLogin],
+    [orgId, workerLogin, referenceAt],
   )
   return resolveOpenWorkdayState(result.rows)
 }
@@ -4234,17 +4220,50 @@ async function closeMobileWorkday(client, orgId, workday, stopZone, endAt = new 
   return result.rows[0] ?? null
 }
 
-async function storeMobileScanCommand(client, orgId, workerLogin, clientActionId, qrCode, action, resultPayload) {
-  if (!clientActionId || !(await ensureMobileWorkflowTables(client))) return
+function mobileScanSchemaNotReadyError() {
+  const error = new Error('MOBILE_SCAN_SCHEMA_NOT_READY')
+  error.statusCode = 503
+  error.publicCode = 'MOBILE_SCAN_SCHEMA_NOT_READY'
+  error.publicMessage = 'Bezpieczny zapis skanow jest chwilowo niedostepny.'
+  return error
+}
+
+async function storeMobileScanCommand(
+  client,
+  orgId,
+  workerLogin,
+  clientActionId,
+  qrCode,
+  action,
+  resultPayload,
+  { requestFingerprint, occurredAt, receivedAt, offline },
+) {
+  if (!clientActionId || !(await ensureMobileWorkflowTables(client))) {
+    throw mobileScanSchemaNotReadyError()
+  }
   let savepointCreated = false
   try {
     await client.query('savepoint mobile_scan_command_store')
     savepointCreated = true
     await client.query(
-      `insert into public.mobile_scan_command (org_id, worker_login, client_action_id, qr_code, action, result)
-       values ($1,$2,$3,$4,$5,$6::jsonb)
+      `insert into public.mobile_scan_command (
+         org_id, worker_login, client_action_id, qr_code, action, result,
+         request_fingerprint, occurred_at, received_at, offline
+       )
+       values ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10)
        on conflict (org_id, worker_login, client_action_id) do nothing`,
-      [orgId, workerLogin, clientActionId, qrCode, action, JSON.stringify(resultPayload)],
+      [
+        orgId,
+        workerLogin,
+        clientActionId,
+        qrCode,
+        action,
+        JSON.stringify(resultPayload),
+        requestFingerprint,
+        occurredAt,
+        receivedAt,
+        offline === true,
+      ],
     )
     await client.query('release savepoint mobile_scan_command_store')
   } catch (error) {
@@ -4258,21 +4277,23 @@ async function storeMobileScanCommand(client, orgId, workerLogin, clientActionId
     }
     if (isPostgresMissingRelationError(error)) {
       console.warn(`[mobile/workflow] scan command store unavailable: ${normalizeText(error?.message).slice(0, 200)}`)
-      return
+      throw mobileScanSchemaNotReadyError()
     }
     throw error
   }
 }
 
 async function readMobileScanCommand(client, orgId, workerLogin, clientActionId) {
-  if (!clientActionId || !(await ensureMobileWorkflowTables(client))) return null
+  if (!clientActionId || !(await ensureMobileWorkflowTables(client))) {
+    throw mobileScanSchemaNotReadyError()
+  }
   let result
   let savepointCreated = false
   try {
     await client.query('savepoint mobile_scan_command_read')
     savepointCreated = true
     result = await client.query(
-      `select result
+      `select result, request_fingerprint
          from public.mobile_scan_command
         where org_id = $1 and worker_login = $2 and client_action_id = $3
         limit 1`,
@@ -4290,11 +4311,11 @@ async function readMobileScanCommand(client, orgId, workerLogin, clientActionId)
     }
     if (isPostgresMissingRelationError(error)) {
       console.warn(`[mobile/workflow] scan command read unavailable: ${normalizeText(error?.message).slice(0, 200)}`)
-      return null
+      throw mobileScanSchemaNotReadyError()
     }
     throw error
   }
-  return result.rows[0]?.result || null
+  return result.rows[0] || null
 }
 
 async function processMobileWorkflowScan(client, orgId, worker, body) {
@@ -4308,12 +4329,27 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
   }
 
   const clientActionId = normalizeText(body?.clientActionId).slice(0, 128)
-  const existingResult = await readMobileScanCommand(client, orgId, worker.login, clientActionId)
-  if (existingResult) {
-    return { ...existingResult, idempotent: true }
+  if (!clientActionId) {
+    const error = new Error('MOBILE_SCAN_CLIENT_ACTION_ID_MISSING')
+    error.statusCode = 400
+    error.publicCode = 'CLIENT_ACTION_ID_MISSING'
+    error.publicMessage = 'Brak identyfikatora skanu.'
+    throw error
+  }
+  const requestFingerprint = fingerprintMobileScanRequest(body)
+  const existingCommand = await readMobileScanCommand(client, orgId, worker.login, clientActionId)
+  if (existingCommand) {
+    assertMobileScanReplayFingerprint(existingCommand.request_fingerprint, requestFingerprint)
+    return { ...existingCommand.result, idempotent: true }
   }
 
-  const scannedAt = resolveAuthoritativeMobileScanAt({ serverNow: new Date() })
+  const receivedAt = new Date()
+  const offline = body?.offline === true
+  const scannedAt = resolveAuthoritativeMobileScanAt({
+    serverNow: receivedAt,
+    offline,
+    clientOccurredAt: body?.occurredAt,
+  })
   const comment = normalizeText(body?.comment)
   const zone = await findMobileZoneByQr(client, orgId, qrCode)
   if (!zone) {
@@ -4324,7 +4360,10 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
     throw error
   }
 
-  const openWorkdayState = await fetchMobileOpenWorkdayState(client, orgId, worker.login)
+  // Offline commands are replayed in FIFO order, but may arrive after midnight.
+  // Resolve the active workday relative to the signed command occurrence time,
+  // never relative to the later delivery time.
+  const openWorkdayState = await fetchMobileOpenWorkdayState(client, orgId, worker.login, scannedAt)
   let activeWorkday = openWorkdayState.activeWorkday
   let activeCycle = null
   let visitEventId = ''
@@ -4493,8 +4532,20 @@ async function processMobileWorkflowScan(client, orgId, worker, body) {
     message,
     snapshot,
     serverAt: new Date().toISOString(),
+    occurredAt: scannedAt.toISOString(),
+    receivedAt: receivedAt.toISOString(),
+    offline,
   }
-  await storeMobileScanCommand(client, orgId, worker.login, clientActionId, qrCode, action, resultPayload)
+  await storeMobileScanCommand(
+    client,
+    orgId,
+    worker.login,
+    clientActionId,
+    qrCode,
+    action,
+    resultPayload,
+    { requestFingerprint, occurredAt: scannedAt, receivedAt, offline },
+  )
   return resultPayload
 }
 

@@ -11,7 +11,13 @@ const MOBILE_WORKER_ERROR = Object.freeze({
   CLAIM_MISMATCH: 'WORKER_CLAIM_MISMATCH',
   NOT_FOUND: 'WORKER_NOT_FOUND',
   SERVER_TIME_INVALID: 'MOBILE_SERVER_TIME_INVALID',
+  OFFLINE_TIME_INVALID: 'MOBILE_OFFLINE_TIME_INVALID',
+  OFFLINE_TIME_TOO_OLD: 'MOBILE_OFFLINE_TIME_TOO_OLD',
+  OFFLINE_TIME_IN_FUTURE: 'MOBILE_OFFLINE_TIME_IN_FUTURE',
 })
+
+const MOBILE_OFFLINE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+const MOBILE_OFFLINE_MAX_FUTURE_DRIFT_MS = 5 * 60 * 1000
 
 function text(value) {
   return String(value ?? '').trim()
@@ -189,7 +195,11 @@ function resolveAuthenticatedMobileWorker({
   return selected.row
 }
 
-function resolveAuthoritativeMobileScanAt({ serverNow = new Date() } = {}) {
+function resolveAuthoritativeMobileScanAt({
+  serverNow = new Date(),
+  offline = false,
+  clientOccurredAt = '',
+} = {}) {
   const parsed = serverNow instanceof Date ? new Date(serverNow.getTime()) : new Date(serverNow)
   if (!Number.isFinite(parsed.getTime())) {
     throw workerPolicyError(
@@ -198,11 +208,38 @@ function resolveAuthoritativeMobileScanAt({ serverNow = new Date() } = {}) {
       'Nie udalo sie ustalic czasu serwera.',
     )
   }
-  return parsed
+  if (offline !== true) return parsed
+
+  const occurredAt = new Date(clientOccurredAt)
+  if (!text(clientOccurredAt) || !Number.isFinite(occurredAt.getTime())) {
+    throw workerPolicyError(
+      400,
+      MOBILE_WORKER_ERROR.OFFLINE_TIME_INVALID,
+      'Skan offline nie zawiera poprawnego czasu zdarzenia.',
+    )
+  }
+  const ageMs = parsed.getTime() - occurredAt.getTime()
+  if (ageMs > MOBILE_OFFLINE_MAX_AGE_MS) {
+    throw workerPolicyError(
+      409,
+      MOBILE_WORKER_ERROR.OFFLINE_TIME_TOO_OLD,
+      'Skan offline jest starszy niz dopuszczalny okres synchronizacji.',
+    )
+  }
+  if (ageMs < -MOBILE_OFFLINE_MAX_FUTURE_DRIFT_MS) {
+    throw workerPolicyError(
+      409,
+      MOBILE_WORKER_ERROR.OFFLINE_TIME_IN_FUTURE,
+      'Czas telefonu jest nieprawidlowy. Ustaw automatyczna date i godzine.',
+    )
+  }
+  return occurredAt
 }
 
 module.exports = {
   MOBILE_WORKER_ERROR,
+  MOBILE_OFFLINE_MAX_AGE_MS,
+  MOBILE_OFFLINE_MAX_FUTURE_DRIFT_MS,
   resolveAuthenticatedMobileWorker,
   resolveAuthoritativeMobileScanAt,
 }
