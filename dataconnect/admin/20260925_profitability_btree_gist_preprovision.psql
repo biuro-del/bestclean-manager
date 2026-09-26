@@ -1,0 +1,136 @@
+-- DATABASE-ADMIN CANDIDATE ONLY. Never run without separate approval.
+-- Installs only the exact btree_gist extension required by Foundation V2.
+-- It creates no roles, tables or application data.
+
+\set ON_ERROR_STOP on
+
+\if :{?profitability_extension_expected_database}
+\else
+  do $$ begin raise exception 'PROFITABILITY_EXTENSION_EXPECTED_DATABASE_REQUIRED'; end $$;
+\endif
+\if :{?profitability_extension_expected_admin}
+\else
+  do $$ begin raise exception 'PROFITABILITY_EXTENSION_EXPECTED_ADMIN_REQUIRED'; end $$;
+\endif
+\if :{?profitability_extension_backup_reference}
+\else
+  do $$ begin raise exception 'PROFITABILITY_EXTENSION_BACKUP_REFERENCE_REQUIRED'; end $$;
+\endif
+\if :{?profitability_extension_confirmation}
+\else
+  do $$ begin raise exception 'PROFITABILITY_EXTENSION_CONFIRMATION_REQUIRED'; end $$;
+\endif
+
+select
+  :'profitability_extension_expected_database' = 'iclean-room-database'
+    and current_database() = :'profitability_extension_expected_database'
+    as profitability_extension_database_confirmed,
+  session_user = :'profitability_extension_expected_admin'
+    and current_user = session_user
+    as profitability_extension_admin_confirmed,
+  :'profitability_extension_backup_reference' = '1790402094445'
+    as profitability_extension_backup_confirmed,
+  :'profitability_extension_confirmation'
+    = 'INSTALL_PROFITABILITY_BTREE_GIST_1_7_ONLY_20260926'
+    as profitability_extension_execution_confirmed,
+  current_setting('server_version_num')::integer between 170000 and 179999
+    as profitability_extension_pg17_confirmed,
+  not pg_is_in_recovery()
+    and current_setting('transaction_read_only') = 'off'
+    and current_setting('default_transaction_read_only') = 'off'
+    as profitability_extension_writable_primary_confirmed,
+  coalesce(
+    (select default_version = '1.7'
+       from pg_available_extensions
+      where name = 'btree_gist'),
+    false
+  ) as profitability_extension_available_confirmed,
+  coalesce(
+    (select role_row.rolsuper
+         or exists (
+           select 1
+             from pg_roles admin_role
+            where admin_role.rolname = 'cloudsqlsuperuser'
+              and pg_has_role(session_user, admin_role.oid, 'member')
+         )
+       from pg_roles role_row
+      where role_row.rolname = session_user),
+    false
+  ) as profitability_extension_privileged_admin_confirmed,
+  not exists (
+    select 1
+      from pg_extension extension_row
+      join pg_namespace namespace_row on namespace_row.oid = extension_row.extnamespace
+     where extension_row.extname = 'btree_gist'
+       and (
+         extension_row.extversion <> '1.7'
+         or namespace_row.nspname <> 'public'
+       )
+  ) as profitability_extension_existing_state_confirmed
+\gset
+
+\if :profitability_extension_database_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_EXTENSION_DATABASE_MISMATCH'; end $$;
+\endif
+\if :profitability_extension_admin_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_EXTENSION_ADMIN_MISMATCH'; end $$;
+\endif
+\if :profitability_extension_backup_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_EXTENSION_BACKUP_MISMATCH'; end $$;
+\endif
+\if :profitability_extension_execution_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_EXTENSION_CONFIRMATION_MISMATCH'; end $$;
+\endif
+\if :profitability_extension_pg17_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_EXTENSION_POSTGRESQL_17_REQUIRED'; end $$;
+\endif
+\if :profitability_extension_writable_primary_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_EXTENSION_WRITABLE_PRIMARY_REQUIRED'; end $$;
+\endif
+\if :profitability_extension_available_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_EXTENSION_BTREE_GIST_1_7_UNAVAILABLE'; end $$;
+\endif
+\if :profitability_extension_privileged_admin_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_EXTENSION_PRIVILEGED_ADMIN_REQUIRED'; end $$;
+\endif
+\if :profitability_extension_existing_state_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_EXTENSION_EXISTING_STATE_MISMATCH'; end $$;
+\endif
+
+begin;
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
+select pg_advisory_xact_lock(
+  hashtextextended('cleanzi:profitability-btree-gist:1.7', 0)
+);
+
+create extension if not exists btree_gist
+  with schema public
+  version '1.7';
+
+do $$
+begin
+  if not exists (
+    select 1
+      from pg_extension extension_row
+      join pg_namespace namespace_row on namespace_row.oid = extension_row.extnamespace
+     where extension_row.extname = 'btree_gist'
+       and extension_row.extversion = '1.7'
+       and namespace_row.nspname = 'public'
+  ) then
+    raise exception 'PROFITABILITY_EXTENSION_POSTFLIGHT_FAILED';
+  end if;
+end
+$$;
+
+commit;
+\echo 'PROFITABILITY_BTREE_GIST_1_7_PREPROVISIONED'

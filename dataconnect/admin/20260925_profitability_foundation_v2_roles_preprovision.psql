@@ -1,0 +1,994 @@
+-- DATABASE-ADMIN CANDIDATE ONLY. Never run without separate role-provision approval.
+--
+-- This script provisions only the five isolated roles required by
+-- Profitability Foundation V2, their three closed SET ROLE edges, the five
+-- unavoidable PostgreSQL 17 creator edges to a dedicated provisioner and the
+-- minimum database/schema ACLs required by the guarded migration wrapper. It
+-- does not touch tables, data, extensions, portal_app, PUBLIC or unrelated
+-- roles.
+--
+-- Passwords and other credentials MUST NOT be passed with `psql -v`, written
+-- into this file or copied into a shell history. Authenticate through the
+-- separately approved database-admin channel. Both LOGIN roles are created
+-- with PASSWORD NULL; credential activation is a separate, reviewed action.
+--
+-- Required invocation parameters (all are non-secret guards):
+--   -v profitability_roles_expected_database=iclean-room-database
+--   -v profitability_roles_expected_admin=profitability_provisioner
+--   -v profitability_roles_expected_bootstrap_grantor=<exact OID-10 role>
+--   -v profitability_roles_backup_reference=1790402094445
+--   -v profitability_roles_confirmation=PROVISION_PROFITABILITY_FOUNDATION_V2_ROLES_ONLY_20260926
+
+\set ON_ERROR_STOP on
+
+\if :{?profitability_roles_expected_database}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_EXPECTED_DATABASE_REQUIRED';
+  end $$;
+\endif
+
+\if :{?profitability_roles_expected_admin}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_EXPECTED_ADMIN_REQUIRED';
+  end $$;
+\endif
+
+\if :{?profitability_roles_expected_bootstrap_grantor}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_EXPECTED_BOOTSTRAP_GRANTOR_REQUIRED';
+  end $$;
+\endif
+
+\if :{?profitability_roles_backup_reference}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_BACKUP_REFERENCE_REQUIRED';
+  end $$;
+\endif
+
+\if :{?profitability_roles_confirmation}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_CONFIRMATION_REQUIRED';
+  end $$;
+\endif
+
+select
+  :'profitability_roles_expected_database' = 'iclean-room-database'
+    as profitability_roles_approved_database_confirmed,
+  current_database() = :'profitability_roles_expected_database'
+    as profitability_roles_database_confirmed,
+  session_user = :'profitability_roles_expected_admin'
+    and current_user = session_user
+    as profitability_roles_admin_identity_confirmed,
+  :'profitability_roles_expected_admin' = 'profitability_provisioner'
+    as profitability_roles_approved_admin_confirmed,
+  :'profitability_roles_expected_bootstrap_grantor' = pg_get_userbyid(10)
+    as profitability_roles_bootstrap_grantor_confirmed,
+  :'profitability_roles_backup_reference' = '1790402094445'
+    as profitability_roles_backup_confirmed,
+  :'profitability_roles_confirmation'
+    = 'PROVISION_PROFITABILITY_FOUNDATION_V2_ROLES_ONLY_20260926'
+    as profitability_roles_execution_confirmed,
+  current_setting('server_version_num')::integer between 170000 and 179999
+    as profitability_roles_pg17_confirmed,
+  not pg_is_in_recovery()
+    as profitability_roles_primary_confirmed,
+  current_setting('transaction_read_only') = 'off'
+    and current_setting('default_transaction_read_only') = 'off'
+    as profitability_roles_read_write_confirmed,
+  exists (
+    select 1
+      from pg_roles admin_role
+     where admin_role.rolname = session_user
+       and admin_role.rolcanlogin
+       and admin_role.rolcreaterole
+       and not admin_role.rolinherit
+       and not admin_role.rolsuper
+       and not admin_role.rolbypassrls
+       and not admin_role.rolcreatedb
+       and not admin_role.rolreplication
+       and admin_role.rolconnlimit = -1
+       and admin_role.rolvaliduntil is null
+       and admin_role.rolconfig is null
+  ) as profitability_roles_admin_capability_confirmed
+\gset
+
+\if :profitability_roles_approved_database_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_APPROVED_DATABASE_MISMATCH';
+  end $$;
+\endif
+
+\if :profitability_roles_database_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_DATABASE_MISMATCH';
+  end $$;
+\endif
+
+\if :profitability_roles_admin_identity_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_ADMIN_IDENTITY_MISMATCH';
+  end $$;
+\endif
+
+\if :profitability_roles_approved_admin_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_APPROVED_ADMIN_MISMATCH';
+  end $$;
+\endif
+
+\if :profitability_roles_bootstrap_grantor_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_BOOTSTRAP_GRANTOR_MISMATCH';
+  end $$;
+\endif
+
+\if :profitability_roles_backup_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_APPROVED_BACKUP_MISMATCH';
+  end $$;
+\endif
+
+\if :profitability_roles_execution_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_CONFIRMATION_MISMATCH';
+  end $$;
+\endif
+
+\if :profitability_roles_pg17_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_POSTGRESQL_17_REQUIRED';
+  end $$;
+\endif
+
+\if :profitability_roles_primary_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_PRIMARY_DATABASE_REQUIRED';
+  end $$;
+\endif
+
+\if :profitability_roles_read_write_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_READ_WRITE_SESSION_REQUIRED';
+  end $$;
+\endif
+
+\if :profitability_roles_admin_capability_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_RESTRICTED_PROVISIONER_REQUIRED';
+  end $$;
+\endif
+
+begin;
+
+set local lock_timeout = '5s';
+set local statement_timeout = '30s';
+
+select pg_advisory_xact_lock(
+  hashtextextended('cleanzi:profitability:foundation-v2:roles', 0)
+);
+
+-- Existing roles are accepted only when every relevant security attribute is
+-- already exact. Existing unexpected memberships abort before any mutation.
+do $preflight$
+declare
+  expected_role record;
+  checked_role record;
+  existing_target_role_count integer;
+  role_has_credential boolean;
+  provisioner_oid oid;
+begin
+  if current_user <> session_user then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_SET_ROLE_FORBIDDEN';
+  end if;
+
+  if session_user in (
+    'portal_app',
+    'profitability_migration_executor',
+    'profitability_migration_runner',
+    'profitability_owner',
+    'profitability_session',
+    'profitability_runtime'
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_SEPARATE_ADMIN_REQUIRED';
+  end if;
+
+  select oid into strict provisioner_oid
+    from pg_roles
+   where rolname = session_user;
+
+  select count(*)::integer into existing_target_role_count
+    from pg_roles
+   where rolname in (
+     'profitability_migration_executor',
+     'profitability_migration_runner',
+     'profitability_owner',
+     'profitability_session',
+     'profitability_runtime'
+   );
+
+  -- Cloud SQL intentionally blocks pg_authid unless an explicit database flag
+  -- delegates access. A completely fresh install does not need that catalog:
+  -- every role is created below with an explicit PASSWORD NULL in this same
+  -- transaction. Any existing or partial state, however, must fail closed
+  -- unless the credential state can be verified before the first mutation.
+  if existing_target_role_count > 0
+     and not coalesce(
+       has_table_privilege(session_user, 'pg_catalog.pg_authid', 'SELECT'),
+       false
+     ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_EXISTING_CREDENTIAL_STATE_UNVERIFIABLE';
+  end if;
+
+  -- The dedicated provisioner must be restored from any temporary platform
+  -- elevation before this script runs. It may touch the five target roles only
+  -- through PostgreSQL 17's automatic creator edges created below.
+  if exists (
+    select 1
+      from pg_auth_members membership
+      left join pg_roles granted_role on granted_role.oid = membership.roleid
+     where (
+       membership.member = provisioner_oid
+       or membership.roleid = provisioner_oid
+     )
+       and not (
+         membership.member = provisioner_oid
+         and granted_role.rolname in (
+           'profitability_migration_executor',
+           'profitability_migration_runner',
+           'profitability_owner',
+           'profitability_session',
+           'profitability_runtime'
+         )
+         and membership.grantor = 10::oid
+         and membership.admin_option
+         and not membership.inherit_option
+         and not membership.set_option
+       )
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_PROVISIONER_MEMBERSHIP_FORBIDDEN';
+  end if;
+
+  -- CREATEROLE alone cannot delegate database/schema ACL. Require only the
+  -- exact direct GRANT OPTION surface needed by the statements below. The
+  -- provisioner must not own the database or public schema.
+  if exists (
+    select 1 from pg_database database_row
+     where database_row.datname = current_database()
+       and database_row.datdba = provisioner_oid
+  ) or exists (
+    select 1 from pg_namespace namespace_row
+     where namespace_row.nspname = 'public'
+       and namespace_row.nspowner = provisioner_oid
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_PROVISIONER_OWNERSHIP_FORBIDDEN';
+  end if;
+
+  if 1 <> (
+    select count(*)
+      from pg_database database_row
+      cross join lateral aclexplode(
+        case when cardinality(database_row.datacl) > 0
+             then database_row.datacl else null::aclitem[] end
+      ) privilege
+     where database_row.datname = current_database()
+       and privilege.grantee = provisioner_oid
+       and privilege.privilege_type = 'CONNECT'
+       and privilege.is_grantable
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_PROVISIONER_DATABASE_GRANT_OPTION_REQUIRED';
+  end if;
+
+  if exists (
+    select 1
+      from pg_database database_row
+      cross join lateral aclexplode(
+        case when cardinality(database_row.datacl) > 0
+             then database_row.datacl else null::aclitem[] end
+      ) privilege
+     where privilege.grantee = provisioner_oid
+       and not (
+         database_row.datname = current_database()
+         and privilege.privilege_type = 'CONNECT'
+         and privilege.is_grantable
+       )
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_PROVISIONER_DATABASE_ACL_FORBIDDEN';
+  end if;
+
+  if 2 <> (
+    select count(*)
+      from pg_namespace namespace_row
+      cross join lateral aclexplode(
+        case when cardinality(namespace_row.nspacl) > 0
+             then namespace_row.nspacl else null::aclitem[] end
+      ) privilege
+     where namespace_row.nspname = 'public'
+       and privilege.grantee = provisioner_oid
+       and privilege.privilege_type in ('USAGE', 'CREATE')
+       and privilege.is_grantable
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_PROVISIONER_SCHEMA_GRANT_OPTION_REQUIRED';
+  end if;
+
+  if exists (
+    select 1
+      from pg_namespace namespace_row
+      cross join lateral aclexplode(
+        case when cardinality(namespace_row.nspacl) > 0
+             then namespace_row.nspacl else null::aclitem[] end
+      ) privilege
+     where privilege.grantee = provisioner_oid
+       and not (
+         namespace_row.nspname = 'public'
+         and privilege.privilege_type in ('USAGE', 'CREATE')
+         and privilege.is_grantable
+       )
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_PROVISIONER_SCHEMA_ACL_FORBIDDEN';
+  end if;
+
+  for expected_role in
+    select *
+      from (values
+        ('profitability_migration_executor'::text, true),
+        ('profitability_migration_runner'::text, false),
+        ('profitability_owner'::text, false),
+        ('profitability_session'::text, true),
+        ('profitability_runtime'::text, false)
+      ) as expected(rolname, can_login)
+  loop
+    select * into checked_role
+      from pg_roles
+     where rolname = expected_role.rolname;
+
+    if found then
+      if checked_role.rolcanlogin <> expected_role.can_login
+         or checked_role.rolinherit
+         or checked_role.rolsuper
+         or checked_role.rolbypassrls
+         or checked_role.rolcreaterole
+         or checked_role.rolcreatedb
+         or checked_role.rolreplication
+         or checked_role.rolconnlimit <> -1
+         or checked_role.rolvaliduntil is not null
+         or checked_role.rolconfig is not null then
+        raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_EXISTING_ROLE_ATTRIBUTES_MISMATCH: %',
+          expected_role.rolname;
+      end if;
+
+      -- pg_roles masks rolpassword as ******** even when the underlying
+      -- credential is NULL. Read only a boolean from pg_authid and never the
+      -- credential value. A platform-level denial remains a hard stop.
+      begin
+        select exists (
+          select 1
+            from pg_authid credential_role
+           where credential_role.oid = checked_role.oid
+             and credential_role.rolpassword is not null
+        ) into role_has_credential;
+      exception
+        when insufficient_privilege then
+          raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_EXISTING_CREDENTIAL_STATE_UNVERIFIABLE: %',
+            expected_role.rolname;
+      end;
+
+      if role_has_credential then
+        raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_EXISTING_ROLE_ATTRIBUTES_MISMATCH: %',
+          expected_role.rolname;
+      end if;
+    end if;
+  end loop;
+
+  if exists (
+    select 1
+      from pg_auth_members membership
+      join pg_roles granted_role on granted_role.oid = membership.roleid
+      join pg_roles member_role on member_role.oid = membership.member
+     where (
+       granted_role.rolname in (
+         'profitability_migration_executor',
+         'profitability_migration_runner',
+         'profitability_owner',
+         'profitability_session',
+         'profitability_runtime'
+       )
+       or member_role.rolname in (
+         'profitability_migration_executor',
+         'profitability_migration_runner',
+         'profitability_owner',
+         'profitability_session',
+         'profitability_runtime'
+       )
+     )
+       and not (
+          granted_role.rolname = 'profitability_migration_runner'
+          and member_role.rolname = 'profitability_migration_executor'
+          and membership.grantor = provisioner_oid
+          and not membership.admin_option
+         and not membership.inherit_option
+         and membership.set_option
+       )
+       and not (
+          granted_role.rolname = 'profitability_owner'
+          and member_role.rolname = 'profitability_migration_runner'
+          and membership.grantor = provisioner_oid
+         and not membership.admin_option
+         and not membership.inherit_option
+         and membership.set_option
+       )
+        and not (
+          granted_role.rolname = 'profitability_runtime'
+          and member_role.rolname = 'profitability_session'
+          and membership.grantor = provisioner_oid
+          and not membership.admin_option
+          and not membership.inherit_option
+          and membership.set_option
+        )
+        and not (
+          granted_role.rolname in (
+            'profitability_migration_executor',
+            'profitability_migration_runner',
+            'profitability_owner',
+            'profitability_session',
+            'profitability_runtime'
+          )
+          and member_role.rolname = session_user
+          and membership.grantor = 10::oid
+          and membership.admin_option
+          and not membership.inherit_option
+          and not membership.set_option
+        )
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_UNEXPECTED_EXISTING_MEMBERSHIP';
+  end if;
+
+  -- Missing expected ACLs are added below. Any pre-existing direct database or
+  -- schema ACL outside the allowlist is drift and aborts instead of being
+  -- silently repaired. ACLs inherited from PUBLIC are never changed here.
+  if exists (
+    select 1
+      from pg_database database_row
+      cross join lateral aclexplode(
+        case when cardinality(database_row.datacl) > 0
+             then database_row.datacl else null::aclitem[] end
+      ) privilege
+      join pg_roles grantee on grantee.oid = privilege.grantee
+     where grantee.rolname in (
+       'profitability_migration_executor',
+       'profitability_migration_runner',
+       'profitability_owner',
+       'profitability_session',
+       'profitability_runtime'
+     )
+       and not (
+         database_row.datname = current_database()
+         and privilege.privilege_type = 'CONNECT'
+         and not privilege.is_grantable
+         and grantee.rolname in (
+           'profitability_migration_executor',
+           'profitability_session'
+         )
+       )
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_UNEXPECTED_EXISTING_DATABASE_ACL';
+  end if;
+
+  if exists (
+    select 1
+      from pg_namespace namespace_row
+      cross join lateral aclexplode(
+        case when cardinality(namespace_row.nspacl) > 0
+             then namespace_row.nspacl else null::aclitem[] end
+      ) privilege
+      join pg_roles grantee on grantee.oid = privilege.grantee
+     where grantee.rolname in (
+       'profitability_migration_executor',
+       'profitability_migration_runner',
+       'profitability_owner',
+       'profitability_session',
+       'profitability_runtime'
+     )
+       and not (
+         namespace_row.nspname = 'public'
+         and not privilege.is_grantable
+         and (
+           (
+             grantee.rolname = 'profitability_owner'
+             and privilege.privilege_type in ('USAGE', 'CREATE')
+           )
+           or (
+             grantee.rolname = 'profitability_runtime'
+             and privilege.privilege_type = 'USAGE'
+           )
+         )
+       )
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_UNEXPECTED_EXISTING_SCHEMA_ACL';
+  end if;
+
+  if exists (
+    select 1
+      from pg_roles restricted_role
+     where restricted_role.rolname in (
+       'profitability_migration_executor',
+       'profitability_migration_runner',
+       'profitability_session',
+       'profitability_runtime'
+     )
+       and has_schema_privilege(restricted_role.oid, 'public', 'CREATE')
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_EXISTING_SCHEMA_CREATE_FORBIDDEN';
+  end if;
+end
+$preflight$;
+
+do $create_roles_and_memberships$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'profitability_migration_executor') then
+    execute 'create role profitability_migration_executor with login password null noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls connection limit -1';
+  end if;
+
+  if not exists (select 1 from pg_roles where rolname = 'profitability_migration_runner') then
+    execute 'create role profitability_migration_runner with nologin password null noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls connection limit -1';
+  end if;
+
+  if not exists (select 1 from pg_roles where rolname = 'profitability_owner') then
+    execute 'create role profitability_owner with nologin password null noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls connection limit -1';
+  end if;
+
+  if not exists (select 1 from pg_roles where rolname = 'profitability_session') then
+    execute 'create role profitability_session with login password null noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls connection limit -1';
+  end if;
+
+  if not exists (select 1 from pg_roles where rolname = 'profitability_runtime') then
+    execute 'create role profitability_runtime with nologin password null noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls connection limit -1';
+  end if;
+
+  -- PostgreSQL 17 deliberately retains one automatic creator edge per target
+  -- role: ADMIN TRUE, INHERIT FALSE, SET FALSE. Its bootstrap grantor owns the
+  -- edge, so the restricted provisioner cannot safely revoke it. Exact
+  -- postflight below treats only those five edges as valid.
+
+  if not exists (
+    select 1
+      from pg_auth_members membership
+     where membership.roleid = (select oid from pg_roles where rolname = 'profitability_migration_runner')
+       and membership.member = (select oid from pg_roles where rolname = 'profitability_migration_executor')
+  ) then
+    execute 'grant profitability_migration_runner to profitability_migration_executor with admin false, inherit false, set true';
+  end if;
+
+  if not exists (
+    select 1
+      from pg_auth_members membership
+     where membership.roleid = (select oid from pg_roles where rolname = 'profitability_owner')
+       and membership.member = (select oid from pg_roles where rolname = 'profitability_migration_runner')
+  ) then
+    execute 'grant profitability_owner to profitability_migration_runner with admin false, inherit false, set true';
+  end if;
+
+  if not exists (
+    select 1
+      from pg_auth_members membership
+     where membership.roleid = (select oid from pg_roles where rolname = 'profitability_runtime')
+       and membership.member = (select oid from pg_roles where rolname = 'profitability_session')
+  ) then
+    execute 'grant profitability_runtime to profitability_session with admin false, inherit false, set true';
+  end if;
+end
+$create_roles_and_memberships$;
+
+-- Explicit LOGIN connectivity is required for the migration executor and the
+-- isolated runtime session. No direct TEMPORARY ACL is granted here; any
+-- separate database-wide PUBLIC policy is left unchanged. The two NOLOGIN
+-- execution roles acquire schema access only after SET ROLE.
+grant connect on database :"profitability_roles_expected_database"
+to profitability_migration_executor, profitability_session;
+
+grant usage, create on schema public to profitability_owner;
+grant usage on schema public to profitability_runtime;
+
+-- These are no-ops for newly created roles. Preflight has already rejected an
+-- existing direct CREATE grant, so this cannot conceal pre-existing drift.
+revoke create on schema public from
+  profitability_runtime,
+  profitability_session,
+  profitability_migration_executor,
+  profitability_migration_runner;
+
+do $postflight$
+declare
+  expected_role record;
+  checked_role record;
+  provisioner_role record;
+  provisioner_oid oid;
+  target_role_name text;
+begin
+  select * into strict provisioner_role
+    from pg_roles
+   where rolname = session_user;
+
+  provisioner_oid := provisioner_role.oid;
+
+  if not provisioner_role.rolcanlogin
+     or provisioner_role.rolinherit
+     or provisioner_role.rolsuper
+     or provisioner_role.rolbypassrls
+     or not provisioner_role.rolcreaterole
+     or provisioner_role.rolcreatedb
+     or provisioner_role.rolreplication
+     or provisioner_role.rolconnlimit <> -1
+     or provisioner_role.rolvaliduntil is not null
+     or provisioner_role.rolconfig is not null then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_PROVISIONER_POSTFLIGHT_FAILED';
+  end if;
+
+  for expected_role in
+    select *
+      from (values
+        ('profitability_migration_executor'::text, true),
+        ('profitability_migration_runner'::text, false),
+        ('profitability_owner'::text, false),
+        ('profitability_session'::text, true),
+        ('profitability_runtime'::text, false)
+      ) as expected(rolname, can_login)
+  loop
+    select * into strict checked_role
+      from pg_roles
+     where rolname = expected_role.rolname;
+
+    if checked_role.rolcanlogin <> expected_role.can_login
+       or checked_role.rolinherit
+       or checked_role.rolsuper
+       or checked_role.rolbypassrls
+       or checked_role.rolcreaterole
+       or checked_role.rolcreatedb
+       or checked_role.rolreplication
+       or checked_role.rolconnlimit <> -1
+       or checked_role.rolvaliduntil is not null
+       or checked_role.rolconfig is not null then
+      raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_ROLE_POSTFLIGHT_FAILED: %',
+        expected_role.rolname;
+    end if;
+  end loop;
+
+  if 8 <> (
+    select count(*)
+      from pg_auth_members membership
+      join pg_roles granted_role on granted_role.oid = membership.roleid
+      join pg_roles member_role on member_role.oid = membership.member
+     where granted_role.rolname in (
+       'profitability_migration_executor',
+       'profitability_migration_runner',
+       'profitability_owner',
+       'profitability_session',
+       'profitability_runtime'
+     )
+        or member_role.rolname in (
+          'profitability_migration_executor',
+          'profitability_migration_runner',
+          'profitability_owner',
+          'profitability_session',
+          'profitability_runtime'
+        )
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_MEMBERSHIP_COUNT_POSTFLIGHT_FAILED';
+  end if;
+
+  if 1 <> (
+    select count(*)
+      from pg_auth_members membership
+     where membership.roleid = (select oid from pg_roles where rolname = 'profitability_migration_runner')
+       and membership.member = (select oid from pg_roles where rolname = 'profitability_migration_executor')
+       and membership.grantor = provisioner_oid
+       and not membership.admin_option
+       and not membership.inherit_option
+       and membership.set_option
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_EXECUTOR_EDGE_POSTFLIGHT_FAILED';
+  end if;
+
+  if 1 <> (
+    select count(*)
+      from pg_auth_members membership
+     where membership.roleid = (select oid from pg_roles where rolname = 'profitability_owner')
+       and membership.member = (select oid from pg_roles where rolname = 'profitability_migration_runner')
+       and membership.grantor = provisioner_oid
+       and not membership.admin_option
+       and not membership.inherit_option
+       and membership.set_option
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_OWNER_EDGE_POSTFLIGHT_FAILED';
+  end if;
+
+  if 1 <> (
+    select count(*)
+      from pg_auth_members membership
+     where membership.roleid = (select oid from pg_roles where rolname = 'profitability_runtime')
+       and membership.member = (select oid from pg_roles where rolname = 'profitability_session')
+       and membership.grantor = provisioner_oid
+       and not membership.admin_option
+       and not membership.inherit_option
+       and membership.set_option
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_RUNTIME_EDGE_POSTFLIGHT_FAILED';
+  end if;
+
+  if exists (
+    select 1
+      from pg_auth_members membership
+      join pg_roles granted_role on granted_role.oid = membership.roleid
+      join pg_roles member_role on member_role.oid = membership.member
+     where (
+       granted_role.rolname in (
+         'profitability_migration_executor',
+         'profitability_migration_runner',
+         'profitability_owner',
+         'profitability_session',
+         'profitability_runtime'
+       )
+       or member_role.rolname in (
+         'profitability_migration_executor',
+         'profitability_migration_runner',
+         'profitability_owner',
+         'profitability_session',
+         'profitability_runtime'
+       )
+     )
+       and not (
+          granted_role.rolname = 'profitability_migration_runner'
+          and member_role.rolname = 'profitability_migration_executor'
+          and membership.grantor = provisioner_oid
+          and not membership.admin_option
+         and not membership.inherit_option
+         and membership.set_option
+       )
+       and not (
+          granted_role.rolname = 'profitability_owner'
+          and member_role.rolname = 'profitability_migration_runner'
+          and membership.grantor = provisioner_oid
+         and not membership.admin_option
+         and not membership.inherit_option
+         and membership.set_option
+       )
+       and not (
+          granted_role.rolname = 'profitability_runtime'
+          and member_role.rolname = 'profitability_session'
+          and membership.grantor = provisioner_oid
+          and not membership.admin_option
+         and not membership.inherit_option
+          and membership.set_option
+        )
+        and not (
+          granted_role.rolname in (
+            'profitability_migration_executor',
+            'profitability_migration_runner',
+            'profitability_owner',
+            'profitability_session',
+            'profitability_runtime'
+          )
+          and member_role.rolname = session_user
+          and membership.grantor = 10::oid
+          and membership.admin_option
+          and not membership.inherit_option
+          and not membership.set_option
+        )
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_UNEXPECTED_POSTFLIGHT_MEMBERSHIP';
+  end if;
+
+  foreach target_role_name in array array[
+    'profitability_migration_executor',
+    'profitability_migration_runner',
+    'profitability_owner',
+    'profitability_session',
+    'profitability_runtime'
+  ]
+  loop
+    if 1 <> (
+      select count(*)
+        from pg_auth_members membership
+       where membership.roleid = (select oid from pg_roles where rolname = target_role_name)
+         and membership.member = provisioner_oid
+         and membership.grantor = 10::oid
+         and membership.admin_option
+         and not membership.inherit_option
+         and not membership.set_option
+    ) then
+      raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_PROVISIONER_EDGE_POSTFLIGHT_FAILED: %',
+        target_role_name;
+    end if;
+  end loop;
+
+  if exists (
+    select 1
+      from pg_auth_members membership
+      left join pg_roles granted_role on granted_role.oid = membership.roleid
+     where (
+       membership.member = provisioner_oid
+       or membership.roleid = provisioner_oid
+     )
+       and not (
+         membership.member = provisioner_oid
+         and granted_role.rolname in (
+           'profitability_migration_executor',
+           'profitability_migration_runner',
+           'profitability_owner',
+           'profitability_session',
+           'profitability_runtime'
+         )
+         and membership.grantor = 10::oid
+         and membership.admin_option
+         and not membership.inherit_option
+         and not membership.set_option
+       )
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_PROVISIONER_MEMBERSHIP_POSTFLIGHT_FAILED';
+  end if;
+
+  if 2 <> (
+    select count(*)
+      from pg_database database_row
+      cross join lateral aclexplode(database_row.datacl) privilege
+      join pg_roles grantee on grantee.oid = privilege.grantee
+     where grantee.rolname in (
+       'profitability_migration_executor',
+       'profitability_migration_runner',
+       'profitability_owner',
+       'profitability_session',
+       'profitability_runtime'
+     )
+       and database_row.datname = current_database()
+       and privilege.privilege_type = 'CONNECT'
+       and not privilege.is_grantable
+       and grantee.rolname in (
+         'profitability_migration_executor',
+         'profitability_session'
+       )
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_DATABASE_CONNECT_POSTFLIGHT_FAILED';
+  end if;
+
+  if exists (
+    select 1
+      from pg_database database_row
+      cross join lateral aclexplode(
+        case when cardinality(database_row.datacl) > 0
+             then database_row.datacl else null::aclitem[] end
+      ) privilege
+      join pg_roles grantee on grantee.oid = privilege.grantee
+     where grantee.rolname in (
+       'profitability_migration_executor',
+       'profitability_migration_runner',
+       'profitability_owner',
+       'profitability_session',
+       'profitability_runtime'
+     )
+       and not (
+         database_row.datname = current_database()
+         and privilege.privilege_type = 'CONNECT'
+         and not privilege.is_grantable
+         and grantee.rolname in (
+           'profitability_migration_executor',
+           'profitability_session'
+         )
+       )
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_DATABASE_ACL_POSTFLIGHT_FAILED';
+  end if;
+
+  if not has_database_privilege(
+    'profitability_migration_executor',
+    current_database(),
+    'CONNECT'
+  ) or not has_database_privilege(
+    'profitability_session',
+    current_database(),
+    'CONNECT'
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_DATABASE_CONNECT_EFFECTIVE_POSTFLIGHT_FAILED';
+  end if;
+
+  if 3 <> (
+    select count(*)
+      from pg_namespace namespace_row
+      cross join lateral aclexplode(namespace_row.nspacl) privilege
+      join pg_roles grantee on grantee.oid = privilege.grantee
+     where namespace_row.nspname = 'public'
+       and not privilege.is_grantable
+       and (
+         (
+           grantee.rolname = 'profitability_owner'
+           and privilege.privilege_type in ('USAGE', 'CREATE')
+         )
+         or (
+           grantee.rolname = 'profitability_runtime'
+           and privilege.privilege_type = 'USAGE'
+         )
+       )
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_SCHEMA_ACL_COUNT_POSTFLIGHT_FAILED';
+  end if;
+
+  if exists (
+    select 1
+      from pg_namespace namespace_row
+      cross join lateral aclexplode(
+        case when cardinality(namespace_row.nspacl) > 0
+             then namespace_row.nspacl else null::aclitem[] end
+      ) privilege
+      join pg_roles grantee on grantee.oid = privilege.grantee
+     where grantee.rolname in (
+       'profitability_migration_executor',
+       'profitability_migration_runner',
+       'profitability_owner',
+       'profitability_session',
+       'profitability_runtime'
+     )
+       and not (
+         namespace_row.nspname = 'public'
+         and not privilege.is_grantable
+         and (
+           (
+             grantee.rolname = 'profitability_owner'
+             and privilege.privilege_type in ('USAGE', 'CREATE')
+           )
+           or (
+             grantee.rolname = 'profitability_runtime'
+             and privilege.privilege_type = 'USAGE'
+           )
+         )
+       )
+  ) then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_SCHEMA_ACL_POSTFLIGHT_FAILED';
+  end if;
+
+  if not has_schema_privilege('profitability_owner', 'public', 'USAGE')
+     or not has_schema_privilege('profitability_owner', 'public', 'CREATE')
+     or not has_schema_privilege('profitability_runtime', 'public', 'USAGE') then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_REQUIRED_SCHEMA_ACCESS_POSTFLIGHT_FAILED';
+  end if;
+
+  if has_schema_privilege('profitability_runtime', 'public', 'CREATE')
+     or has_schema_privilege('profitability_session', 'public', 'CREATE')
+     or has_schema_privilege('profitability_migration_executor', 'public', 'CREATE')
+     or has_schema_privilege('profitability_migration_runner', 'public', 'CREATE') then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_SCHEMA_CREATE_POSTFLIGHT_FAILED';
+  end if;
+end
+$postflight$;
+
+-- The provisioner remains a dedicated administrative role because PostgreSQL
+-- 17 ties the five creator edges to it. Disable its external credential in the
+-- same transaction; a future provisioning window must activate a new one via
+-- the separately controlled database-admin channel.
+do $lock_provisioner_credential$
+begin
+  if session_user <> 'profitability_provisioner'
+     or current_user <> session_user then
+    raise exception 'PROFITABILITY_FOUNDATION_V2_ROLES_PROVISIONER_LOCK_IDENTITY_MISMATCH';
+  end if;
+
+  execute format('alter role %I password null', session_user);
+end
+$lock_provisioner_credential$;
+
+commit;
+
+\echo 'PROFITABILITY_FOUNDATION_V2_ROLES_PREPROVISION_OK'

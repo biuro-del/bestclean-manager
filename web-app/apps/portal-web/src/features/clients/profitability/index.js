@@ -1,14 +1,21 @@
 import template from './template.html?raw'
 import './style.css'
 import {
+  archiveProfitabilityHygienePackage,
+  createProfitabilityCommandId,
   createProfitabilityCost,
   createProfitabilityRevenue,
   fetchProfitabilityHistory,
   fetchProfitabilitySummary,
+  saveProfitabilityHygienePackage,
   saveProfitabilityAsset,
   saveProfitabilityContract,
   saveProfitabilityWorkerRate,
 } from '../../../services/profitabilityService'
+import {
+  COST_CONTROL_PROFILE,
+  normalizeProfitabilityViewPayload,
+} from './viewModel'
 
 const DEFAULT_CURRENCY = 'PLN'
 const CURRENCY_DIGITS = new Map([
@@ -20,6 +27,16 @@ const CURRENCY_DIGITS = new Map([
   ['KWD', 3],
   ['PLN', 2],
 ])
+const VALUE_BASIS_LABELS = Object.freeze({
+  PLAN: 'Plan',
+  ESTIMATE: 'Szacunek',
+  ACTUAL: 'Rzeczywiste',
+})
+const HYGIENE_BILLING_LABELS = Object.freeze({
+  IN_CONTRACT: 'W cenie kontraktu',
+  MONTHLY_EXTRA: 'Dodatkowo co miesiąc',
+  AD_HOC: 'Jednorazowo / ad hoc',
+})
 
 function text(value) {
   return String(value ?? '').trim()
@@ -133,6 +150,26 @@ function normalizeCurrency(value) {
   return currency
 }
 
+function valueKeyPart(value, fallback = 'pozycja') {
+  const normalized = text(value)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return normalized || fallback
+}
+
+function financialValueKey({ category, date, group, name, period, recurrence }) {
+  return [
+    valueKeyPart(group, 'entry'),
+    valueKeyPart(category, 'other'),
+    valueKeyPart(name),
+    valueKeyPart(recurrence, 'one-time'),
+    valueKeyPart(date || period, 'period'),
+  ].join(':').slice(0, 96)
+}
+
 function formatDuration(value) {
   const seconds = safeBigInt(value)
   if (seconds === null) return '—'
@@ -168,11 +205,20 @@ function polishPlural(value, one, few, many) {
 }
 
 const COST_CATEGORY_LABELS = Object.freeze({
+  ASSETS: 'Sprzęt i maszyny',
+  CHEMICALS: 'Chemia',
+  CLEANING_PRODUCTS: 'Środki czystości',
   COORDINATION: 'Koordynacja',
+  CONSUMABLES: 'Materiały eksploatacyjne',
   DELIVERIES: 'Dostawy',
+  EQUIPMENT: 'Sprzęt i maszyny',
+  HYGIENE: 'Higiena',
+  LABOR: 'Praca',
+  MACHINES: 'Maszyny',
   MATERIALS: 'Materiały i środki',
   OBJECT_TRAINING: 'Szkolenie obiektowe',
   OTHER_DIRECT: 'Pozostałe koszty',
+  PERIODIC: 'Prace okresowe',
   SHARED_COST: 'Koszty wspólne',
   SUBCONTRACTORS: 'Podwykonawcy',
   TRANSPORT: 'Transport',
@@ -206,17 +252,18 @@ function normalizeObjects(payload = {}) {
 }
 
 function normalizePayload(payload = {}) {
-  const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : {}
-  const objects = normalizeObjects(payload)
+  const safePayload = normalizeProfitabilityViewPayload(payload)
+  const summary = safePayload.summary && typeof safePayload.summary === 'object' ? safePayload.summary : {}
+  const objects = normalizeObjects(safePayload)
   return {
-    ...payload,
-    currency: text(payload.currency || summary.currency).toUpperCase() || DEFAULT_CURRENCY,
-    period: text(payload.period),
+    ...safePayload,
+    currency: text(safePayload.currency || summary.currency).toUpperCase() || DEFAULT_CURRENCY,
+    period: text(safePayload.period),
     summary,
     objects,
-    warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
-    history: Array.isArray(payload.history) ? payload.history : [],
-    capability: payload.capability && typeof payload.capability === 'object' ? payload.capability : {},
+    warnings: Array.isArray(safePayload.warnings) ? safePayload.warnings : [],
+    history: Array.isArray(safePayload.history) ? safePayload.history : [],
+    capability: safePayload.capability && typeof safePayload.capability === 'object' ? safePayload.capability : {},
   }
 }
 
@@ -279,6 +326,10 @@ export function createClientProfitabilityFeature(ctx) {
   let currentPayload = normalizePayload()
   let modalType = ''
   let modalTrigger = null
+  let modalRecord = null
+  let modalCommandId = ''
+  let modalCommandFingerprint = ''
+  let modalRequestSequence = 0
   const listeners = []
 
   function byId(id) {
@@ -319,8 +370,160 @@ export function createClientProfitabilityFeature(ctx) {
     return Boolean(canEditProfitability() && currentPayload.capability?.canEdit !== false)
   }
 
+  function operationalCostsEditable() {
+    return Boolean(readable() && currentPayload.capability?.canEditOperationalCosts === true)
+  }
+
   function readable() {
     return Boolean(canReadProfitability() && currentPayload.capability?.canRead !== false)
+  }
+
+  function financeProfile() {
+    return text(currentPayload.capability?.financeProfile || currentPayload.financeProfile).toUpperCase()
+  }
+
+  function costControlOnly() {
+    return financeProfile() === COST_CONTROL_PROFILE
+  }
+
+  function clearModalSensitiveData({ restoreFocus = false } = {}) {
+    modalRequestSequence += 1
+    const trigger = modalTrigger
+    const { layer, title, description, body, form, error, submit } = modalElements()
+    if (layer) layer.hidden = true
+    if (form) form.reset()
+    if (title) title.textContent = 'Edycja danych'
+    if (description) description.textContent = ''
+    if (body) body.replaceChildren()
+    if (error) {
+      error.textContent = ''
+      error.hidden = true
+    }
+    if (submit) {
+      submit.hidden = false
+      submit.disabled = false
+    }
+    modalType = ''
+    modalTrigger = null
+    modalRecord = null
+    modalCommandId = ''
+    modalCommandFingerprint = ''
+    document.body.classList.remove('cpf-modal-open')
+    if (restoreFocus) trigger?.focus?.()
+  }
+
+  function scrubRenderedSensitiveData() {
+    const emptyHtmlIds = [
+      'cpfObjectRows',
+      'cpfObjectTotals',
+      'cpfBreakdownRows',
+      'cpfPlanExecution',
+      'cpfTrendContent',
+      'cpfRankingContent',
+      'cpfCostsContent',
+      'cpfPeriodicContent',
+    ]
+    emptyHtmlIds.forEach((id) => byId(id)?.replaceChildren())
+
+    const textDefaults = {
+      cpfTitle: 'Koszty i rentowność',
+      cpfErrorMessage: '',
+      cpfQualityBadge: 'Sprawdzanie kompletności',
+      cpfContextNote: '',
+      cpfMetricRevenue: '—',
+      cpfMetricRevenueMeta: '',
+      cpfMetricCost: '—',
+      cpfMetricCostMeta: '',
+      cpfMetricLabor: '—',
+      cpfMetricLaborMeta: '',
+      cpfMetricMargin: '—',
+      cpfMetricMarginMeta: '',
+      cpfMetricProfitability: '—',
+      cpfMetricProfitabilityMeta: '',
+      cpfMetricCompleteness: '—',
+      cpfMetricCompletenessMeta: '',
+      cpfWarningSummary: '',
+      cpfObjectCount: '0 obiektów',
+      cpfBreakdownTitle: 'Szczegóły obiektu',
+      cpfSelectedObjectMeta: 'Wybierz obiekt z tabeli.',
+      cpfPlanMeta: 'Czas i koszt pracy wybranego obiektu',
+      cpfRankingMeta: '',
+      cpfFootnote: 'Kwoty netto. Obliczenia wykonuje backend.',
+    }
+    Object.entries(textDefaults).forEach(([id, value]) => setText(id, value))
+
+    ;[
+      'cpfMetricRevenue',
+      'cpfMetricCost',
+      'cpfMetricLabor',
+      'cpfMetricMargin',
+      'cpfMetricProfitability',
+      'cpfMetricCompleteness',
+      'cpfQualityBadge',
+    ].forEach((id) => byId(id)?.classList.remove('is-positive', 'is-negative', 'is-incomplete', 'is-complete', 'is-preview'))
+
+    const objectFilter = byId('cpfObjectFilter')
+    if (objectFilter) {
+      objectFilter.replaceChildren()
+      const option = document.createElement('option')
+      option.value = ''
+      option.textContent = 'Wszystkie obiekty'
+      objectFilter.append(option)
+      objectFilter.value = ''
+      objectFilter.disabled = true
+    }
+
+    ;[
+      'cpfContractBtn',
+      'cpfAddCostBtn',
+      'cpfHygieneBtn',
+      'cpfAddRevenueBtn',
+      'cpfWorkerRateBtn',
+      'cpfAssetBtn',
+      'cpfHistoryBtn',
+      'cpfObjectDetailsBtn',
+      'cpfWarningDetailsBtn',
+    ].forEach((id) => {
+      const button = byId(id)
+      if (button) button.disabled = true
+    })
+
+    const access = byId('cpfAccessState')
+    if (access) {
+      access.replaceChildren()
+      access.hidden = true
+    }
+    setHidden('cpfWarningPanel', true)
+    setHidden('cpfLoadingState', true)
+    setHidden('cpfErrorState', true)
+    setHidden('cpfContent', true)
+    clearModalSensitiveData()
+  }
+
+  function clearSensitiveView({ invalidateRequests = false } = {}) {
+    if (invalidateRequests) requestSequence += 1
+    currentObjectId = ''
+    currentPayload = normalizePayload()
+    scrubRenderedSensitiveData()
+  }
+
+  function showAccessDenied(capability = {}) {
+    clearSensitiveView()
+    currentPayload = normalizePayload({
+      capability: {
+        ...capability,
+        canRead: false,
+      },
+    })
+    renderAccessState()
+  }
+
+  function renderFinanceVisibility() {
+    const restricted = costControlOnly()
+    document.querySelectorAll('#view-clientProfileDetails [data-cpf-owner-finance]').forEach((element) => {
+      element.hidden = restricted
+    })
+    setText('cpfTitle', restricted ? 'Koszty operacyjne obiektów' : 'Koszty i rentowność')
   }
 
   function renderAccessState() {
@@ -349,6 +552,7 @@ export function createClientProfitabilityFeature(ctx) {
   }
 
   function showError(error) {
+    clearSensitiveView()
     setHidden('cpfLoadingState', true)
     setHidden('cpfContent', true)
     setHidden('cpfErrorState', false)
@@ -368,6 +572,7 @@ export function createClientProfitabilityFeature(ctx) {
     })
     select.innerHTML = options.join('')
     select.value = currentObjectId
+    select.disabled = false
   }
 
   function renderMetrics() {
@@ -378,7 +583,9 @@ export function createClientProfitabilityFeature(ctx) {
     const profitability = safeBigInt(summary.profitabilityBps)
     setMetric('cpfMetricRevenue', formatMinor(summary.revenueMinor, currency), {
       metaId: 'cpfMetricRevenueMeta',
-      meta: summary.revenueMinor === null || summary.revenueMinor === undefined ? 'Brak wartości kontraktu' : 'Kwoty netto',
+      meta: costControlOnly()
+        ? 'Niedostępne dla tej roli'
+        : summary.revenueMinor === null || summary.revenueMinor === undefined ? 'Brak wartości kontraktu' : 'Kwoty netto',
     })
     setMetric('cpfMetricCost', incomplete && !integerString(summary.totalCostMinor) ? '—' : formatMinor(summary.totalCostMinor, currency), {
       className: incomplete ? 'is-incomplete' : '',
@@ -393,12 +600,12 @@ export function createClientProfitabilityFeature(ctx) {
     setMetric('cpfMetricMargin', incomplete && margin === null ? '—' : formatMinor(summary.marginMinor, currency), {
       className: margin !== null ? (margin < 0n ? 'is-negative' : 'is-positive') : incomplete ? 'is-incomplete' : '',
       metaId: 'cpfMetricMarginMeta',
-      meta: incomplete ? 'Wynik wymaga uzupełnienia' : 'Przychód minus koszty',
+      meta: costControlOnly() ? 'Niedostępne dla tej roli' : incomplete ? 'Wynik wymaga uzupełnienia' : 'Przychód minus koszty',
     })
     setMetric('cpfMetricProfitability', incomplete || profitability === null ? '—' : formatBps(summary.profitabilityBps), {
       className: incomplete ? 'is-incomplete' : profitability !== null && profitability < 0n ? 'is-negative' : 'is-positive',
       metaId: 'cpfMetricProfitabilityMeta',
-      meta: incomplete ? 'Nie można obliczyć' : 'Marża / przychód',
+      meta: costControlOnly() ? 'Niedostępne dla tej roli' : incomplete ? 'Nie można obliczyć' : 'Marża / przychód',
     })
     const quality = completenessState(summary.completenessPercent)
     setMetric('cpfMetricCompleteness', Number.isFinite(Number(summary.completenessPercent)) ? `${Math.round(Number(summary.completenessPercent))}%` : '—', {
@@ -418,10 +625,21 @@ export function createClientProfitabilityFeature(ctx) {
     if (row.incomplete || Number(row.completenessPercent) < 100) {
       return { className: 'is-incomplete', label: 'Niepełne dane' }
     }
-    const status = text(row.status).toUpperCase()
+    const status = text(row.operationalStatus || row.status).toUpperCase()
     if (status === 'NOT_CALCULABLE') return { className: 'is-incomplete', label: 'Nie można obliczyć' }
+    if (status === 'NO_TARGET') return { className: 'is-incomplete', label: 'Brak celu operacyjnego' }
+    if (status === 'CRITICAL') return { className: 'is-blocked', label: 'Stan krytyczny' }
+    if (status === 'OK') return { className: 'is-complete', label: 'OK' }
     if (status === 'NEGATIVE') return { className: 'is-blocked', label: 'Wynik ujemny' }
-    if (status === 'BELOW_TARGET') return { className: 'is-incomplete', label: 'Poniżej celu' }
+    if (status === 'BELOW_TARGET') {
+      const gap = safeBigInt(row.improvementGapMinor)
+      return {
+        className: 'is-incomplete',
+        label: gap !== null && gap > 0n
+          ? `Do poprawy o ${formatMinor(gap, row.currency || currentPayload.currency)}`
+          : 'Poniżej celu',
+      }
+    }
     if (status === 'ABOVE_TARGET') return { className: 'is-complete', label: 'Powyżej celu' }
     const margin = safeBigInt(row.marginMinor)
     if (margin !== null && margin < 0n) return { className: 'is-blocked', label: 'Wynik ujemny' }
@@ -446,11 +664,11 @@ export function createClientProfitabilityFeature(ctx) {
       return `
         <tr class="${row.objectId === currentObjectId ? 'is-selected' : ''}" data-cpf-object-row="${escapeHtml(row.objectId)}">
           <td><button class="cpf-object-button" type="button" data-cpf-select-object="${escapeHtml(row.objectId)}">${escapeHtml(row.name)}</button></td>
-          <td>${formatMinor(row.revenueMinor, currency)}</td>
+          <td data-cpf-owner-finance>${formatMinor(row.revenueMinor, currency)}</td>
           <td>${formatMinor(row.laborCostMinor, currency)}</td>
           <td>${formatMinor(row.materialCostMinor, currency)}</td>
           <td>${formatMinor(row.otherCostMinor, currency)}</td>
-          <td>${marginText}${profitabilityText ? `<span class="cpf-money-note">${profitabilityText}</span>` : ''}</td>
+          <td data-cpf-owner-finance>${marginText}${profitabilityText ? `<span class="cpf-money-note">${profitabilityText}</span>` : ''}</td>
           <td><span class="cpf-data-badge ${status.className}">${escapeHtml(status.label)}</span></td>
         </tr>
       `
@@ -461,11 +679,11 @@ export function createClientProfitabilityFeature(ctx) {
     tfoot.innerHTML = rows.length ? `
       <tr>
         <td>Razem</td>
-        <td>${formatMinor(summary.revenueMinor, currency)}</td>
+        <td data-cpf-owner-finance>${formatMinor(summary.revenueMinor, currency)}</td>
         <td>${formatMinor(summary.laborCostMinor, currency)}</td>
         <td>${formatMinor(summary.materialCostMinor, currency)}</td>
         <td>${formatMinor(summary.otherCostMinor, currency)}</td>
-        <td>${formatMinor(summary.marginMinor, currency)}${integerString(summary.profitabilityBps) && !summary.incomplete ? `<span class="cpf-money-note">${formatBps(summary.profitabilityBps)}</span>` : ''}</td>
+        <td data-cpf-owner-finance>${formatMinor(summary.marginMinor, currency)}${integerString(summary.profitabilityBps) && !summary.incomplete ? `<span class="cpf-money-note">${formatBps(summary.profitabilityBps)}</span>` : ''}</td>
         <td></td>
       </tr>
     ` : ''
@@ -474,7 +692,12 @@ export function createClientProfitabilityFeature(ctx) {
   function breakdownRows(row) {
     if (!row) return []
     const explicit = Array.isArray(row.costBreakdown) ? row.costBreakdown : []
-    if (explicit.length) return explicit
+    if (explicit.length) {
+      return explicit.map((item) => ({
+        ...item,
+        label: text(item.label) || COST_CATEGORY_LABELS[text(item.category || item.key).toUpperCase()] || text(item.category || item.key) || 'Koszt',
+      }))
+    }
     return [
       { key: 'labor', label: 'Praca', amountMinor: row.laborCostMinor },
       { key: 'materials', label: 'Materiały i środki', amountMinor: row.materialCostMinor },
@@ -492,16 +715,24 @@ export function createClientProfitabilityFeature(ctx) {
     const actionIds = [
       'cpfContractBtn',
       'cpfAddCostBtn',
+      'cpfHygieneBtn',
       'cpfAddRevenueBtn',
       'cpfWorkerRateBtn',
       'cpfAssetBtn',
       'cpfHistoryBtn',
       'cpfObjectDetailsBtn',
     ]
-    const editActionIds = new Set(['cpfContractBtn', 'cpfAddCostBtn', 'cpfAddRevenueBtn', 'cpfWorkerRateBtn', 'cpfAssetBtn'])
     actionIds.forEach((id) => {
       const button = byId(id)
-      if (button) button.disabled = !row || (editActionIds.has(id) && !editable())
+      if (!button) return
+      const requiresFullFinance = ['cpfContractBtn', 'cpfAddRevenueBtn', 'cpfWorkerRateBtn'].includes(id)
+      const requiresOperationalCostEdit = ['cpfAddCostBtn', 'cpfHygieneBtn', 'cpfAssetBtn'].includes(id)
+      const requiresFinancialModelV21 = id === 'cpfHygieneBtn'
+      button.hidden = (requiresFullFinance && costControlOnly())
+        || (requiresFinancialModelV21 && text(currentPayload.capability?.financialModelVersion) !== 'v2.1')
+      button.disabled = !row
+        || (requiresFullFinance && !editable())
+        || (requiresOperationalCostEdit && !operationalCostsEditable())
     })
     if (!row) {
       list.innerHTML = ''
@@ -528,6 +759,12 @@ export function createClientProfitabilityFeature(ctx) {
   }
 
   function laborWorkerRows(row) {
+    if (costControlOnly() && Array.isArray(row?.labor?.byWorker)) {
+      return row.labor.byWorker.map((item) => ({
+        durationSeconds: item.durationSeconds,
+        label: text(item.workerName || item.workerLogin) || 'Pracownik',
+      }))
+    }
     const breakdown = row?.laborCostBreakdown
     if (Array.isArray(breakdown)) {
       return breakdown.map((item) => ({
@@ -560,10 +797,10 @@ export function createClientProfitabilityFeature(ctx) {
     const deltaClass = isOverPlan ? 'is-negative' : isUnderPlan ? 'is-positive' : 'is-neutral'
     const deltaLabel = isOverPlan ? 'Przekroczenie planu' : isUnderPlan ? 'Poniżej planu' : 'Zgodnie z planem'
     const workers = laborWorkerRows(row)
-      .filter((item) => safeBigInt(item.amountMinor) !== null)
+      .filter((item) => safeBigInt(costControlOnly() ? item.durationSeconds : item.amountMinor) !== null)
       .sort((left, right) => {
-        const leftAmount = safeBigInt(left.amountMinor) ?? 0n
-        const rightAmount = safeBigInt(right.amountMinor) ?? 0n
+        const leftAmount = safeBigInt(costControlOnly() ? left.durationSeconds : left.amountMinor) ?? 0n
+        const rightAmount = safeBigInt(costControlOnly() ? right.durationSeconds : right.amountMinor) ?? 0n
         return leftAmount === rightAmount ? 0 : leftAmount > rightAmount ? -1 : 1
       })
       .slice(0, 3)
@@ -576,7 +813,7 @@ export function createClientProfitabilityFeature(ctx) {
         <div class="cpf-plan-stat"><span>Rzeczywisty koszt</span><strong>${formatMinor(comparison.actualCostMinor, currency)}</strong></div>
         <div class="cpf-plan-delta ${deltaClass}"><span>${deltaLabel}</span><strong>${formatDuration(comparison.secondsDelta)} · ${formatMinor(comparison.costDeltaMinor, currency)}</strong></div>
       </div>
-      ${workers.length ? `<div class="cpf-labor-split"><span>Najwyższy koszt pracy według pracowników</span>${workers.map((item) => `<div><strong>${escapeHtml(item.label)}</strong><b>${formatMinor(item.amountMinor, currency)}</b></div>`).join('')}</div>` : ''}
+      ${workers.length ? `<div class="cpf-labor-split"><span>${costControlOnly() ? 'Czas pracy według pracowników' : 'Najwyższy koszt pracy według pracowników'}</span>${workers.map((item) => `<div><strong>${escapeHtml(item.label)}</strong><b>${costControlOnly() ? formatDuration(item.durationSeconds) : formatMinor(item.amountMinor, currency)}</b></div>`).join('')}</div>` : ''}
     `
   }
 
@@ -649,16 +886,28 @@ export function createClientProfitabilityFeature(ctx) {
     if (!target) return
     const row = selectedObject()
     const entries = Array.isArray(row?.costEntries) ? row.costEntries : []
-    if (!row || !entries.length) {
-      target.innerHTML = `<div class="cpf-table-empty">${row ? 'Brak ręcznych wpisów kosztowych w wybranym okresie.' : 'Wybierz obiekt, aby zobaczyć wpisy kosztowe.'}</div>`
+    const hygienePackages = Array.isArray(row?.hygienePackages) ? row.hygienePackages : []
+    if (!row || (!entries.length && !hygienePackages.length)) {
+      target.innerHTML = `<div class="cpf-table-empty">${row ? 'Brak wpisów kosztowych i pakietów higieny w wybranym okresie.' : 'Wybierz obiekt, aby zobaczyć wpisy kosztowe.'}</div>`
       return
     }
-    target.innerHTML = `<table class="cpf-data-table"><thead><tr><th>Data</th><th>Kategoria</th><th>Nazwa</th><th>Charakter</th><th>Kwota netto</th></tr></thead><tbody>${entries.map((entry) => {
+    const costTable = entries.length ? `<table class="cpf-data-table"><thead><tr><th>Data</th><th>Kategoria</th><th>Nazwa</th><th>Charakter</th><th>Kwota netto</th></tr></thead><tbody>${entries.map((entry) => {
       const category = COST_CATEGORY_LABELS[text(entry.category).toUpperCase()] || text(entry.category) || 'Pozostałe'
       const recurrence = RECURRENCE_LABELS[text(entry.recurrence).toUpperCase()] || text(entry.recurrence) || '—'
+      const valueBasis = VALUE_BASIS_LABELS[text(entry.valueBasis).toUpperCase()] || ''
       const date = entry.date || entry.occurredOn || entry.activeFrom
-      return `<tr><td>${escapeHtml(formatDate(date))}</td><td>${escapeHtml(category)}</td><td><strong>${escapeHtml(entry.name || 'Koszt')}</strong></td><td>${escapeHtml(recurrence)}</td><td><strong>${formatMinor(entry.amountMinor, entry.currency || row.currency)}</strong></td></tr>`
-    }).join('')}</tbody></table>`
+      return `<tr><td>${escapeHtml(formatDate(date))}</td><td>${escapeHtml(category)}</td><td><strong>${escapeHtml(entry.name || 'Koszt')}</strong></td><td>${escapeHtml([recurrence, valueBasis].filter(Boolean).join(' · '))}</td><td><strong>${formatMinor(entry.amountMinor, entry.currency || row.currency)}</strong></td></tr>`
+    }).join('')}</tbody></table>` : ''
+    const hygieneTable = hygienePackages.length ? `<table class="cpf-data-table"><thead><tr><th>Okres</th><th>Pakiet higieny</th><th>Rozliczenie</th><th>Rodzaj</th><th>Koszt netto</th><th>Akcje</th></tr></thead><tbody>${hygienePackages.map((entry) => {
+      const billingMode = text(entry.billingMode).toUpperCase()
+      const canManage = operationalCostsEditable() && (!costControlOnly() || billingMode === 'IN_CONTRACT')
+      const periodLabel = billingMode === 'AD_HOC'
+        ? formatDate(entry.occurredOn || entry.effectiveFrom)
+        : `${formatDate(entry.effectiveFrom)}${entry.effectiveTo ? ` – ${formatDate(entry.effectiveTo)}` : ' – bezterminowo'}`
+      const versionId = escapeHtml(entry.packageVersionId)
+      return `<tr><td>${escapeHtml(periodLabel)}</td><td><strong>${escapeHtml(entry.name || 'Pakiet środków higieny')}</strong></td><td>${escapeHtml(HYGIENE_BILLING_LABELS[billingMode] || billingMode || '—')}</td><td>${escapeHtml(VALUE_BASIS_LABELS[text(entry.valueBasis).toUpperCase()] || text(entry.valueBasis) || '—')}</td><td><strong>${formatMinor(entry.costMinor, entry.currency || row.currency)}</strong></td><td>${canManage ? `<button class="cpf-link-action" type="button" data-cpf-edit-hygiene="${versionId}">Edytuj</button><button class="cpf-link-action" type="button" data-cpf-archive-hygiene="${versionId}">Archiwizuj</button>` : '—'}</td></tr>`
+    }).join('')}</tbody></table>` : ''
+    target.innerHTML = `${costTable}${hygieneTable}`
   }
 
   function renderPeriodicTable() {
@@ -693,6 +942,8 @@ export function createClientProfitabilityFeature(ctx) {
     if (!panel) return
     const warnings = currentPayload.warnings
     panel.hidden = warnings.length === 0
+    const detailsButton = byId('cpfWarningDetailsBtn')
+    if (detailsButton) detailsButton.disabled = warnings.length === 0
     setText('cpfWarningSummary', warnings.length
       ? `${warnings.length} ${warnings.length === 1 ? 'problem wpływa' : 'problemy wpływają'} na wiarygodność wyniku. ${warnings.slice(0, 2).map(warningLabel).join(' · ')}`
       : '')
@@ -700,6 +951,10 @@ export function createClientProfitabilityFeature(ctx) {
 
   function renderPayload(payload, options = {}) {
     currentPayload = normalizePayload(payload)
+    if (!readable()) {
+      showAccessDenied(currentPayload.capability)
+      return
+    }
     if (currentPayload.period) currentPeriod = currentPayload.period
     const preferredObjectId = text(options.objectId || currentObjectId)
     currentObjectId = currentPayload.objects.some((row) => row.objectId === preferredObjectId)
@@ -714,6 +969,7 @@ export function createClientProfitabilityFeature(ctx) {
     renderObjects()
     renderBreakdown()
     renderAnalytics()
+    renderFinanceVisibility()
     setHidden('cpfLoadingState', true)
     setHidden('cpfErrorState', true)
     setHidden('cpfContent', false)
@@ -721,22 +977,30 @@ export function createClientProfitabilityFeature(ctx) {
   }
 
   async function load(force = false) {
-    if (!currentClient || !appState.session?.orgId || !renderAccessState()) return
+    const orgId = appState.session?.orgId
+    const clientId = currentClient?.id || currentClient?.clientId
+    if (!currentClient || !orgId || !canReadProfitability()) {
+      clearSensitiveView({ invalidateRequests: true })
+      renderAccessState()
+      return
+    }
+    const requestedObjectId = currentObjectId
     const sequence = ++requestSequence
+    clearSensitiveView()
+    renderAccessState()
     setLoading(true)
     try {
-      const payload = await fetchProfitabilitySummary(appState.session.orgId, currentClient.id || currentClient.clientId, {
+      const payload = await fetchProfitabilitySummary(orgId, clientId, {
         period: currentPeriod,
-        objectId: currentObjectId,
+        objectId: requestedObjectId,
         force,
       })
       if (sequence !== requestSequence) return
-      renderPayload(payload, { objectId: currentObjectId })
+      renderPayload(payload, { objectId: requestedObjectId })
     } catch (error) {
       if (sequence !== requestSequence) return
-      if (error?.status === 403 || ['PROFITABILITY_NOT_ENTITLED', 'PROFITABILITY_FORBIDDEN'].includes(text(error?.code))) {
-        currentPayload = normalizePayload({ capability: { canRead: false } })
-        renderAccessState()
+      if ([401, 403].includes(Number(error?.status)) || ['PROFITABILITY_NOT_ENTITLED', 'PROFITABILITY_FORBIDDEN'].includes(text(error?.code))) {
+        showAccessDenied()
         return
       }
       showError(error)
@@ -764,14 +1028,7 @@ export function createClientProfitabilityFeature(ctx) {
   }
 
   function closeModal() {
-    const { layer, form, error } = modalElements()
-    if (layer) layer.hidden = true
-    if (form) form.reset()
-    if (error) error.hidden = true
-    modalType = ''
-    document.body.classList.remove('cpf-modal-open')
-    modalTrigger?.focus?.()
-    modalTrigger = null
+    clearModalSensitiveData({ restoreFocus: true })
   }
 
   function syncContractBillingFields() {
@@ -792,23 +1049,28 @@ export function createClientProfitabilityFeature(ctx) {
     })
   }
 
-  function openModal(type, trigger = null) {
+  function openModal(type, trigger = null, record = null) {
     const object = selectedObject()
     if (!object && type !== 'warnings') {
       showTransientNotice('Najpierw wybierz obiekt.', 'error')
       return
     }
-    if (['contract', 'cost', 'revenue', 'worker-rate', 'asset'].includes(type) && !editable()) {
+    const sensitiveEdit = ['contract', 'revenue', 'worker-rate'].includes(type)
+    const operationalCostEdit = ['cost', 'hygiene', 'hygiene-archive', 'asset'].includes(type)
+    if ((sensitiveEdit && !editable()) || (operationalCostEdit && !operationalCostsEditable())) {
       showTransientNotice('Nie masz uprawnienia do edycji danych finansowych.', 'error')
       return
     }
     const elements = modalElements()
     if (!elements.layer || !elements.body) return
+    modalRequestSequence += 1
     modalType = type
     modalTrigger = trigger || document.activeElement
+    modalRecord = record && typeof record === 'object' ? record : null
     elements.error.hidden = true
     elements.submit.hidden = ['history', 'warnings', 'details'].includes(type)
     elements.submit.disabled = false
+    elements.submit.textContent = 'Zapisz zmiany'
     const currency = object?.currency || currentPayload.currency || DEFAULT_CURRENCY
 
     if (type === 'contract') {
@@ -881,6 +1143,12 @@ export function createClientProfitabilityFeature(ctx) {
           { value: 'MONTHLY', label: 'Miesięczny' },
           { value: 'ACTUAL_USAGE', label: 'Według wykonania' },
         ], required: true }),
+        fieldHtml(escapeHtml, { name: 'valueBasis', label: 'Rodzaj wartości', type: 'select', value: 'ACTUAL', options: [
+          { value: 'PLAN', label: 'Plan' },
+          { value: 'ESTIMATE', label: 'Szacunek' },
+          { value: 'ACTUAL', label: 'Wartość rzeczywista' },
+        ], required: true }),
+        fieldHtml(escapeHtml, { name: 'valueKey', label: 'Klucz porównania', help: 'Zostaw puste, aby system utworzył go automatycznie. Ten sam klucz łączy szacunek z wartością rzeczywistą.' }),
         fieldHtml(escapeHtml, { name: 'source', label: 'Źródło danych', type: 'select', options: [
           { value: 'MANUAL', label: 'Ręczne' },
           { value: 'IMPORT', label: 'Import' },
@@ -913,6 +1181,12 @@ export function createClientProfitabilityFeature(ctx) {
           { value: 'MONTHLY', label: 'Miesięczny' },
           { value: 'ACTUAL_USAGE', label: 'Rzeczywiste zużycie' },
         ], required: true }),
+        fieldHtml(escapeHtml, { name: 'valueBasis', label: 'Rodzaj wartości', type: 'select', value: 'ACTUAL', options: [
+          { value: 'PLAN', label: 'Plan' },
+          { value: 'ESTIMATE', label: 'Szacunek' },
+          { value: 'ACTUAL', label: 'Wartość rzeczywista' },
+        ], required: true }),
+        fieldHtml(escapeHtml, { name: 'valueKey', label: 'Klucz porównania', help: 'Zostaw puste, aby system utworzył go automatycznie. Ten sam klucz łączy szacunek z wartością rzeczywistą.' }),
         fieldHtml(escapeHtml, { name: 'source', label: 'Źródło danych', type: 'select', options: [
           { value: 'MANUAL', label: 'Ręczne' },
           { value: 'WAREHOUSE', label: 'Magazyn' },
@@ -921,6 +1195,56 @@ export function createClientProfitabilityFeature(ctx) {
         ], required: true }),
         fieldHtml(escapeHtml, { name: 'description', label: 'Opis lub dokument', type: 'textarea', wide: true }),
       ].join('')
+    } else if (type === 'hygiene') {
+      const packageRecord = modalRecord || {}
+      const selectedBillingMode = text(packageRecord.billingMode).toUpperCase() || 'IN_CONTRACT'
+      const selectedValueBasis = text(packageRecord.valueBasis).toUpperCase() || 'ESTIMATE'
+      elements.title.textContent = modalRecord ? 'Edytuj pakiet środków higieny' : 'Pakiet środków higieny'
+      elements.description.textContent = object.name
+      const restricted = costControlOnly()
+      const fields = [
+        fieldHtml(escapeHtml, { name: 'packageName', label: 'Nazwa pakietu', value: packageRecord.name || packageRecord.packageName, required: true, wide: true }),
+        fieldHtml(escapeHtml, { name: 'billingMode', label: 'Sposób rozliczenia', type: 'select', value: selectedBillingMode, options: modalRecord
+          ? [{ value: selectedBillingMode, label: HYGIENE_BILLING_LABELS[selectedBillingMode] || selectedBillingMode }]
+          : restricted
+            ? [{ value: 'IN_CONTRACT', label: 'W cenie kontraktu' }]
+          : [
+              { value: 'IN_CONTRACT', label: 'W cenie kontraktu' },
+              { value: 'MONTHLY_EXTRA', label: 'Dodatkowo co miesiąc' },
+              { value: 'AD_HOC', label: 'Jednorazowo / ad hoc' },
+            ], required: true }),
+        fieldHtml(escapeHtml, { name: 'valueBasis', label: 'Rodzaj wartości', type: 'select', value: selectedValueBasis, options: modalRecord
+          ? [{ value: selectedValueBasis, label: VALUE_BASIS_LABELS[selectedValueBasis] || selectedValueBasis }]
+          : [
+              { value: 'PLAN', label: 'Plan' },
+              { value: 'ESTIMATE', label: 'Szacunek' },
+              { value: 'ACTUAL', label: 'Koszt rzeczywisty' },
+            ], required: true }),
+        fieldHtml(escapeHtml, { name: 'cost', label: 'Koszt netto', value: minorToDecimalInput(packageRecord.costMinor, packageRecord.currency || currency), required: restricted, help: `Kwota w ${currency}` }),
+        ...(!restricted ? [
+          fieldHtml(escapeHtml, { name: 'priceNet', label: 'Cena sprzedaży netto', value: minorToDecimalInput(packageRecord.priceNetMinor, packageRecord.currency || currency), help: `Kwota w ${currency}; wystarczy koszt albo cena.` }),
+          fieldHtml(escapeHtml, { name: 'margin', label: 'Marża (%)', value: integerString(packageRecord.marginBps) ? Number(packageRecord.marginBps) / 100 : '20', step: '0.01', help: 'Domyślnie 20%. System wyliczy brakującą cenę albo koszt.' }),
+        ] : []),
+        fieldHtml(escapeHtml, { name: 'currency', label: 'Waluta ISO 4217', value: packageRecord.currency || currency, required: true }),
+        fieldHtml(escapeHtml, { name: 'effectiveFrom', label: 'Obowiązuje od', type: 'date', value: packageRecord.effectiveFrom || `${currentPeriod}-01`, required: true }),
+        fieldHtml(escapeHtml, { name: 'effectiveTo', label: 'Obowiązuje do', type: 'date', value: packageRecord.effectiveTo }),
+        fieldHtml(escapeHtml, { name: 'occurredOn', label: 'Data pozycji ad hoc', type: 'date', value: packageRecord.occurredOn, help: 'Wymagana tylko dla pozycji jednorazowej.' }),
+        fieldHtml(escapeHtml, { name: 'recognitionKey', label: 'Klucz rozliczenia', value: packageRecord.recognitionKey, help: 'Zostaw puste, aby system utworzył stabilny klucz dla pakietu i okresu.' }),
+        fieldHtml(escapeHtml, { name: 'reason', label: 'Powód zmiany', type: 'textarea', wide: true }),
+      ]
+      elements.body.innerHTML = fields.join('')
+    } else if (type === 'hygiene-archive') {
+      elements.title.textContent = 'Archiwizuj pakiet środków higieny'
+      elements.description.textContent = `${object.name} · ${modalRecord?.name || 'Pakiet'}`
+      elements.submit.textContent = 'Archiwizuj'
+      elements.body.innerHTML = fieldHtml(escapeHtml, {
+        name: 'reason',
+        label: 'Powód archiwizacji',
+        type: 'textarea',
+        required: true,
+        wide: true,
+        help: 'Pakiet zniknie z bieżącego rozliczenia. Operacja pozostanie w historii zmian.',
+      })
     } else if (type === 'worker-rate') {
       elements.title.textContent = 'Stawka kosztowa pracownika'
       elements.description.textContent = object.name
@@ -991,19 +1315,25 @@ export function createClientProfitabilityFeature(ctx) {
     if (!object) return
     const elements = modalElements()
     openModal('history', trigger)
+    if (modalType !== 'history') return
+    const historySequence = modalRequestSequence
+    const clientId = currentClient.id || currentClient.clientId
+    const objectId = object.objectId
     elements.title.textContent = 'Historia zmian'
     elements.description.textContent = object.name
     elements.body.innerHTML = '<div class="cpf-loading">Ładowanie historii…</div>'
     try {
-      const payload = await fetchProfitabilityHistory(appState.session.orgId, currentClient.id || currentClient.clientId, {
+      const payload = await fetchProfitabilityHistory(appState.session.orgId, clientId, {
         period: currentPeriod,
-        objectId: object.objectId,
+        objectId,
       })
+      if (historySequence !== modalRequestSequence || modalType !== 'history') return
       const rows = Array.isArray(payload?.history) ? payload.history : []
       elements.body.innerHTML = `<div class="cpf-history-list">${rows.length
         ? rows.map((entry) => `<article class="cpf-history-item"><strong>${escapeHtml(entry.actionLabel || entry.action || 'Zmiana danych')}</strong><span>${escapeHtml(entry.changedAt || entry.createdAt || '')} · ${escapeHtml(entry.actorName || entry.actorId || 'Nieznany autor')}</span><span>${escapeHtml(entry.summary || entry.reason || 'Brak opisu')}</span></article>`).join('')
         : '<article class="cpf-history-item"><strong>Brak zmian</strong><span>Nie zapisano jeszcze historii dla tego obiektu i okresu.</span></article>'}</div>`
     } catch (error) {
+      if (historySequence !== modalRequestSequence || modalType !== 'history') return
       elements.body.innerHTML = `<div class="cpf-error"><strong>Nie udało się pobrać historii.</strong><span>${escapeHtml(error?.message || 'Nieznany błąd.')}</span></div>`
     }
   }
@@ -1016,12 +1346,19 @@ export function createClientProfitabilityFeature(ctx) {
     event.preventDefault()
     const object = selectedObject()
     const elements = modalElements()
-    if (!object || !elements.form || !['contract', 'cost', 'revenue', 'worker-rate', 'asset'].includes(modalType)) return
+    if (!object || !elements.form || !['contract', 'cost', 'revenue', 'hygiene', 'hygiene-archive', 'worker-rate', 'asset'].includes(modalType)) return
+    const submissionSequence = modalRequestSequence
     elements.error.hidden = true
     elements.submit.disabled = true
     try {
       if (!elements.form.reportValidity()) return
       const values = formValues(elements.form)
+      const commandFingerprint = JSON.stringify(values)
+      if (!modalCommandId || modalCommandFingerprint !== commandFingerprint) {
+        modalCommandId = createProfitabilityCommandId(modalType)
+        modalCommandFingerprint = commandFingerprint
+      }
+      const mutationOptions = { commandId: modalCommandId }
       const currency = normalizeCurrency(values.currency)
       if (modalType === 'contract') {
         if (values.validTo && values.validFrom && values.validTo <= values.validFrom) {
@@ -1059,10 +1396,19 @@ export function createClientProfitabilityFeature(ctx) {
           targetMarginBps: percentToBps(values.targetMargin, 'Próg rentowności'),
           source: text(values.source),
           reason: text(values.reason),
-        })
+        }, mutationOptions)
       } else if (modalType === 'revenue') {
         const occurredOn = text(values.occurredOn)
         const recurrence = text(values.recurrence).toUpperCase()
+        const valueBasis = text(values.valueBasis).toUpperCase()
+        const valueKey = text(values.valueKey) || financialValueKey({
+          category: values.category,
+          date: occurredOn,
+          group: 'revenue',
+          name: values.name,
+          period: currentPeriod,
+          recurrence,
+        })
         await createProfitabilityRevenue(appState.session.orgId, currentClient.id || currentClient.clientId, object.objectId, currentPeriod, {
           category: text(values.category),
           name: text(values.name),
@@ -1071,21 +1417,89 @@ export function createClientProfitabilityFeature(ctx) {
           occurredOn,
           periodStart: recurrence === 'MONTHLY' ? occurredOn : '',
           recurrence,
+          valueBasis,
+          valueKey,
           source: text(values.source),
           description: text(values.description),
           reason: text(values.reason),
-        })
+        }, mutationOptions)
       } else if (modalType === 'cost') {
+        const recurrence = text(values.recurrence).toUpperCase()
+        const costDate = text(values.costDate)
+        const valueBasis = text(values.valueBasis).toUpperCase()
+        const valueKey = text(values.valueKey) || financialValueKey({
+          category: values.category,
+          date: costDate,
+          group: 'cost',
+          name: values.name,
+          period: currentPeriod,
+          recurrence,
+        })
         await createProfitabilityCost(appState.session.orgId, currentClient.id || currentClient.clientId, object.objectId, currentPeriod, {
           category: text(values.category),
           name: text(values.name),
           amountMinor: nonNegativeMinor(values.amount, currency, 'Kwota kosztu', { required: true }),
           currency,
-          costDate: text(values.costDate),
-          recurrence: text(values.recurrence),
+          costDate,
+          recurrence,
+          valueBasis,
+          valueKey,
           source: text(values.source),
           description: text(values.description),
+        }, mutationOptions)
+      } else if (modalType === 'hygiene') {
+        const billingMode = text(values.billingMode).toUpperCase()
+        const effectiveFrom = text(values.effectiveFrom)
+        const occurredOn = text(values.occurredOn) || effectiveFrom
+        if (values.effectiveTo && values.effectiveFrom && values.effectiveTo <= values.effectiveFrom) {
+          throw new Error('Data zakończenia pakietu musi być późniejsza niż data rozpoczęcia.')
+        }
+        if (costControlOnly() && billingMode !== 'IN_CONTRACT') {
+          throw new Error('Ta rola może zapisać wyłącznie pakiet ujęty w cenie kontraktu.')
+        }
+        const packageName = text(values.packageName)
+        const costMinor = nonNegativeMinor(values.cost, currency, 'Koszt pakietu', { required: costControlOnly() })
+        const priceNetMinor = costControlOnly() ? '' : nonNegativeMinor(values.priceNet, currency, 'Cena pakietu')
+        if (!costMinor && !priceNetMinor) {
+          throw new Error('Podaj koszt netto albo cenę sprzedaży netto pakietu.')
+        }
+        const recognitionKey = text(values.recognitionKey) || financialValueKey({
+          category: 'hygiene',
+          date: billingMode === 'AD_HOC' ? occurredOn : effectiveFrom,
+          group: 'package',
+          name: packageName,
+          period: currentPeriod,
+          recurrence: billingMode,
         })
+        await saveProfitabilityHygienePackage(appState.session.orgId, currentClient.id || currentClient.clientId, object.objectId, currentPeriod, {
+          packageId: text(modalRecord?.packageId),
+          replacesPackageVersionId: text(modalRecord?.packageVersionId),
+          packageName,
+          billingMode,
+          valueBasis: text(values.valueBasis).toUpperCase(),
+          costMinor,
+          priceNetMinor,
+          marginBps: costControlOnly() ? '' : percentToBps(values.margin, 'Marża pakietu', { min: -1000, max: 100 }),
+          currency,
+          effectiveFrom,
+          effectiveTo: text(values.effectiveTo),
+          occurredOn: billingMode === 'AD_HOC' ? occurredOn : '',
+          recognitionKey,
+          reason: text(values.reason),
+          status: 'POSTED',
+        }, mutationOptions)
+      } else if (modalType === 'hygiene-archive') {
+        const packageVersionId = text(modalRecord?.packageVersionId)
+        if (!packageVersionId) throw new Error('Nie można ustalić wersji pakietu do archiwizacji.')
+        await archiveProfitabilityHygienePackage(
+          appState.session.orgId,
+          currentClient.id || currentClient.clientId,
+          object.objectId,
+          currentPeriod,
+          packageVersionId,
+          text(values.reason),
+          mutationOptions,
+        )
       } else if (modalType === 'worker-rate') {
         if (values.effectiveTo && values.effectiveFrom && values.effectiveTo <= values.effectiveFrom) {
           throw new Error('Data końcowa stawki musi być późniejsza niż data początkowa.')
@@ -1098,7 +1512,7 @@ export function createClientProfitabilityFeature(ctx) {
           effectiveTo: text(values.effectiveTo),
           source: text(values.source),
           reason: text(values.reason),
-        })
+        }, mutationOptions)
       } else {
         const settlementMethod = text(values.settlementMethod)
         const purchaseAmountMinor = nonNegativeMinor(values.purchaseAmount, currency, 'Wartość zakupu')
@@ -1125,16 +1539,18 @@ export function createClientProfitabilityFeature(ctx) {
           serviceCostMinor: nonNegativeMinor(values.serviceCost, currency, 'Koszt serwisu'),
           currency,
           costEnd: text(values.costEnd),
-        })
+        }, mutationOptions)
       }
+      if (submissionSequence !== modalRequestSequence) return
       closeModal()
       showTransientNotice('Zapisano dane finansowe.')
       await load(true)
     } catch (error) {
+      if (submissionSequence !== modalRequestSequence) return
       elements.error.textContent = text(error?.message) || 'Nie udało się zapisać danych.'
       elements.error.hidden = false
     } finally {
-      elements.submit.disabled = false
+      if (submissionSequence === modalRequestSequence) elements.submit.disabled = false
     }
   }
 
@@ -1159,8 +1575,30 @@ export function createClientProfitabilityFeature(ctx) {
       const button = event.target.closest('[data-cpf-select-object]')
       if (button) selectObject(button.getAttribute('data-cpf-select-object'))
     })
+    addListener(byId('cpfCostsContent'), 'click', (event) => {
+      const editButton = event.target.closest('[data-cpf-edit-hygiene]')
+      const archiveButton = event.target.closest('[data-cpf-archive-hygiene]')
+      const button = editButton || archiveButton
+      if (!button) return
+      const packageVersionId = button.getAttribute(
+        editButton ? 'data-cpf-edit-hygiene' : 'data-cpf-archive-hygiene',
+      )
+      const record = selectedObject()?.hygienePackages?.find(
+        (entry) => text(entry.packageVersionId) === text(packageVersionId),
+      )
+      if (!record) {
+        showTransientNotice('Nie znaleziono aktualnej wersji pakietu. Odśwież dane i spróbuj ponownie.', 'error')
+        return
+      }
+      if (costControlOnly() && text(record.billingMode).toUpperCase() !== 'IN_CONTRACT') {
+        showTransientNotice('Ta rola może zmieniać wyłącznie pakiety ujęte w cenie kontraktu.', 'error')
+        return
+      }
+      openModal(editButton ? 'hygiene' : 'hygiene-archive', button, record)
+    })
     addListener(byId('cpfContractBtn'), 'click', (event) => openModal('contract', event.currentTarget))
     addListener(byId('cpfAddCostBtn'), 'click', (event) => openModal('cost', event.currentTarget))
+    addListener(byId('cpfHygieneBtn'), 'click', (event) => openModal('hygiene', event.currentTarget))
     addListener(byId('cpfAddRevenueBtn'), 'click', (event) => openModal('revenue', event.currentTarget))
     addListener(byId('cpfWorkerRateBtn'), 'click', (event) => openModal('worker-rate', event.currentTarget))
     addListener(byId('cpfAssetBtn'), 'click', (event) => openModal('asset', event.currentTarget))
@@ -1193,8 +1631,7 @@ export function createClientProfitabilityFeature(ctx) {
     const clientChanged = nextClientId !== text(currentClient?.id || currentClient?.clientId)
     currentClient = client || null
     if (clientChanged) {
-      currentObjectId = ''
-      currentPayload = normalizePayload()
+      clearSensitiveView({ invalidateRequests: true })
     }
     const previewHost = ['127.0.0.1', 'localhost'].includes(window.location.hostname)
     if (import.meta.env.DEV && previewHost && new URLSearchParams(window.location.search).get('profitabilityPreview') === '1') {
@@ -1207,7 +1644,11 @@ export function createClientProfitabilityFeature(ctx) {
       }
       return
     }
-    if (!renderAccessState()) return
+    if (!canReadProfitability()) {
+      clearSensitiveView({ invalidateRequests: true })
+      renderAccessState()
+      return
+    }
     if (options.payload) {
       renderPayload(options.payload, { objectId: options.objectId })
       return
@@ -1215,10 +1656,17 @@ export function createClientProfitabilityFeature(ctx) {
     await load(Boolean(options.force || clientChanged))
   }
 
-  function destroy() {
-    requestSequence += 1
+  function resetSession() {
+    clearSensitiveView({ invalidateRequests: true })
     listeners.splice(0).forEach((remove) => remove())
+    currentClient = null
+    currentPeriod = monthKey()
+    byId('cpdProfitabilityMount')?.replaceChildren()
     mounted = false
+  }
+
+  function destroy() {
+    resetSession()
   }
 
   return {
@@ -1227,5 +1675,6 @@ export function createClientProfitabilityFeature(ctx) {
     open,
     refresh: () => load(true),
     renderPayload,
+    resetSession,
   }
 }

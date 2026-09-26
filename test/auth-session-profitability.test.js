@@ -109,3 +109,86 @@ test('missing subscription does not extend cleaning-provider access', () => {
   })
   assert.equal(buildSessionContext('UID-1', provider).organizationKind, 'CLEANING_PROVIDER')
 })
+
+test('access profile v2 exposes only the trusted cost-control capability for an operations admin', () => {
+  const context = buildSessionContext('UID-1', row({
+    role: 'ADMIN',
+    profitability_access_profile_v2_enabled: true,
+    profitability_access_profile: {
+      orgId: 'ORG-1',
+      uid: 'UID-1',
+      status: 'ACTIVE',
+      operationalProfile: 'OPERATIONS_ADMIN',
+      objectScope: 'ALL',
+      workerScope: 'ALL',
+      financeProfile: 'COST_CONTROL',
+      accessMode: 'MANAGE',
+      canEditOperationalCosts: true,
+    },
+  }))
+
+  assert.deepEqual(context.capabilities.profitabilityModule, {
+    enabled: true,
+    canRead: true,
+    canEdit: false,
+    readCode: 'ACCESS_PROFILE_RESOLVED',
+    editCode: 'PROFITABILITY_SENSITIVE_EDIT_FORBIDDEN',
+    accessVersion: 'v2',
+    canEditOperationalCosts: true,
+    financeProfile: 'COST_CONTROL',
+    objectScope: 'ALL',
+    operationalProfile: 'OPERATIONS_ADMIN',
+    workerScope: 'ALL',
+  })
+})
+
+test('access profile v2 never falls back from an ADMIN role or legacy grant when binding is absent', () => {
+  const context = buildSessionContext('UID-1', row({
+    role: 'ADMIN',
+    profitability_access_profile_v2_enabled: true,
+    profitability_grants: { profitabilityModule: { read: true, edit: true } },
+  }))
+
+  assert.equal(context.capabilities.profitabilityModule.canRead, false)
+  assert.equal(context.capabilities.profitabilityModule.canEdit, false)
+  assert.equal(context.capabilities.profitabilityModule.financeProfile, 'NONE')
+  assert.equal(context.capabilities.profitabilityModule.objectScope, 'NONE')
+})
+
+test('enforced v2 rollout blocked by configuration never falls back to legacy finance grants', () => {
+  const context = buildSessionContext('UID-1', row({
+    role: 'ADMIN',
+    profitability_access_profile_v2_blocked: true,
+    profitability_grants: { profitabilityModule: { read: true, edit: true } },
+    is_finance_admin: true,
+  }))
+
+  assert.equal(context.capabilities.profitabilityModule.canRead, false)
+  assert.equal(context.capabilities.profitabilityModule.canEdit, false)
+  assert.equal(
+    context.capabilities.profitabilityModule.readCode,
+    'PROFITABILITY_ACCESS_PROFILE_NOT_READY',
+  )
+})
+
+test('financial model enforcement blocks profitability only and never falls back to older sums', () => {
+  const context = buildSessionContext('UID-1', row({
+    profitability_financial_model_v21_blocked: true,
+  }))
+
+  assert.equal(context.capabilities.profitabilityModule.canRead, false)
+  assert.equal(context.capabilities.profitabilityModule.canEdit, false)
+  assert.equal(
+    context.capabilities.profitabilityModule.readCode,
+    'PROFITABILITY_FINANCIAL_MODEL_NOT_READY',
+  )
+})
+
+test('session exposes V2.1 version only after the backend gate is active', () => {
+  const context = buildSessionContext('UID-1', row({
+    profitability_financial_model_v21_enabled: true,
+  }))
+
+  assert.equal(context.capabilities.profitabilityModule.canRead, true)
+  assert.equal(context.capabilities.profitabilityModule.financialModelVersion, 'v2.1')
+})

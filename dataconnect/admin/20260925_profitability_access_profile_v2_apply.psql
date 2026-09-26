@@ -1,0 +1,201 @@
+-- DATABASE-ADMIN CANDIDATE ONLY. Never run without separate migration approval.
+--
+-- This is the only supported executable entrypoint for the profitability
+-- access-profile v2 migration. The raw SQL file rejects direct execution.
+--
+-- Required invocation parameters (none is a secret):
+--   -v profitability_access_expected_database=iclean-room-database
+--   -v profitability_access_expected_migration_runner=migration_runner
+--   -v profitability_access_runtime_role=<exact runtime database role>
+--   -v profitability_access_backup_reference=<approved backup id>
+--   -v profitability_access_confirmation=APPLY_PROFITABILITY_ACCESS_PROFILE_V2_ONLY_20260925
+
+\set ON_ERROR_STOP on
+
+\if :{?profitability_access_expected_database}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_EXPECTED_DATABASE_REQUIRED';
+  end $$;
+\endif
+
+\if :{?profitability_access_expected_migration_runner}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_EXPECTED_MIGRATION_RUNNER_REQUIRED';
+  end $$;
+\endif
+
+\if :{?profitability_access_runtime_role}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_RUNTIME_ROLE_REQUIRED';
+  end $$;
+\endif
+
+\if :{?profitability_access_backup_reference}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_BACKUP_REFERENCE_REQUIRED';
+  end $$;
+\endif
+
+\if :{?profitability_access_confirmation}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_CONFIRMATION_REQUIRED';
+  end $$;
+\endif
+
+select
+  :'profitability_access_expected_database' = 'iclean-room-database'
+    as profitability_access_approved_database_confirmed,
+  current_database() = :'profitability_access_expected_database'
+    as profitability_access_database_confirmed,
+  :'profitability_access_expected_migration_runner' = 'migration_runner'
+    as profitability_access_approved_runner_confirmed,
+  session_user = 'migration_runner'
+    and current_user = 'migration_runner'
+    and session_user = :'profitability_access_expected_migration_runner'
+    as profitability_access_session_confirmed,
+  :'profitability_access_confirmation'
+    = 'APPLY_PROFITABILITY_ACCESS_PROFILE_V2_ONLY_20260925'
+    as profitability_access_execution_confirmed,
+  :'profitability_access_backup_reference'
+    ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{5,127}$'
+    as profitability_access_backup_confirmed,
+  current_setting('server_version_num')::integer between 170000 and 179999
+    as profitability_access_pg17_confirmed,
+  not pg_is_in_recovery()
+    as profitability_access_primary_confirmed,
+  current_setting('transaction_read_only') = 'off'
+    and current_setting('default_transaction_read_only') = 'off'
+    as profitability_access_read_write_confirmed,
+  :'profitability_access_runtime_role' not in (
+      '', 'PUBLIC', 'public', 'migration_runner', session_user, current_user
+    )
+    and exists (
+      select 1
+        from pg_roles runtime_role
+       where runtime_role.rolname = :'profitability_access_runtime_role'
+         and not runtime_role.rolsuper
+         and not runtime_role.rolbypassrls
+         and not runtime_role.rolcreaterole
+         and not runtime_role.rolcreatedb
+         and not runtime_role.rolreplication
+    )
+    as profitability_access_runtime_role_confirmed,
+  coalesce((
+    select not has_schema_privilege(runtime_role.oid, 'public', 'CREATE')
+      from pg_roles runtime_role
+     where runtime_role.rolname = :'profitability_access_runtime_role'
+  ), false) as profitability_access_runtime_schema_confirmed
+\gset
+
+\if :profitability_access_approved_database_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_APPROVED_DATABASE_MISMATCH';
+  end $$;
+\endif
+
+\if :profitability_access_database_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_DATABASE_MISMATCH';
+  end $$;
+\endif
+
+\if :profitability_access_approved_runner_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_APPROVED_MIGRATION_RUNNER_MISMATCH';
+  end $$;
+\endif
+
+\if :profitability_access_session_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_MIGRATION_SESSION_MISMATCH';
+  end $$;
+\endif
+
+\if :profitability_access_execution_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_CONFIRMATION_MISMATCH';
+  end $$;
+\endif
+
+\if :profitability_access_backup_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_BACKUP_REFERENCE_INVALID';
+  end $$;
+\endif
+
+\if :profitability_access_pg17_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_POSTGRESQL_17_REQUIRED';
+  end $$;
+\endif
+
+\if :profitability_access_primary_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_PRIMARY_DATABASE_REQUIRED';
+  end $$;
+\endif
+
+\if :profitability_access_read_write_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_READ_WRITE_SESSION_REQUIRED';
+  end $$;
+\endif
+
+\if :profitability_access_runtime_role_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_RUNTIME_ROLE_INVALID';
+  end $$;
+\endif
+
+\if :profitability_access_runtime_schema_confirmed
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_RUNTIME_SCHEMA_CREATE_EXCESS';
+  end $$;
+\endif
+
+-- Arm the raw SQL only after every production-target guard has passed. The raw
+-- migration consumes this marker before BEGIN, so every retry repeats all
+-- checks through this wrapper.
+select set_config(
+  'cleanzi.profitability_access_v2_entrypoint',
+  'GUARDED_PROFITABILITY_ACCESS_PROFILE_V2_20260925',
+  false
+);
+
+select set_config(
+  'cleanzi.profitability_access_v2_runtime_role',
+  :'profitability_access_runtime_role',
+  false
+);
+
+select set_config(
+  'cleanzi.profitability_access_v2_backup_reference',
+  :'profitability_access_backup_reference',
+  false
+);
+
+-- Keep this include after every fail-closed gate above. \ir resolves relative
+-- to this file and does not depend on the operator's working directory.
+\ir ../migrations/20260925_profitability_access_profile_v2_additive.sql
+
+select set_config('cleanzi.profitability_access_v2_entrypoint', '', false);
+select set_config('cleanzi.profitability_access_v2_runtime_role', '', false);
+select set_config('cleanzi.profitability_access_v2_backup_reference', '', false);
+
+\echo 'PROFITABILITY_ACCESS_PROFILE_V2_MIGRATION_APPLIED'

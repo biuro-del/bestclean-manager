@@ -40,7 +40,7 @@
       </div>
 
       <div class="cpf-metrics" aria-label="Podsumowanie finansowe klienta">
-        <article class="cpf-metric">
+        <article class="cpf-metric" data-cpf-owner-finance>
           <span>Przychód netto</span>
           <strong id="cpfMetricRevenue">—</strong>
           <small id="cpfMetricRevenueMeta">Wybrany okres</small>
@@ -55,12 +55,12 @@
           <strong id="cpfMetricLabor">—</strong>
           <small id="cpfMetricLaborMeta">Na podstawie START/STOP</small>
         </article>
-        <article class="cpf-metric">
+        <article class="cpf-metric" data-cpf-owner-finance>
           <span>Marża</span>
           <strong id="cpfMetricMargin">—</strong>
           <small id="cpfMetricMarginMeta">Przychód minus koszty</small>
         </article>
-        <article class="cpf-metric">
+        <article class="cpf-metric" data-cpf-owner-finance>
           <span>Rentowność</span>
           <strong id="cpfMetricProfitability">—</strong>
           <small id="cpfMetricProfitabilityMeta">Nie można obliczyć</small>
@@ -93,11 +93,11 @@
               <thead>
                 <tr>
                   <th scope="col">Obiekt</th>
-                  <th scope="col">Przychód</th>
+                  <th scope="col" data-cpf-owner-finance>Przychód</th>
                   <th scope="col">Praca</th>
                   <th scope="col">Materiały</th>
                   <th scope="col">Inne koszty</th>
-                  <th scope="col">Marża</th>
+                  <th scope="col" data-cpf-owner-finance>Marża</th>
                   <th scope="col">Jakość danych</th>
                 </tr>
               </thead>
@@ -126,6 +126,7 @@
           </div>
           <footer class="cpf-panel-actions">
             <button class="cpf-primary-action" id="cpfAddCostBtn" type="button">Dodaj koszt</button>
+            <button class="cpf-secondary-action" id="cpfHygieneBtn" type="button">Pakiet higieny</button>
             <button class="cpf-secondary-action" id="cpfAddRevenueBtn" type="button">Dodaj przychód</button>
             <button class="cpf-secondary-action" id="cpfWorkerRateBtn" type="button">Stawka pracownika</button>
             <button class="cpf-secondary-action" id="cpfAssetBtn" type="button">Dodaj sprzęt</button>
@@ -146,7 +147,7 @@
           <div class="cpf-insight-body" id="cpfPlanExecution"></div>
         </section>
 
-        <section class="cpf-panel" aria-labelledby="cpfTrendTitle">
+        <section class="cpf-panel" aria-labelledby="cpfTrendTitle" data-cpf-owner-finance>
           <header class="cpf-panel-head cpf-panel-head--compact">
             <div>
               <h4 id="cpfTrendTitle">Trend rentowności</h4>
@@ -178,7 +179,7 @@
           <div class="cpf-table-scroll" id="cpfCostsContent"></div>
         </section>
 
-        <section class="cpf-panel" aria-labelledby="cpfPeriodicTitle">
+        <section class="cpf-panel" aria-labelledby="cpfPeriodicTitle" data-cpf-owner-finance>
           <header class="cpf-panel-head cpf-panel-head--compact">
             <div>
               <h4 id="cpfPeriodicTitle">Prace okresowe i dodatkowe</h4>

@@ -7,21 +7,54 @@ const {
   calculateEntries,
   calculateObjectProfitability,
   createProfitabilityRepository,
+  evaluateProfitabilityTarget,
+  projectHygienePackageMutation,
+  projectProfitabilityHistory,
+  projectProfitabilityPayload,
   roundRatio,
   serializeBigInts,
 } = require('./profitability')
+const {
+  PROFITABILITY_ACCESS_PROFILE_MODES,
+  resolveProfitabilityAccessProfileOrganizationMode,
+  resolveProfitabilityAccessProfileRollout,
+} = require('./profitability-access-profile-rollout')
+const {
+  PROFITABILITY_FINANCIAL_MODEL_MODES,
+  resolveProfitabilityFinancialModelOrganizationMode,
+  resolveProfitabilityFinancialModelRollout,
+} = require('./profitability-financial-model-rollout')
 
-const REQUIRED_RELATIONS = Object.freeze([
+const REQUIRED_DOMAIN_RELATIONS = Object.freeze([
   'public.service_object',
   'public.worker_cost_rate',
   'public.object_contract_version',
   'public.periodic_work',
+  'public.periodic_work_zone',
   'public.object_equipment',
   'public.object_financial_entry',
   'public.financial_period',
   'public.profitability_snapshot',
   'public.profitability_audit',
+])
+
+const REQUIRED_LEGACY_ACCESS_RELATIONS = Object.freeze([
   'public.profitability_permission',
+])
+
+const REQUIRED_FINANCIAL_MODEL_V21_RELATIONS = Object.freeze([
+  'public.profitability_command_receipt',
+  'public.profitability_financial_model_enforcement',
+  'public.object_hygiene_package_version',
+  'public.profitability_effective_financial_entry',
+  'public.profitability_effective_hygiene_package',
+])
+
+// Backward-compatible export for callers that still audit the complete legacy
+// footprint. Runtime readiness is evaluated per access mode below.
+const REQUIRED_RELATIONS = Object.freeze([
+  ...REQUIRED_DOMAIN_RELATIONS,
+  ...REQUIRED_LEGACY_ACCESS_RELATIONS,
 ])
 
 const ISSUE_MESSAGES = Object.freeze({
@@ -50,6 +83,50 @@ class ProfitabilityApiError extends Error {
 
 function text(value) {
   return String(value ?? '').trim()
+}
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function hygieneFinancialField(key) {
+  const normalized = String(key ?? '').replace(/[^a-z0-9]/gi, '').toLowerCase()
+  return normalized === 'pricenetminor'
+    || normalized === 'marginbps'
+    || normalized.includes('revenue')
+}
+
+function hasSubmittedValue(value) {
+  if (value === null || value === undefined) return false
+  if (typeof value === 'string') return value.trim() !== ''
+  return true
+}
+
+function restrictCostControlHygienePackage(packageInput) {
+  const source = isRecord(packageInput) ? packageInput : {}
+  const billingMode = text(source.billingMode || 'IN_CONTRACT').toUpperCase()
+  if (billingMode !== 'IN_CONTRACT') {
+    throw new ProfitabilityApiError(
+      403,
+      'PROFITABILITY_HYGIENE_CONTRACT_TERMS_FORBIDDEN',
+      'Ten profil moĹĽe zapisywaÄ‡ wyĹ‚Ä…cznie pakiety higieniczne ujÄ™te w kontrakcie.',
+    )
+  }
+  const forbiddenFields = Object.entries(source)
+    .filter(([key, value]) => hygieneFinancialField(key) && hasSubmittedValue(value))
+    .map(([key]) => key)
+  if (forbiddenFields.length) {
+    throw new ProfitabilityApiError(
+      403,
+      'PROFITABILITY_HYGIENE_FINANCIAL_FIELDS_FORBIDDEN',
+      'Ten profil nie moĹĽe ustalaÄ‡ ceny, marĹĽy ani przychodu pakietu higienicznego.',
+      { fields: forbiddenFields.sort() },
+    )
+  }
+  return Object.fromEntries([
+    ...Object.entries(source).filter(([key]) => !hygieneFinancialField(key)),
+    ['billingMode', 'IN_CONTRACT'],
+  ])
 }
 
 function identifier(value, field, maxLength = 180) {
@@ -118,6 +195,35 @@ function aggregateLaborCostBreakdown(rows) {
     }
   }
   return aggregate
+}
+
+function aggregateLaborTimeBreakdown(rows) {
+  const byWorker = new Map()
+  for (const row of rows) {
+    for (const entry of row.laborTimeBreakdown ?? []) {
+      const workerLogin = text(entry?.workerLogin)
+      if (!workerLogin || entry?.durationSeconds === null || entry?.durationSeconds === undefined) continue
+      byWorker.set(workerLogin, (byWorker.get(workerLogin) ?? 0n) + BigInt(entry.durationSeconds))
+    }
+  }
+  return [...byWorker.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([workerLogin, durationSeconds]) => ({ durationSeconds, workerLogin }))
+}
+
+function laborTimeBreakdown(sessions = []) {
+  const byWorker = new Map()
+  for (const session of sessions) {
+    const workerLogin = text(session?.workerLogin)
+    if (!workerLogin || session?.durationSeconds === null || session?.durationSeconds === undefined) continue
+    byWorker.set(
+      workerLogin,
+      (byWorker.get(workerLogin) ?? 0n) + BigInt(session.durationSeconds),
+    )
+  }
+  return [...byWorker.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([workerLogin, durationSeconds]) => ({ durationSeconds, workerLogin }))
 }
 
 function aggregateSnapshotTrend(objectTrends, expectedObjectCount, expectedCurrency) {
@@ -208,7 +314,36 @@ function mapObjectResult(serviceObject, input, result) {
   const periodicMetadata = new Map(
     (input.periodicWorks ?? []).map((work) => [String(work.id), work]),
   )
-  return {
+  let target = null
+  let operationalOutcome = {}
+  if (input.accessProfileVersion === 'v2') {
+    target = {
+      currency: input.targetCurrency ?? result.currency,
+      minimumMarginBps: input.targetMinimumMarginBps ?? input.targetProfitabilityBps ?? null,
+      minimumResultMinor: input.targetMinimumResultMinor ?? null,
+      policy: input.targetPolicy ?? 'ALL_DEFINED',
+      targetId: input.targetId ?? null,
+    }
+    const evaluated = evaluateProfitabilityTarget({
+      resultMinor: result.marginMinor,
+      revenueMinor: result.revenueMinor,
+      minimumMarginBps: target.minimumMarginBps,
+      minimumResultMinor: target.minimumResultMinor,
+    })
+    operationalOutcome = result.complete
+      ? {
+          operationalStatus: evaluated.operationalStatus,
+          improvementGapMinor: evaluated.improvementGapMinor,
+          targetEvaluation: evaluated,
+        }
+      : {
+          operationalStatus: 'INCOMPLETE',
+          improvementGapMinor: null,
+          targetEvaluation: { ...evaluated, evaluated: false, meetsTarget: null },
+        }
+  }
+  const mapped = {
+    clientId: serviceObject.client_id,
     objectId: result.objectId,
     name: serviceObject.name,
     timeZone: serviceObject.timezone,
@@ -239,9 +374,13 @@ function mapObjectResult(serviceObject, input, result) {
       name: entry.name || entry.category,
       recurrence: entry.recurrence,
       source: entry.source ?? null,
+      valueBasis: entry.valueBasis ?? null,
+      valueKey: entry.valueKey ?? null,
     })),
+    hygienePackages: (input.hygienePackages ?? []).map((packageRow) => ({ ...packageRow })),
     laborComparison: result.laborComparison,
     laborCostBreakdown: result.laborCostBreakdown,
+    laborTimeBreakdown: laborTimeBreakdown(input.laborSessions),
     planDataQuality: result.planDataQuality,
     periodicBreakdown: result.periodicBreakdown.map((row) => {
       const metadata = periodicMetadata.get(String(row.id)) ?? {}
@@ -264,6 +403,30 @@ function mapObjectResult(serviceObject, input, result) {
       { key: 'other', label: 'Transport i pozostałe', amountMinor: otherDirect },
     ],
   }
+  if (target) mapped.target = target
+  return { ...mapped, ...operationalOutcome }
+}
+
+function aggregateOperationalOutcome(rows) {
+  const applicable = rows.filter((row) => row.operationalStatus)
+  if (!applicable.length) return {}
+  const statuses = new Set(applicable.map((row) => row.operationalStatus))
+  const operationalStatus = statuses.has('INCOMPLETE')
+    ? 'INCOMPLETE'
+    : statuses.has('NOT_CALCULABLE')
+      ? 'NOT_CALCULABLE'
+      : statuses.has('CRITICAL')
+        ? 'CRITICAL'
+        : statuses.has('BELOW_TARGET')
+          ? 'BELOW_TARGET'
+          : statuses.has('NO_TARGET')
+            ? 'NO_TARGET'
+            : 'OK'
+  const gaps = applicable.map((row) => row.improvementGapMinor)
+  const improvementGapMinor = gaps.some((gap) => gap === null || gap === undefined)
+    ? null
+    : gaps.reduce((sum, gap) => sum + BigInt(gap), 0n)
+  return { operationalStatus, improvementGapMinor }
 }
 
 async function buildSummary(repository, { orgId, clientId, objectId = '', period, uid }) {
@@ -338,6 +501,7 @@ async function buildSummary(repository, { orgId, clientId, objectId = '', period
 
   const aggregate = aggregateClientProfitability(calculations)
   const category = (key) => sumBigInts(rows.map((row) => row[key]))
+  const operationalOutcome = aggregateOperationalOutcome(rows)
   return {
     currency: aggregate.currency,
     summary: {
@@ -362,6 +526,7 @@ async function buildSummary(repository, { orgId, clientId, objectId = '', period
       }))),
       laborComparison: aggregateLaborComparison(rows),
       laborCostBreakdown: aggregateLaborCostBreakdown(rows),
+      laborTimeBreakdown: aggregateLaborTimeBreakdown(rows),
       notCalculableObjects: aggregate.notCalculableObjects,
       objectCount: aggregate.objectCount,
       periodicBreakdown: rows.flatMap((row) => row.periodicBreakdown.map((work) => ({
@@ -371,6 +536,7 @@ async function buildSummary(repository, { orgId, clientId, objectId = '', period
       }))),
       profitableObjects: aggregate.profitableObjects,
       unprofitableObjects: aggregate.unprofitableObjects,
+      ...operationalOutcome,
     },
     objects: rows,
     trend: aggregateSnapshotTrend(objectTrends, serviceObjects.length, aggregate.currency),
@@ -378,15 +544,137 @@ async function buildSummary(repository, { orgId, clientId, objectId = '', period
   }
 }
 
-async function relationReady(client, relationExists) {
-  for (const relation of REQUIRED_RELATIONS) {
+async function buildPortfolioSummary(repository, { orgId, clientId = '', objectId = '', period, uid }) {
+  const availableObjects = clientId
+    ? await repository.listServiceObjectsForClient({ orgId, clientId, uid })
+    : await repository.listServiceObjectsForOrganization({ orgId, uid })
+  const serviceObjects = objectId
+    ? availableObjects.filter((serviceObject) => serviceObject.object_id === objectId)
+    : availableObjects
+  if (objectId && serviceObjects.length === 0) {
+    throw new ProfitabilityApiError(
+      404,
+      'PROFITABILITY_OBJECT_NOT_FOUND',
+      'Nie znaleziono obiektu w dostępnym portfelu.',
+    )
+  }
+
+  const rows = []
+  const calculations = []
+  const objectTrends = []
+  for (const serviceObject of serviceObjects) {
+    const calculationClientId = serviceObject.client_id
+    const input = await repository.loadObjectCalculationInput({
+      objectId: serviceObject.object_id,
+      orgId,
+      period,
+      uid,
+    })
+    const result = calculateObjectProfitability(input)
+    calculations.push(result)
+    rows.push(mapObjectResult(serviceObject, input, result))
+    const trend = await repository.listProfitabilityTrend({
+      clientId: calculationClientId,
+      months: 12,
+      objectId: serviceObject.object_id,
+      orgId,
+      period,
+      uid,
+    })
+    objectTrends.push({
+      ...trend,
+      points: (trend.points ?? []).map((point) => ({
+        ...point,
+        objectName: serviceObject.name,
+      })),
+    })
+  }
+
+  if (!calculations.length) {
+    return {
+      currency: 'PLN',
+      summary: {
+        revenueMinor: '0',
+        totalCostMinor: null,
+        laborCostMinor: null,
+        marginMinor: null,
+        profitabilityBps: null,
+        completenessPercent: 0,
+        incomplete: true,
+        objectCount: 0,
+        profitableObjects: 0,
+        unprofitableObjects: 0,
+        notCalculableObjects: 0,
+      },
+      objects: [],
+      trend: {
+        emptyReason: 'Organizacja nie ma dostępnych obiektów z historią rentowności.',
+        points: [],
+        source: 'PROFITABILITY_SNAPSHOT',
+        status: 'EMPTY',
+        window: null,
+      },
+      warnings: [{ code: 'NO_SERVICE_OBJECTS', message: 'Brak dostępnych obiektów rozliczeniowych.' }],
+    }
+  }
+
+  const aggregate = aggregateClientProfitability(calculations)
+  const category = (key) => sumBigInts(rows.map((row) => row[key]))
+  const operationalOutcome = aggregateOperationalOutcome(rows)
+  return {
+    currency: aggregate.currency,
+    summary: {
+      currency: aggregate.currency,
+      revenueMinor: aggregate.revenueMinor,
+      totalCostMinor: aggregate.totalCostMinor,
+      knownCostMinor: aggregate.knownCostMinor,
+      laborCostMinor: rows.some((row) => row.laborCostMinor === null) ? null : category('laborCostMinor'),
+      materialCostMinor: category('materialCostMinor'),
+      equipmentCostMinor: category('equipmentCostMinor'),
+      periodicCostMinor: category('periodicCostMinor'),
+      otherDirectCostMinor: category('otherDirectCostMinor'),
+      marginMinor: aggregate.marginMinor,
+      profitabilityBps: aggregate.profitabilityBps,
+      completenessPercent: Number(aggregate.completenessBps) / 100,
+      incomplete: !aggregate.complete,
+      laborIncomplete: rows.some((row) => row.laborCostMinor === null),
+      costEntries: rows.flatMap((row) => row.costEntries.map((entry) => ({
+        ...entry,
+        objectId: row.objectId,
+        objectName: row.name,
+      }))),
+      laborComparison: aggregateLaborComparison(rows),
+      laborCostBreakdown: aggregateLaborCostBreakdown(rows),
+      laborTimeBreakdown: aggregateLaborTimeBreakdown(rows),
+      notCalculableObjects: aggregate.notCalculableObjects,
+      objectCount: aggregate.objectCount,
+      periodicBreakdown: rows.flatMap((row) => row.periodicBreakdown.map((work) => ({
+        ...work,
+        objectId: row.objectId,
+        objectName: row.name,
+      }))),
+      profitableObjects: aggregate.profitableObjects,
+      unprofitableObjects: aggregate.unprofitableObjects,
+      ...operationalOutcome,
+    },
+    objects: rows,
+    trend: aggregateSnapshotTrend(objectTrends, serviceObjects.length, aggregate.currency),
+    warnings: rows.flatMap((row) => row.issues.map((issue) => issueWarning(issue, row.name))),
+  }
+}
+
+async function relationsReady(client, relationExists, relations) {
+  for (const relation of relations) {
     if (!(await relationExists(client, relation))) return false
   }
   return true
 }
 
 function mapError(error) {
-  if (error instanceof ProfitabilityApiError || error instanceof ProfitabilityAccessError) return error
+  if (error instanceof ProfitabilityApiError) return error
+  if (error instanceof ProfitabilityAccessError) {
+    return new ProfitabilityApiError(error.statusCode, error.code, error.message)
+  }
   if (['OBJECT_SCOPE_MISMATCH', 'OBJECT_NOT_FOUND'].includes(error?.code)) {
     return new ProfitabilityApiError(
       404,
@@ -394,12 +682,19 @@ function mapError(error) {
       'Nie znaleziono obiektu w profilu tego klienta.',
     )
   }
+  if (error?.code === 'PROFITABILITY_ACCESS_PROFILE_SCHEMA_NOT_READY') {
+    return new ProfitabilityApiError(
+      503,
+      error.code,
+      'Bezpieczny profil dostępu do rentowności nie jest jeszcze gotowy.',
+      error.details,
+    )
+  }
   if (Number.isInteger(Number(error?.statusCode)) && text(error?.code)) {
     return new ProfitabilityApiError(
       Number(error.statusCode),
       text(error.code),
       text(error.message) || 'Nie udało się wykonać operacji finansowej.',
-      error.details,
     )
   }
   if (error?.code === '42P01') {
@@ -409,11 +704,14 @@ function mapError(error) {
     return new ProfitabilityApiError(409, 'PROFITABILITY_PERIOD_CONFLICT', 'W tym zakresie istnieje już obowiązujący wpis.')
   }
   if (error?.code === 'INCOMPLETE_DATA') {
+    const issueCodes = (Array.isArray(error.details) ? error.details : [])
+      .map((entry) => text(entry?.code))
+      .filter(Boolean)
     return new ProfitabilityApiError(
       409,
       'PROFITABILITY_PERIOD_INCOMPLETE',
       'Nie można zamknąć okresu z niepełnymi danymi.',
-      error.details,
+      issueCodes.length ? { issueCodes: [...new Set(issueCodes)] } : undefined,
     )
   }
   if (error?.code === '23514') {
@@ -462,6 +760,12 @@ function createProfitabilityApi(dependencies = {}) {
     sendJson,
     verifyFirebaseIdToken,
   } = dependencies
+  const accessProfileRollout = resolveProfitabilityAccessProfileRollout(
+    dependencies.environment ?? process.env,
+  )
+  const financialModelRollout = resolveProfitabilityFinancialModelRollout(
+    dependencies.environment ?? process.env,
+  )
   if (![connectDbClient, createRepository, databaseRelationExists, parseBearerToken, readJsonBody, sendApiError, sendJson, verifyFirebaseIdToken].every((fn) => typeof fn === 'function')) {
     throw new TypeError('Profitability API dependencies are incomplete.')
   }
@@ -495,19 +799,82 @@ function createProfitabilityApi(dependencies = {}) {
     let client
     try {
       const orgId = identifier(requestUrl.searchParams.get('orgId'), 'orgId', 64)
-      const clientId = identifier(requestUrl.searchParams.get('clientId'), 'clientId', 64)
+      const requestedView = text(requestUrl.searchParams.get('view')).toLowerCase()
+      const portfolioRequest = method === 'GET' && requestedView === 'portfolio'
+      const rawClientId = text(requestUrl.searchParams.get('clientId'))
+      const clientId = rawClientId
+        ? identifier(rawClientId, 'clientId', 64)
+        : portfolioRequest
+          ? ''
+          : identifier(rawClientId, 'clientId', 64)
       const period = monthPeriod(requestUrl.searchParams.get('period'))
       const rawObjectId = text(requestUrl.searchParams.get('objectId'))
       const objectId = rawObjectId ? identifier(rawObjectId, 'objectId', 64) : ''
       const uid = identifier(decodedToken?.uid, 'uid', 128)
       client = await connectDbClient()
-      if (!(await relationReady(client, databaseRelationExists))) {
+      if (!(await relationsReady(client, databaseRelationExists, REQUIRED_DOMAIN_RELATIONS))) {
         throw new ProfitabilityApiError(503, 'PROFITABILITY_SCHEMA_NOT_READY', 'Schemat modułu finansowego nie został jeszcze aktywowany.')
       }
-      const repository = createRepository(client)
+      const accessProfileMode = await resolveProfitabilityAccessProfileOrganizationMode({
+        client,
+        organizationId: orgId,
+        policy: accessProfileRollout,
+        relationExists: databaseRelationExists,
+      })
+      if (accessProfileMode.mode === PROFITABILITY_ACCESS_PROFILE_MODES.BLOCKED) {
+        throw new ProfitabilityApiError(
+          503,
+          'PROFITABILITY_ACCESS_PROFILE_NOT_READY',
+          'Bezpieczny profil dostępu do rentowności nie jest jeszcze gotowy.',
+        )
+      }
+      const accessProfileV2Enabled = accessProfileMode.mode === PROFITABILITY_ACCESS_PROFILE_MODES.V2
+      if (
+        !accessProfileV2Enabled &&
+        !(await relationsReady(client, databaseRelationExists, REQUIRED_LEGACY_ACCESS_RELATIONS))
+      ) {
+        throw new ProfitabilityApiError(
+          503,
+          'PROFITABILITY_SCHEMA_NOT_READY',
+          'Schemat modułu finansowego nie został jeszcze aktywowany.',
+        )
+      }
+      const financialModelMode = await resolveProfitabilityFinancialModelOrganizationMode({
+        client,
+        organizationId: orgId,
+        policy: financialModelRollout,
+        relationExists: databaseRelationExists,
+      })
+      if (financialModelMode.mode === PROFITABILITY_FINANCIAL_MODEL_MODES.BLOCKED) {
+        throw new ProfitabilityApiError(
+          503,
+          'PROFITABILITY_FINANCIAL_MODEL_NOT_READY',
+          'Bezpieczny model danych rentowności nie jest jeszcze gotowy.',
+        )
+      }
+      const financialModelV21Enabled =
+        financialModelMode.mode === PROFITABILITY_FINANCIAL_MODEL_MODES.V21
+      if (
+        financialModelV21Enabled &&
+        !(await relationsReady(
+          client,
+          databaseRelationExists,
+          REQUIRED_FINANCIAL_MODEL_V21_RELATIONS,
+        ))
+      ) {
+        throw new ProfitabilityApiError(
+          503,
+          'PROFITABILITY_FINANCIAL_MODEL_NOT_READY',
+          'Schemat modelu finansowego V2.1 nie jest kompletny.',
+        )
+      }
+      const repository = createRepository(client, {
+        accessProfileV2: { enabled: accessProfileV2Enabled },
+        financialModelV21: { enabled: financialModelV21Enabled },
+      })
 
       if (method === 'GET') {
-        if (text(requestUrl.searchParams.get('view')).toLowerCase() === 'history') {
+        if (requestedView === 'history') {
           const scopedObjectId = identifier(objectId, 'objectId', 64)
           const history = await repository.listAudit({
             clientId,
@@ -517,29 +884,61 @@ function createProfitabilityApi(dependencies = {}) {
             periodId: period.key,
             uid,
           })
-          sendJson(res, 200, { ok: true, data: { history: history.map((row) => ({
-            action: row.action,
-            actorId: row.actor_uid,
-            reason: row.reason,
-            changedAt: row.created_at,
-            entityType: row.entity_type,
-            entityId: row.entity_id,
-          })) } })
+          const projectedHistory = accessProfileV2Enabled
+            ? projectProfitabilityHistory(
+                history,
+                (await repository.resolveAccessProfileV2({ orgId, uid })).financeProfile,
+                { objectId: scopedObjectId },
+              )
+            : history.map((row) => ({
+                action: row.action,
+                actorId: row.actor_uid,
+                reason: row.reason,
+                changedAt: row.created_at,
+                entityType: row.entity_type,
+                entityId: row.entity_id,
+              }))
+          sendJson(res, 200, { ok: true, data: { history: projectedHistory } })
           return
         }
 
-        const payload = await buildSummary(repository, { orgId, clientId, objectId, period, uid })
-        let canEdit = false
-        try {
-          await repository.assertAccess({ action: PROFITABILITY_ACTIONS.EDIT, objectId, orgId, uid })
-          canEdit = true
-        } catch {
-          canEdit = false
+        const payload = portfolioRequest
+          ? await buildPortfolioSummary(repository, { orgId, clientId, objectId, period, uid })
+          : await buildSummary(repository, { orgId, clientId, objectId, period, uid })
+        let responsePayload = payload
+        let capability
+        if (accessProfileV2Enabled) {
+          const accessProfile = await repository.resolveAccessProfileV2({ orgId, uid })
+          responsePayload = projectProfitabilityPayload(payload, accessProfile.financeProfile)
+          capability = {
+            accessVersion: 'v2',
+            canRead: true,
+            canEdit: accessProfile.capabilities.editContractTerms === true
+              && accessProfile.capabilities.editProfitabilityTargets === true
+              && accessProfile.capabilities.editWorkerRates === true,
+            canEditOperationalCosts: accessProfile.capabilities.editOperationalCosts === true,
+            financeProfile: accessProfile.financeProfile,
+            financialModelVersion: financialModelV21Enabled ? 'v2.1' : 'foundation-v2',
+            objectScope: accessProfile.objectScope,
+          }
+        } else {
+          let canEdit = false
+          try {
+            await repository.assertAccess({ action: PROFITABILITY_ACTIONS.EDIT, objectId, orgId, uid })
+            canEdit = true
+          } catch {
+            canEdit = false
+          }
+          capability = {
+            canRead: true,
+            canEdit,
+            financialModelVersion: financialModelV21Enabled ? 'v2.1' : 'foundation-v2',
+          }
         }
         sendJson(res, 200, { ok: true, data: serializeBigInts({
-          ...payload,
+          ...responsePayload,
           period: period.key,
-          capability: { canRead: true, canEdit },
+          capability,
         }) })
         return
       }
@@ -554,47 +953,80 @@ function createProfitabilityApi(dependencies = {}) {
       }
       const scopedObjectId = identifier(objectId || body?.objectId, 'objectId', 64)
       const action = text(body?.action).toLowerCase()
+      const commandId = text(body?.commandId)
       let saved
       const repositoryScope = { orgId, clientId, objectId: scopedObjectId, uid }
+      const mutationAccessProfile = accessProfileV2Enabled
+        ? await repository.resolveAccessProfileV2({ orgId, uid })
+        : null
       if (action === 'upsert-contract') {
         saved = await repository.createContractVersion({
           ...repositoryScope,
+          commandId,
           contract: body.contract,
           reason: text(body?.contract?.reason || body?.reason),
         })
       } else if (action === 'create-cost') {
         saved = await repository.createCost({
           ...repositoryScope,
+          commandId,
           cost: body.cost,
           reason: text(body?.cost?.reason || body?.reason),
         })
       } else if (action === 'create-revenue') {
         saved = await repository.createRevenue({
           ...repositoryScope,
+          commandId,
           revenue: body.revenue,
           reason: text(body?.revenue?.reason || body?.reason),
         })
       } else if (action === 'upsert-worker-rate') {
         saved = await repository.createWorkerRateVersion({
           ...repositoryScope,
+          commandId,
           rate: body.rate,
           reason: text(body?.rate?.reason || body?.reason),
         })
       } else if (action === 'upsert-asset') {
         saved = await repository.createEquipment({
           ...repositoryScope,
+          commandId,
           asset: body.asset,
           reason: text(body?.asset?.reason || body?.reason),
+        })
+      } else if (action === 'save-hygiene-package') {
+        const packageInput = mutationAccessProfile?.financeProfile === 'COST_CONTROL'
+          ? restrictCostControlHygienePackage(body.package)
+          : body.package
+        saved = await repository.saveHygienePackage({
+          ...repositoryScope,
+          commandId,
+          package: packageInput,
+          reason: text(body?.package?.reason || body?.reason),
+        })
+      } else if (action === 'archive-hygiene-package') {
+        saved = await repository.archiveHygienePackage({
+          ...repositoryScope,
+          commandId,
+          packageVersionId: text(body?.packageVersionId),
+          reason: text(body?.reason),
         })
       } else if (action === 'close-period') {
         saved = await repository.closePeriod({
           ...repositoryScope,
+          commandId,
           period,
           periodId: `${period.key}:${scopedObjectId}`,
           reason: text(body?.reason),
         })
       } else {
         throw new ProfitabilityApiError(400, 'PROFITABILITY_UNKNOWN_ACTION', 'Nieznana operacja finansowa.')
+      }
+      if (action === 'save-hygiene-package' || action === 'archive-hygiene-package') {
+        saved = projectHygienePackageMutation(
+          saved,
+          mutationAccessProfile?.financeProfile ?? 'OWNER_FULL',
+        )
       }
       sendJson(res, 200, { ok: true, data: serializeBigInts({ saved }) })
     } catch (error) {
@@ -611,9 +1043,14 @@ function createProfitabilityApi(dependencies = {}) {
 module.exports = {
   aggregateSnapshotTrend,
   ProfitabilityApiError,
+  REQUIRED_DOMAIN_RELATIONS,
+  REQUIRED_FINANCIAL_MODEL_V21_RELATIONS,
+  REQUIRED_LEGACY_ACCESS_RELATIONS,
   REQUIRED_RELATIONS,
+  buildPortfolioSummary,
   buildSummary,
   createProfitabilityApi,
   mapError,
   monthPeriod,
+  restrictCostControlHygienePackage,
 }

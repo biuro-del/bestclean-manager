@@ -1,0 +1,194 @@
+-- DATABASE-ADMIN CANDIDATE ONLY. Never run without separate approval.
+-- Guarded entrypoint for Profitability V2.1. This wrapper creates no roles,
+-- credentials, extensions, tenant rows or feature-flag state.
+--
+-- Required invocation parameters (none is a secret):
+--   -v profitability_v21_expected_database=iclean-room-database
+--   -v profitability_v21_expected_executor=profitability_migration_executor
+--   -v profitability_v21_expected_migration_runner=profitability_migration_runner
+--   -v profitability_v21_owner_role=profitability_owner
+--   -v profitability_v21_runtime_role=profitability_runtime
+--   -v profitability_v21_backup_reference=<approved backup id>
+--   -v profitability_v21_confirmation=APPLY_PROFITABILITY_FINANCIAL_MODEL_V21_ONLY_20260926
+
+\set ON_ERROR_STOP on
+
+\if :{?profitability_v21_expected_database}
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_EXPECTED_DATABASE_REQUIRED'; end $$;
+\endif
+\if :{?profitability_v21_expected_executor}
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_EXPECTED_EXECUTOR_REQUIRED'; end $$;
+\endif
+\if :{?profitability_v21_expected_migration_runner}
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_EXPECTED_RUNNER_REQUIRED'; end $$;
+\endif
+\if :{?profitability_v21_owner_role}
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_OWNER_ROLE_REQUIRED'; end $$;
+\endif
+\if :{?profitability_v21_runtime_role}
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_RUNTIME_ROLE_REQUIRED'; end $$;
+\endif
+\if :{?profitability_v21_backup_reference}
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_BACKUP_REFERENCE_REQUIRED'; end $$;
+\endif
+\if :{?profitability_v21_confirmation}
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_CONFIRMATION_REQUIRED'; end $$;
+\endif
+
+select
+  :'profitability_v21_expected_database' = 'iclean-room-database'
+    and current_database() = :'profitability_v21_expected_database'
+    as profitability_v21_database_confirmed,
+  :'profitability_v21_expected_executor' = 'profitability_migration_executor'
+    and session_user = :'profitability_v21_expected_executor'
+    and current_user = session_user
+    as profitability_v21_executor_confirmed,
+  :'profitability_v21_expected_migration_runner' = 'profitability_migration_runner'
+    as profitability_v21_runner_name_confirmed,
+  :'profitability_v21_owner_role' = 'profitability_owner'
+    as profitability_v21_owner_name_confirmed,
+  :'profitability_v21_runtime_role' = 'profitability_runtime'
+    as profitability_v21_runtime_name_confirmed,
+  :'profitability_v21_confirmation'
+    = 'APPLY_PROFITABILITY_FINANCIAL_MODEL_V21_ONLY_20260926'
+    as profitability_v21_execution_confirmed,
+  :'profitability_v21_backup_reference'
+    ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{5,127}$'
+    as profitability_v21_backup_confirmed,
+  current_setting('server_version_num')::integer between 170000 and 179999
+    and not pg_is_in_recovery()
+    and current_setting('transaction_read_only') = 'off'
+    and current_setting('default_transaction_read_only') = 'off'
+    as profitability_v21_database_state_confirmed,
+  exists (
+    select 1 from pg_auth_members membership_row
+    join pg_roles granted_role on granted_role.oid = membership_row.roleid
+    join pg_roles member_role on member_role.oid = membership_row.member
+    where granted_role.rolname = :'profitability_v21_expected_migration_runner'
+      and member_role.rolname = :'profitability_v21_expected_executor'
+      and membership_row.set_option
+      and not membership_row.inherit_option
+      and not membership_row.admin_option
+  ) as profitability_v21_executor_edge_confirmed,
+  exists (
+    select 1 from pg_auth_members membership_row
+    join pg_roles granted_role on granted_role.oid = membership_row.roleid
+    join pg_roles member_role on member_role.oid = membership_row.member
+    where granted_role.rolname = :'profitability_v21_owner_role'
+      and member_role.rolname = :'profitability_v21_expected_migration_runner'
+      and membership_row.set_option
+      and not membership_row.inherit_option
+      and not membership_row.admin_option
+  ) as profitability_v21_owner_edge_confirmed,
+  exists (
+    select 1 from pg_roles runtime_role
+    where runtime_role.rolname = :'profitability_v21_runtime_role'
+      and not runtime_role.rolsuper
+      and not runtime_role.rolbypassrls
+      and not runtime_role.rolcreaterole
+      and not runtime_role.rolcreatedb
+      and not runtime_role.rolreplication
+      and not has_schema_privilege(runtime_role.oid, 'public', 'CREATE')
+  ) as profitability_v21_runtime_role_confirmed
+\gset
+
+\if :profitability_v21_database_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_DATABASE_MISMATCH'; end $$;
+\endif
+\if :profitability_v21_executor_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_EXECUTOR_MISMATCH'; end $$;
+\endif
+\if :profitability_v21_runner_name_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_RUNNER_NAME_MISMATCH'; end $$;
+\endif
+\if :profitability_v21_owner_name_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_OWNER_NAME_MISMATCH'; end $$;
+\endif
+\if :profitability_v21_runtime_name_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_RUNTIME_NAME_MISMATCH'; end $$;
+\endif
+\if :profitability_v21_execution_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_CONFIRMATION_MISMATCH'; end $$;
+\endif
+\if :profitability_v21_backup_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_BACKUP_REFERENCE_INVALID'; end $$;
+\endif
+\if :profitability_v21_database_state_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_WRITABLE_PG17_PRIMARY_REQUIRED'; end $$;
+\endif
+\if :profitability_v21_executor_edge_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_EXECUTOR_EDGE_INVALID'; end $$;
+\endif
+\if :profitability_v21_owner_edge_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_OWNER_EDGE_INVALID'; end $$;
+\endif
+\if :profitability_v21_runtime_role_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_V21_RUNTIME_ROLE_INVALID'; end $$;
+\endif
+
+begin;
+
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
+set local idle_in_transaction_session_timeout = '180s';
+
+select pg_advisory_xact_lock(
+  hashtextextended('cleanzi:profitability-financial-model:v2.1', 0)
+);
+
+select set_config(
+  'cleanzi.profitability_v21_entrypoint',
+  'GUARDED_PROFITABILITY_FINANCIAL_MODEL_V21_20260926',
+  true
+);
+select set_config(
+  'cleanzi.profitability_v21_expected_executor',
+  :'profitability_v21_expected_executor',
+  true
+);
+select set_config(
+  'cleanzi.profitability_v21_migration_runner',
+  :'profitability_v21_expected_migration_runner',
+  true
+);
+select set_config(
+  'cleanzi.profitability_v21_owner_role',
+  :'profitability_v21_owner_role',
+  true
+);
+select set_config(
+  'cleanzi.profitability_v21_runtime_role',
+  :'profitability_v21_runtime_role',
+  true
+);
+select set_config(
+  'cleanzi.profitability_v21_backup_reference',
+  :'profitability_v21_backup_reference',
+  true
+);
+
+set local role :"profitability_v21_expected_migration_runner";
+
+\ir ../migrations/20260926_profitability_financial_model_v21_additive.sql
+
+commit;
+
+\echo 'PROFITABILITY_FINANCIAL_MODEL_V21_MIGRATION_APPLIED'

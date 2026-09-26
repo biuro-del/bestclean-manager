@@ -1,5 +1,6 @@
 import './style.css'
 import template from './template.html?raw'
+import { fetchProfitabilityPortfolio } from '../../services/profitabilityService'
 
 export const route = 'contractProfitability'
 export const viewId = 'view-contractProfitability'
@@ -53,6 +54,7 @@ function localPreviewHost() {
 
 export function createContractProfitabilityFeature(ctx) {
   const {
+    appState,
     canReadProfitability,
     createBindingHelpers,
     escapeHtml,
@@ -64,6 +66,124 @@ export function createContractProfitabilityFeature(ctx) {
   let selectedContractId = ''
   let chartMetric = 'profitabilityBps'
   let resizeObserver = null
+
+  function currentMonthKey() {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  }
+
+  function explicitPreviewRequested() {
+    if (!import.meta.env.DEV || !localPreviewHost()) return false
+    return new URLSearchParams(window.location.search).get('profitabilityPreview') === '1'
+  }
+
+  function clientLabels() {
+    return new Map((Array.isArray(appState?.clients) ? appState.clients : []).map((client) => [
+      String(client?.id || client?.clientId || '').trim(),
+      String(client?.name || client?.companyName || client?.shortName || client?.id || '').trim(),
+    ]).filter(([id]) => id))
+  }
+
+  function sumMinorValues(values) {
+    let total = 0
+    let known = false
+    for (const value of values) {
+      const parsed = numericValue(value)
+      if (parsed === null) continue
+      total += parsed
+      known = true
+    }
+    return known ? String(total) : null
+  }
+
+  function sumRequiredMinorValues(values) {
+    const parsed = values.map((value) => numericValue(value))
+    if (parsed.some((value) => value === null)) return null
+    return String(parsed.reduce((sum, value) => sum + value, 0))
+  }
+
+  function operationalCategoryMinor(categories, names) {
+    const accepted = new Set(names.map((name) => String(name).toUpperCase()))
+    return sumMinorValues((Array.isArray(categories) ? categories : [])
+      .filter((row) => accepted.has(String(row?.category || '').toUpperCase()))
+      .map((row) => row?.amountMinor))
+  }
+
+  function normalizePortfolioPayload(source = {}) {
+    const labels = clientLabels()
+    const requestedProfile = String(source?.capability?.financeProfile || source?.financeProfile || '').toUpperCase()
+    // Missing and unknown profiles must never fall back to the owner projection.
+    // The backend remains authoritative; this defensive client boundary only
+    // removes sensitive fields if a malformed payload ever reaches the browser.
+    const financeProfile = requestedProfile === 'OWNER_FULL' ? 'OWNER_FULL' : 'COST_CONTROL'
+    const restricted = financeProfile === 'COST_CONTROL'
+    const rows = Array.isArray(source?.objects) ? source.objects : []
+    const contracts = rows.map((row) => {
+      if (!restricted) {
+        return {
+          ...row,
+          id: row.objectId,
+          clientName: labels.get(String(row.clientId || '')) || row.clientId || 'Klient',
+          contractName: row.contractName || row.name,
+          objectName: row.name,
+          targetProfitabilityBps: row.target?.minimumMarginBps ?? row.targetProfitabilityBps ?? null,
+          plannedMinutes: row.laborComparison?.plannedSeconds === null || row.laborComparison?.plannedSeconds === undefined
+            ? null
+            : String(Math.round(Number(row.laborComparison.plannedSeconds) / 60)),
+          actualMinutes: row.laborComparison?.actualSeconds === null || row.laborComparison?.actualSeconds === undefined
+            ? null
+            : String(Math.round(Number(row.laborComparison.actualSeconds) / 60)),
+        }
+      }
+
+      const categories = row.operationalCosts?.categories || []
+      const laborCostMinor = row.labor?.totalLaborCostMinor ?? null
+      const operationalCostMinor = row.operationalCosts?.totalOperationalCostMinor ?? null
+      const statusMap = {
+        OK: 'ABOVE_TARGET',
+        BELOW_TARGET: 'BELOW_TARGET',
+        CRITICAL: 'NEGATIVE',
+        INCOMPLETE: 'INCOMPLETE',
+        NOT_CALCULABLE: 'NOT_CALCULABLE',
+        NO_TARGET: 'NOT_CALCULABLE',
+      }
+      return {
+        id: row.objectId,
+        clientId: row.clientId,
+        clientName: labels.get(String(row.clientId || '')) || row.clientId || 'Klient',
+        contractName: row.name,
+        objectName: row.name,
+        currency: row.currency || source.currency || 'PLN',
+        laborCostMinor,
+        materialCostMinor: operationalCategoryMinor(categories, ['MATERIAL', 'MATERIALS']),
+        equipmentCostMinor: operationalCategoryMinor(categories, ['EQUIPMENT']),
+        otherCostMinor: operationalCategoryMinor(categories, ['OTHER', 'PERIODIC', 'TRANSPORT', 'COORDINATION', 'SUBCONTRACTOR', 'DELIVERY', 'TRAINING']),
+        totalCostMinor: sumRequiredMinorValues([laborCostMinor, operationalCostMinor]),
+        completenessPercent: row.dataQuality?.completenessPercent ?? null,
+        status: statusMap[String(row.operationalStatus || '').toUpperCase()] || 'NOT_CALCULABLE',
+        operationalStatus: row.operationalStatus,
+        improvementGapMinor: row.improvementGapMinor ?? null,
+        plannedMinutes: row.labor?.plannedSeconds === null || row.labor?.plannedSeconds === undefined
+          ? null
+          : String(Math.round(Number(row.labor.plannedSeconds) / 60)),
+        actualMinutes: row.labor?.actualSeconds === null || row.labor?.actualSeconds === undefined
+          ? null
+          : String(Math.round(Number(row.labor.actualSeconds) / 60)),
+        issues: (Array.isArray(row.warnings) ? row.warnings : [])
+          .map((warning) => String(warning?.code || warning || '').trim())
+          .filter(Boolean),
+      }
+    })
+
+    const trendSource = Array.isArray(source?.trend) ? source.trend : source?.trend?.points
+    return {
+      ...source,
+      financeProfile,
+      period: source.period || currentMonthKey(),
+      contracts,
+      trend: Array.isArray(trendSource) ? trendSource : [],
+    }
+  }
 
   const byId = (id) => document.getElementById(id)
 
@@ -126,7 +246,7 @@ export function createContractProfitabilityFeature(ctx) {
   }
 
   async function loadPreviewPayload() {
-    if (!(import.meta.env.DEV && localPreviewHost())) {
+    if (!explicitPreviewRequested()) {
       return null
     }
     if (!previewPromise) {
@@ -160,6 +280,111 @@ export function createContractProfitabilityFeature(ctx) {
     }
   }
 
+  function renderLoadingState() {
+    const access = byId('contractProfitabilityAccess')
+    setHidden(byId('contractProfitabilityWorkspace'), true)
+    setHidden(access, false)
+    if (access) {
+      access.replaceChildren()
+      const strong = document.createElement('strong')
+      strong.textContent = 'Ładowanie rentowności…'
+      const span = document.createElement('span')
+      span.textContent = 'Pobieramy bezpieczny zakres danych dla Twojej roli.'
+      access.append(strong, span)
+    }
+  }
+
+  function renderLoadError(error) {
+    const access = byId('contractProfitabilityAccess')
+    setHidden(byId('contractProfitabilityWorkspace'), true)
+    setHidden(access, false)
+    if (access) {
+      access.replaceChildren()
+      const strong = document.createElement('strong')
+      strong.textContent = 'Nie udało się pobrać danych rentowności.'
+      const span = document.createElement('span')
+      span.textContent = String(error?.message || 'Odśwież widok albo zaloguj się ponownie.')
+      access.append(strong, span)
+    }
+  }
+
+  function syncFinanceProfileView() {
+    const root = byId(viewId)
+    const restricted = payload?.financeProfile === 'COST_CONTROL'
+    if (root) root.dataset.financeProfile = restricted ? 'cost-control' : 'owner-full'
+    const heroTitle = byId('contractProfitabilityTitle')
+    const heroDescription = root?.querySelector('.contract-profitability__hero > div > p')
+    const attentionTitle = byId('contractProfitabilityAttentionTitle')
+    const attentionDescription = attentionTitle?.closest('.contract-profitability__panel-head')?.querySelector('p')
+    const detailsEyebrow = root?.querySelector('.contract-profitability__details .contract-profitability__eyebrow')
+    if (heroTitle) heroTitle.textContent = restricted ? 'Kontrola kosztów obiektów' : 'Rentowność kontraktów'
+    if (heroDescription) {
+      heroDescription.textContent = restricted
+        ? 'Monitoruj koszty operacyjne, czas pracy i kompletność danych dostępnych obiektów.'
+        : 'Monitoruj przychody, koszty i marżę wszystkich kontraktów w jednym miejscu.'
+    }
+    if (attentionTitle) attentionTitle.textContent = restricted ? 'Wymagają działania' : 'Wymagają uwagi'
+    if (attentionDescription) {
+      attentionDescription.textContent = restricted
+        ? 'Obiekty z brakami danych, przekroczeniami lub potrzebą poprawy wyniku operacyjnego.'
+        : 'Kontrakty z ryzykiem finansowym lub brakującymi danymi.'
+    }
+    if (detailsEyebrow) detailsEyebrow.textContent = restricted ? 'Analiza obiektu' : 'Analiza kontraktu'
+    const ownerOnlyNodes = [
+      byId('contractProfitabilityMetricRevenue')?.closest('article'),
+      byId('contractProfitabilityMetricMargin')?.closest('article'),
+      byId('contractProfitabilityMetricProfitability')?.closest('article'),
+      root?.querySelector('.contract-profitability__segmented'),
+      root?.querySelector('.contract-profitability__table th:nth-child(2)'),
+      root?.querySelector('.contract-profitability__table th:nth-child(5)'),
+      root?.querySelector('.contract-profitability__table th:nth-child(6)'),
+    ].filter(Boolean)
+    ownerOnlyNodes.forEach((node) => {
+      if (node instanceof HTMLElement) node.hidden = restricted
+    })
+    if (restricted) chartMetric = 'totalCostMinor'
+    const title = byId('contractProfitabilityTableTitle')
+    const tableMeta = byId('contractProfitabilityTableMeta')
+    const trendTitle = byId('contractProfitabilityTrendTitle')
+    const legend = root?.querySelector('.contract-profitability__legend')
+    if (title) title.textContent = restricted ? 'Status operacyjny obiektów' : 'Kontrakty i obiekty'
+    if (tableMeta) {
+      tableMeta.textContent = restricted
+        ? 'Koszty, czas pracy, jakość danych i luka do bezpiecznego celu.'
+        : 'Porównanie wyników w wybranym okresie.'
+    }
+    if (trendTitle) trendTitle.textContent = restricted ? 'Trend kosztów operacyjnych' : 'Trend portfela'
+    if (legend) {
+      legend.innerHTML = restricted
+        ? `
+        <span><i class="is-positive" aria-hidden="true"></i>OK</span>
+        <span><i class="is-warning" aria-hidden="true"></i>Wymaga poprawy</span>
+        <span><i class="is-negative" aria-hidden="true"></i>Stan krytyczny</span>
+        <span><i class="is-incomplete" aria-hidden="true"></i>Braki danych</span>
+      `
+        : `
+        <span><i class="is-positive" aria-hidden="true"></i>Powyżej celu</span>
+        <span><i class="is-warning" aria-hidden="true"></i>Poniżej celu</span>
+        <span><i class="is-negative" aria-hidden="true"></i>Strata</span>
+        <span><i class="is-incomplete" aria-hidden="true"></i>Braki danych</span>
+      `
+    }
+    const status = byId('contractProfitabilityStatus')
+    if (status instanceof HTMLSelectElement) {
+      const labels = restricted
+        ? ['Wszystkie statusy', 'OK', 'Wymaga poprawy', 'Stan krytyczny', 'Niepełne dane', 'Nie można ocenić']
+        : ['Wszystkie statusy', 'Powyżej celu', 'Poniżej celu', 'Wynik ujemny', 'Niepełne dane', 'Nie można obliczyć']
+      ;[...status.options].forEach((option, index) => {
+        if (labels[index]) option.textContent = labels[index]
+      })
+    }
+    root?.querySelectorAll('[data-profitability-metric]').forEach((button) => {
+      const active = button.dataset.profitabilityMetric === chartMetric
+      button.classList.toggle('is-active', active)
+      button.setAttribute('aria-pressed', active ? 'true' : 'false')
+    })
+  }
+
   function currentFilters() {
     return {
       search: normalizedText(byId('contractProfitabilitySearch')?.value),
@@ -175,6 +400,9 @@ export function createContractProfitabilityFeature(ctx) {
     const selectedPeriod = String(period || payload?.period || '')
     if (!selectedPeriod || selectedPeriod === payload?.period) {
       return contracts
+    }
+    if (!previewMode) {
+      return []
     }
 
     const trend = Array.isArray(payload?.trend) ? payload.trend : []
@@ -307,6 +535,37 @@ export function createContractProfitabilityFeature(ctx) {
 
   function renderMetrics(contracts) {
     const currency = payload?.currency || contracts[0]?.currency || 'PLN'
+    if (payload?.financeProfile === 'COST_CONTROL') {
+      const costRows = contracts.filter((contract) => numericValue(contract.totalCostMinor) !== null)
+      const laborRows = contracts.filter((contract) => numericValue(contract.laborCostMinor) !== null)
+      const completenessValues = contracts
+        .map((contract) => numericValue(contract.completenessPercent))
+        .filter((value) => value !== null)
+      const completeness = completenessValues.length
+        ? Math.round(completenessValues.reduce((sum, value) => sum + value, 0) / completenessValues.length)
+        : null
+      setMetric('contractProfitabilityMetricRevenue', '—', '')
+      setMetric(
+        'contractProfitabilityMetricCost',
+        costRows.length ? moneyLabel(sumValues(costRows, 'totalCostMinor'), currency) : '—',
+        `${costRows.length} z ${contracts.length} obiektów z kompletnym kosztem`,
+      )
+      setMetric('contractProfitabilityMetricMargin', '—', '')
+      setMetric('contractProfitabilityMetricProfitability', '—', '')
+      setMetric(
+        'contractProfitabilityMetricLaborShare',
+        laborRows.length ? moneyLabel(sumValues(laborRows, 'laborCostMinor'), currency) : '—',
+        `${laborRows.length} z ${contracts.length} obiektów z kosztem pracy`,
+        laborRows.length === contracts.length ? '' : 'is-warning',
+      )
+      setMetric(
+        'contractProfitabilityMetricCompleteness',
+        completeness === null ? '—' : `${completeness}%`,
+        completeness === 100 ? 'Wszystkie dane kompletne' : 'Wymaga uzupełnienia',
+        completeness !== null && completeness >= 90 ? 'is-positive' : 'is-warning',
+      )
+      return
+    }
     const financiallyComplete = contracts.filter((contract) => {
       const revenue = numericValue(contract.revenueMinor)
       return revenue !== null
@@ -412,9 +671,17 @@ export function createContractProfitabilityFeature(ctx) {
     root.innerHTML = rows.map((contract) => {
       const meta = statusMeta(contract.status)
       const issue = contract.issues?.[0] || contract.note || meta.label
-      const result = numericValue(contract.profitabilityBps) === null
-        ? meta.label
-        : percentLabel(contract.profitabilityBps)
+      const result = payload?.financeProfile === 'COST_CONTROL'
+        ? contract.operationalStatus === 'OK'
+          ? 'OK'
+          : contract.operationalStatus === 'BELOW_TARGET' && numericValue(contract.improvementGapMinor) !== null
+            ? `Do poprawy o ${moneyLabel(contract.improvementGapMinor, contract.currency)}`
+            : contract.operationalStatus === 'CRITICAL'
+              ? 'Stan krytyczny'
+              : meta.label
+        : numericValue(contract.profitabilityBps) === null
+          ? meta.label
+          : percentLabel(contract.profitabilityBps)
       const tone = contract.status === 'NEGATIVE'
         ? 'is-negative'
         : ['INCOMPLETE', 'NOT_CALCULABLE'].includes(contract.status)
@@ -467,7 +734,9 @@ export function createContractProfitabilityFeature(ctx) {
     setHidden(empty, contracts.length > 0)
     setHidden(tableWrap, contracts.length === 0)
     if (metaNode) {
-      metaNode.textContent = `Porównanie ${contracts.length} z ${payload?.contracts?.length || 0} kontraktów w wybranym okresie.`
+      metaNode.textContent = payload?.financeProfile === 'COST_CONTROL'
+        ? `Status ${contracts.length} z ${payload?.contracts?.length || 0} dostępnych obiektów w wybranym okresie.`
+        : `Porównanie ${contracts.length} z ${payload?.contracts?.length || 0} kontraktów w wybranym okresie.`
     }
 
     body.innerHTML = contracts.map((contract) => {
@@ -477,6 +746,14 @@ export function createContractProfitabilityFeature(ctx) {
       const completeness = numericValue(contract.completenessPercent)
       const complete = completeness !== null && completeness >= 100
       const selected = String(contract.id) === String(selectedContractId)
+      const ownerFinance = payload?.financeProfile !== 'COST_CONTROL'
+      const operationalLabel = contract.operationalStatus === 'OK'
+        ? 'OK'
+        : contract.operationalStatus === 'BELOW_TARGET'
+          ? 'Wymaga poprawy'
+          : contract.operationalStatus === 'CRITICAL'
+            ? 'Stan krytyczny'
+            : meta.label
       return `
         <tr
           tabindex="0"
@@ -488,11 +765,11 @@ export function createContractProfitabilityFeature(ctx) {
             <strong>${escapeHtml(contract.objectName || contract.clientName || 'Bez nazwy')}</strong>
             <span>${escapeHtml(contract.clientName || '—')} · ${escapeHtml(contract.contractName || 'Brak numeru')} · ${escapeHtml(contract.city || '—')}</span>
           </td>
-          <td>${escapeHtml(moneyLabel(contract.revenueMinor, contract.currency))}</td>
+          ${ownerFinance ? `<td>${escapeHtml(moneyLabel(contract.revenueMinor, contract.currency))}</td>` : ''}
           <td>${escapeHtml(moneyLabel(contract.laborCostMinor, contract.currency))}</td>
           <td>${escapeHtml(moneyLabel(contract.totalCostMinor, contract.currency))}</td>
-          <td>${escapeHtml(moneyLabel(contract.marginMinor, contract.currency))}</td>
-          <td><strong>${escapeHtml(percentLabel(contract.profitabilityBps))}</strong></td>
+          ${ownerFinance ? `<td>${escapeHtml(moneyLabel(contract.marginMinor, contract.currency))}</td>` : ''}
+          ${ownerFinance ? `<td><strong>${escapeHtml(percentLabel(contract.profitabilityBps))}</strong></td>` : ''}
           <td>
             <div class="contract-profitability__delta">
               <span>${escapeHtml(execution.label)}</span>
@@ -507,7 +784,7 @@ export function createContractProfitabilityFeature(ctx) {
           </td>
           <td>
             <span class="contract-profitability__status ${meta.tone}">
-              ${meta.icon} ${escapeHtml(meta.label)}
+              ${meta.icon} ${escapeHtml(ownerFinance ? meta.label : operationalLabel)}
             </span>
           </td>
           <td>
@@ -563,6 +840,19 @@ export function createContractProfitabilityFeature(ctx) {
     byId('contractProfitabilityDetailsMeta').textContent =
       `${contract.clientName || '—'} · ${contract.contractName || 'Brak numeru'} · Koordynator: ${contract.coordinator || '—'}`
     byId('contractProfitabilityBreakdown').innerHTML = breakdownMarkup(contract)
+    const outcomeCard = payload?.financeProfile === 'COST_CONTROL'
+      ? `
+        <div class="contract-profitability__execution-card">
+          <div><span>Status operacyjny</span><strong>${escapeHtml(contract.operationalStatus || 'Brak danych')}</strong></div>
+          <div><span>Luka do poprawy</span><strong>${escapeHtml(moneyLabel(contract.improvementGapMinor, contract.currency))}</strong></div>
+        </div>
+      `
+      : `
+        <div class="contract-profitability__execution-card">
+          <div><span>Cel rentowności</span><strong>${escapeHtml(percentLabel(contract.targetProfitabilityBps))}</strong></div>
+          <div><span>Wynik</span><strong>${escapeHtml(percentLabel(contract.profitabilityBps))}</strong></div>
+        </div>
+      `
     byId('contractProfitabilityExecution').innerHTML = `
       <div class="contract-profitability__execution-card">
         <div><span>Plan</span><strong>${escapeHtml(hoursLabel(contract.plannedMinutes))}</strong></div>
@@ -572,10 +862,7 @@ export function createContractProfitabilityFeature(ctx) {
         <div><span>Różnica</span><strong>${escapeHtml(hoursLabel(execution.delta, true))}</strong></div>
         <div><span>Ocena</span><strong>${escapeHtml(differenceTone)}</strong></div>
       </div>
-      <div class="contract-profitability__execution-card">
-        <div><span>Cel rentowności</span><strong>${escapeHtml(percentLabel(contract.targetProfitabilityBps))}</strong></div>
-        <div><span>Wynik</span><strong>${escapeHtml(percentLabel(contract.profitabilityBps))}</strong></div>
-      </div>
+      ${outcomeCard}
     `
     const issues = Array.isArray(contract.issues) ? contract.issues.filter(Boolean) : []
     byId('contractProfitabilityIssues').innerHTML = `
@@ -721,7 +1008,9 @@ export function createContractProfitabilityFeature(ctx) {
       ? 'rentowności'
       : chartMetric === 'marginMinor'
         ? 'marży'
-        : 'przychodu'
+        : chartMetric === 'totalCostMinor'
+          ? 'kosztów operacyjnych'
+          : 'przychodu'
     canvas.setAttribute(
       'aria-label',
       `Trend ${metricName}: ${points.map((point) => `${monthLabel(point.period)} ${trendValueLabel(point.value)}`).join(', ')}`,
@@ -747,8 +1036,9 @@ export function createContractProfitabilityFeature(ctx) {
     const contracts = filteredContracts()
     const summary = byId('contractProfitabilityFilterSummary')
     if (summary) {
+      const entityLabel = payload.financeProfile === 'COST_CONTROL' ? 'obiektów' : 'kontraktów'
       summary.textContent =
-        `Wyświetlono ${contracts.length} z ${payload.contracts?.length || 0} kontraktów · okres ${monthLabel(currentFilters().period || payload.period)}.`
+        `Wyświetlono ${contracts.length} z ${payload.contracts?.length || 0} ${entityLabel} · okres ${monthLabel(currentFilters().period || payload.period)}.`
     }
     renderMetrics(contracts)
     renderAttention(contracts)
@@ -760,8 +1050,7 @@ export function createContractProfitabilityFeature(ctx) {
   async function render({ force = false } = {}) {
     let loadedNow = false
     if (force) {
-      payload = null
-      previewPromise = null
+      resetSession()
     }
     if (!payload) {
       payload = await loadPreviewPayload()
@@ -770,8 +1059,28 @@ export function createContractProfitabilityFeature(ctx) {
     }
 
     if (!payload) {
-      renderUnavailableState()
-      return
+      if (canReadProfitability?.() !== true) {
+        renderUnavailableState()
+        return
+      }
+      const orgId = String(appState?.session?.orgId || appState?.session?.activeOrgId || '').trim()
+      if (!orgId) {
+        resetSession()
+        renderLoadError(new Error('Brak aktywnej organizacji. Zaloguj się ponownie.'))
+        return
+      }
+      const periodInput = byId('contractProfitabilityPeriod')
+      const period = String(periodInput?.value || '').trim() || currentMonthKey()
+      renderLoadingState()
+      try {
+        payload = normalizePortfolioPayload(await fetchProfitabilityPortfolio(orgId, { period }))
+        previewMode = false
+        loadedNow = true
+      } catch (error) {
+        resetSession()
+        renderLoadError(error)
+        return
+      }
     }
 
     const access = byId('contractProfitabilityAccess')
@@ -782,6 +1091,7 @@ export function createContractProfitabilityFeature(ctx) {
     setHidden(workspace, false)
     setHidden(demoBadge, !previewMode)
     setHidden(demoNote, !previewMode)
+    syncFinanceProfileView()
 
     const periodInput = byId('contractProfitabilityPeriod')
     if (periodInput instanceof HTMLInputElement && (loadedNow || !periodInput.value)) {
@@ -811,6 +1121,47 @@ export function createContractProfitabilityFeature(ctx) {
     renderFilteredView({ scroll: options.scroll === true })
   }
 
+  function resetSession() {
+    payload = null
+    previewMode = false
+    previewPromise = null
+    selectedContractId = ''
+    chartMetric = 'profitabilityBps'
+
+    const workspace = byId('contractProfitabilityWorkspace')
+    const access = byId('contractProfitabilityAccess')
+    setHidden(workspace, true)
+    if (access) access.replaceChildren()
+    setHidden(access, true)
+
+    ;[
+      'contractProfitabilityFilterSummary',
+      'contractProfitabilityTrendFoot',
+      'contractProfitabilityAttention',
+      'contractProfitabilityTableMeta',
+      'contractProfitabilityRows',
+      'contractProfitabilityDetailsTitle',
+      'contractProfitabilityDetailsMeta',
+      'contractProfitabilityBreakdown',
+      'contractProfitabilityExecution',
+      'contractProfitabilityIssues',
+    ].forEach((id) => byId(id)?.replaceChildren())
+
+    ;[
+      'Revenue', 'Cost', 'Margin', 'Profitability', 'LaborShare', 'Completeness',
+    ].forEach((suffix) => {
+      const metric = byId(`contractProfitabilityMetric${suffix}`)
+      const meta = byId(`contractProfitabilityMetric${suffix}Meta`)
+      if (metric) metric.textContent = '—'
+      if (meta) meta.textContent = ''
+    })
+
+    setHidden(byId('contractProfitabilityDetails'), true)
+    const canvas = byId('contractProfitabilityTrendCanvas')
+    const context = canvas?.getContext?.('2d')
+    if (context) context.clearRect(0, 0, canvas.width, canvas.height)
+  }
+
   function bind() {
     const root = byId(viewId)
     if (!root) {
@@ -819,8 +1170,11 @@ export function createContractProfitabilityFeature(ctx) {
     const binding = createBindingHelpers()
 
     binding.add(byId('contractProfitabilitySearch'), 'input', () => renderFilteredView())
+    binding.add(byId('contractProfitabilityPeriod'), 'change', () => {
+      if (previewMode) renderFilteredView()
+      else void render({ force: true })
+    })
     ;[
-      'contractProfitabilityPeriod',
       'contractProfitabilityClient',
       'contractProfitabilityStatus',
       'contractProfitabilityQuality',
@@ -879,5 +1233,6 @@ export function createContractProfitabilityFeature(ctx) {
   return {
     bind,
     render,
+    resetSession,
   }
 }

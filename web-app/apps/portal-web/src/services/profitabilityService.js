@@ -20,6 +20,14 @@ function text(value) {
   return String(value ?? '').trim()
 }
 
+export function createProfitabilityCommandId(action, supplied = '') {
+  const explicit = text(supplied)
+  if (explicit) return explicit
+  const suffix = globalThis.crypto?.randomUUID?.()
+    || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`
+  return `${text(action).toLowerCase() || 'profitability'}:${suffix}`.slice(0, 96)
+}
+
 async function authHeaders(method = 'GET') {
   if (!isFirebaseConfigured()) {
     throw new Error('Brak konfiguracji Firebase.')
@@ -60,14 +68,17 @@ async function parseResponse(response, fallbackMessage) {
 async function requestProfitability(method, { orgId, clientId, period = '', objectId = '', view = '', body = null } = {}) {
   const normalizedOrgId = text(orgId)
   const normalizedClientId = text(clientId)
-  if (!normalizedOrgId || !normalizedClientId) {
+  const normalizedView = text(view)
+  const portfolioRead = method === 'GET' && normalizedView === 'portfolio'
+  if (!normalizedOrgId || (!normalizedClientId && !portfolioRead)) {
     throw new Error('Brak organizacji lub klienta dla modułu rentowności.')
   }
 
-  const query = new URLSearchParams({ orgId: normalizedOrgId, clientId: normalizedClientId })
+  const query = new URLSearchParams({ orgId: normalizedOrgId })
+  if (normalizedClientId) query.set('clientId', normalizedClientId)
   if (period) query.set('period', text(period))
   if (objectId) query.set('objectId', text(objectId))
-  if (view) query.set('view', text(view))
+  if (normalizedView) query.set('view', normalizedView)
 
   const response = await fetch(`${getPortalApiBase()}/portal/profitability?${query.toString()}`, {
     method,
@@ -97,6 +108,16 @@ export function fetchProfitabilitySummary(orgId, clientId, options = {}) {
   })
 }
 
+export function fetchProfitabilityPortfolio(orgId, options = {}) {
+  return requestProfitability('GET', {
+    orgId,
+    clientId: options.clientId,
+    period: options.period,
+    objectId: options.objectId,
+    view: 'portfolio',
+  })
+}
+
 export function fetchProfitabilityHistory(orgId, clientId, options = {}) {
   return requestProfitability('GET', {
     orgId,
@@ -107,62 +128,115 @@ export function fetchProfitabilityHistory(orgId, clientId, options = {}) {
   })
 }
 
-export function saveProfitabilityContract(orgId, clientId, objectId, period, contract) {
+export function saveProfitabilityContract(orgId, clientId, objectId, period, contract, options = {}) {
   return requestProfitability('POST', {
     orgId,
     clientId,
     objectId,
     period,
-    body: { action: 'upsert-contract', contract },
+    body: {
+      action: 'upsert-contract',
+      commandId: createProfitabilityCommandId('contract', options.commandId),
+      contract,
+    },
   })
 }
 
-export function createProfitabilityCost(orgId, clientId, objectId, period, cost) {
+export function createProfitabilityCost(orgId, clientId, objectId, period, cost, options = {}) {
   return requestProfitability('POST', {
     orgId,
     clientId,
     objectId,
     period,
-    body: { action: 'create-cost', cost },
+    body: {
+      action: 'create-cost',
+      commandId: createProfitabilityCommandId('cost', options.commandId),
+      cost,
+    },
   })
 }
 
-export function createProfitabilityRevenue(orgId, clientId, objectId, period, revenue) {
+export function createProfitabilityRevenue(orgId, clientId, objectId, period, revenue, options = {}) {
   return requestProfitability('POST', {
     orgId,
     clientId,
     objectId,
     period,
-    body: { action: 'create-revenue', revenue },
+    body: {
+      action: 'create-revenue',
+      commandId: createProfitabilityCommandId('revenue', options.commandId),
+      revenue,
+    },
   })
 }
 
-export function saveProfitabilityWorkerRate(orgId, clientId, objectId, period, rate) {
+export function saveProfitabilityWorkerRate(orgId, clientId, objectId, period, rate, options = {}) {
   return requestProfitability('POST', {
     orgId,
     clientId,
     objectId,
     period,
-    body: { action: 'upsert-worker-rate', rate },
+    body: {
+      action: 'upsert-worker-rate',
+      commandId: createProfitabilityCommandId('worker-rate', options.commandId),
+      rate,
+    },
   })
 }
 
-export function saveProfitabilityAsset(orgId, clientId, objectId, period, asset) {
+export function saveProfitabilityAsset(orgId, clientId, objectId, period, asset, options = {}) {
   return requestProfitability('POST', {
     orgId,
     clientId,
     objectId,
     period,
-    body: { action: 'upsert-asset', asset },
+    body: {
+      action: 'upsert-asset',
+      commandId: createProfitabilityCommandId('asset', options.commandId),
+      asset,
+    },
   })
 }
 
-export function closeProfitabilityPeriod(orgId, clientId, objectId, period, reason = '') {
+export function saveProfitabilityHygienePackage(orgId, clientId, objectId, period, packageInput, options = {}) {
   return requestProfitability('POST', {
     orgId,
     clientId,
     objectId,
     period,
-    body: { action: 'close-period', reason: text(reason) },
+    body: {
+      action: 'save-hygiene-package',
+      commandId: createProfitabilityCommandId('hygiene', options.commandId),
+      package: packageInput,
+    },
+  })
+}
+
+export function archiveProfitabilityHygienePackage(orgId, clientId, objectId, period, packageVersionId, reason = '', options = {}) {
+  return requestProfitability('POST', {
+    orgId,
+    clientId,
+    objectId,
+    period,
+    body: {
+      action: 'archive-hygiene-package',
+      commandId: createProfitabilityCommandId('hygiene-archive', options.commandId),
+      packageVersionId: text(packageVersionId),
+      reason: text(reason),
+    },
+  })
+}
+
+export function closeProfitabilityPeriod(orgId, clientId, objectId, period, reason = '', options = {}) {
+  return requestProfitability('POST', {
+    orgId,
+    clientId,
+    objectId,
+    period,
+    body: {
+      action: 'close-period',
+      commandId: createProfitabilityCommandId('close-period', options.commandId),
+      reason: text(reason),
+    },
   })
 }

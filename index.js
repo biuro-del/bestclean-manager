@@ -93,7 +93,14 @@ const {
   requiresCleaningCompanyAppCheck,
   startExistingGoogleAccountEnrollment,
 } = require('./cleaning-company-onboarding-service')
-const { createProfitabilityApi } = require('./profitability-api')
+const {
+  REQUIRED_FINANCIAL_MODEL_V21_RELATIONS,
+  createProfitabilityApi,
+} = require('./profitability-api')
+const { createProfitabilityDbConnectionManager } = require('./profitability-db')
+const {
+  createProfitabilitySessionContextLoader,
+} = require('./profitability/session-context-loader')
 const { createWorkdayReconciliationApi } = require('./workday-reconciliation-api')
 const { createWorkdayStopProposalApi } = require('./workday-stop-proposal-api')
 const { createWorkTimeDaysApi } = require('./work-time-days-api')
@@ -5206,35 +5213,10 @@ function profitabilityCapabilities(input) {
 
 async function buildOrganizationSessionContext(client, uid, row) {
   const enriched = { ...row }
-  if (await databaseRelationReadable(client, 'public.profitability_permission')) {
-    let permissionResult = null
-    try {
-      permissionResult = await client.query(
-        `select permission_code, object_id
-           from public.profitability_permission
-          where org_id = $1::text
-            and uid = $2::text
-            and revoked_at is null`,
-        [normalizeText(row?.org_id), normalizeText(uid)],
-      )
-    } catch (error) {
-      if (normalizeText(error?.code).toUpperCase() !== '42501') {
-        throw error
-      }
-    }
-    if (permissionResult) {
-      const codes = new Set(permissionResult.rows.map((entry) => normalizeText(entry.permission_code)))
-      const canEdit = codes.has('profitability:edit')
-      const canRead = canEdit
-        || codes.has('profitability:view-internal')
-        || codes.has('profitability:view-client-summary')
-        || codes.has('profitability:close-period')
-      enriched.is_finance_admin = canEdit
-      enriched.profitability_grants = {
-        profitabilityModule: canRead || canEdit ? { read: canRead, edit: canEdit } : false,
-      }
-    }
-  }
+  Object.assign(
+    enriched,
+    await profitabilitySessionContextLoader.load({ uid, row }),
+  )
   const context = buildSessionContext(uid, enriched)
   context.capabilities = {
     ...context.capabilities,
@@ -11600,8 +11582,21 @@ const platformApi = createPlatformApi({
   verifyFirebaseIdToken: verifyPlatformFirebaseIdToken,
 })
 
+const profitabilityDb = createProfitabilityDbConnectionManager({
+  cloudSqlConnectionName: CLOUD_SQL_CONNECTION_NAME,
+  createConnectorAuth: createCloudSqlConnectorAuth,
+  environment: process.env,
+  wrapCloudSqlStream: wrapCloudSqlPostgresStream,
+})
+
+const profitabilitySessionContextLoader = createProfitabilitySessionContextLoader({
+  connectProfitabilityClient: profitabilityDb.connect,
+  environment: process.env,
+  requiredFinancialRelations: REQUIRED_FINANCIAL_MODEL_V21_RELATIONS,
+})
+
 const profitabilityApi = createProfitabilityApi({
-  connectDbClient,
+  connectDbClient: profitabilityDb.connect,
   databaseRelationExists,
   parseBearerToken,
   readJsonBody,

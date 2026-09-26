@@ -1,6 +1,7 @@
 'use strict'
 
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
+const { resolveProfitabilityAccessProfile } = require('./profitability/access-profile-v2')
 const {
   evaluateSubscriptionAccess,
   normalizePlanCode,
@@ -212,8 +213,55 @@ function buildSessionContext(uid, row) {
     },
     grants: row.profitability_grants,
   }
-  const profitabilityRead = resolveProfitabilityAccess({ ...profitabilityInput, action: 'read' })
-  const profitabilityEdit = resolveProfitabilityAccess({ ...profitabilityInput, action: 'edit' })
+  const accessProfileV2Enabled = row.profitability_access_profile_v2_enabled === true
+  const accessProfileV2Blocked = row.profitability_access_profile_v2_blocked === true
+  const financialModelV21Enabled = row.profitability_financial_model_v21_enabled === true
+  const financialModelV21Blocked = row.profitability_financial_model_v21_blocked === true
+  const accessProfile = accessProfileV2Enabled
+    ? resolveProfitabilityAccessProfile({
+        requestOrgId: toText(row.org_id),
+        authenticatedOrgId: toText(row.org_id),
+        authenticatedUid: toText(uid),
+        membership: {
+          orgId: toText(row.org_id),
+          uid: toText(uid),
+          role: toStatus(row.role),
+          status: toStatus(row.membership_status),
+        },
+        binding: row.profitability_access_profile,
+      })
+    : null
+  const profitabilityRead = financialModelV21Blocked
+    ? { allowed: false, code: 'PROFITABILITY_FINANCIAL_MODEL_NOT_READY' }
+    : accessProfileV2Enabled
+    ? {
+        allowed: accessProfile?.allowed === true && accessProfile.capabilities.readCostControl === true,
+        code: accessProfile?.code || 'ACTIVE_BINDING_REQUIRED',
+      }
+    : accessProfileV2Blocked
+      ? { allowed: false, code: 'PROFITABILITY_ACCESS_PROFILE_NOT_READY' }
+      : resolveProfitabilityAccess({ ...profitabilityInput, action: 'read' })
+  const profitabilityEdit = financialModelV21Blocked
+    ? { allowed: false, code: 'PROFITABILITY_FINANCIAL_MODEL_NOT_READY' }
+    : accessProfileV2Enabled
+    ? {
+        allowed: accessProfile?.allowed === true
+          && accessProfile.capabilities.editContractTerms === true
+          && accessProfile.capabilities.editProfitabilityTargets === true
+          && accessProfile.capabilities.editWorkerRates === true,
+        code: accessProfile?.allowed === true
+          ? (
+              accessProfile.capabilities.editContractTerms === true
+                && accessProfile.capabilities.editProfitabilityTargets === true
+                && accessProfile.capabilities.editWorkerRates === true
+                ? 'PROFITABILITY_ACCESS_PROFILE_V2'
+                : 'PROFITABILITY_SENSITIVE_EDIT_FORBIDDEN'
+            )
+          : accessProfile?.code || 'ACTIVE_BINDING_REQUIRED',
+      }
+    : accessProfileV2Blocked
+      ? { allowed: false, code: 'PROFITABILITY_ACCESS_PROFILE_NOT_READY' }
+      : resolveProfitabilityAccess({ ...profitabilityInput, action: 'edit' })
   const role = toStatus(row.role)
   const onboardingStatus = toStatus(row.onboarding_status) || 'IN_PROGRESS'
 
@@ -241,6 +289,15 @@ function buildSessionContext(uid, row) {
         canEdit: profitabilityEdit.allowed,
         readCode: profitabilityRead.code,
         editCode: profitabilityEdit.code,
+        ...(financialModelV21Enabled ? { financialModelVersion: 'v2.1' } : {}),
+        ...(accessProfileV2Enabled ? {
+          accessVersion: 'v2',
+          canEditOperationalCosts: accessProfile?.capabilities?.editOperationalCosts === true,
+          financeProfile: accessProfile?.financeProfile ?? 'NONE',
+          objectScope: accessProfile?.objectScope ?? 'NONE',
+          operationalProfile: accessProfile?.operationalProfile ?? 'NONE',
+          workerScope: accessProfile?.workerScope ?? 'NONE',
+        } : {}),
       },
     },
   }

@@ -1,6 +1,6 @@
 'use strict'
 
-const { randomUUID } = require('node:crypto')
+const { createHash, randomUUID } = require('node:crypto')
 
 const {
   PROFITABILITY_ACTIONS,
@@ -16,8 +16,16 @@ const {
   minorUnits,
   normalizeCurrency,
   normalizePeriod,
+  roundRatio,
   serializeBigInts,
 } = require('./domain')
+const {
+  createProfitabilityAccessProfileRepository,
+} = require('./access-profile-repository')
+const {
+  OBJECT_SCOPES,
+  WRITE_KINDS,
+} = require('./access-profile-v2')
 
 function requiredText(value, fieldName) {
   const normalized = String(value ?? '').trim()
@@ -89,8 +97,162 @@ function monthWindow(period, months = 12) {
 }
 
 function databaseDate(value) {
-  if (value instanceof Date) return value.toISOString().slice(0, 10)
-  return String(value ?? '').slice(0, 10)
+  const normalized = String(value ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    throw new TypeError('PostgreSQL DATE must be selected as YYYY-MM-DD text')
+  }
+  return normalized
+}
+
+function nextCalendarDate(value) {
+  const normalized = dateValue(value, 'date')
+  const parsed = new Date(`${normalized}T00:00:00.000Z`)
+  parsed.setUTCDate(parsed.getUTCDate() + 1)
+  return parsed.toISOString().slice(0, 10)
+}
+
+function normalizeHygienePackage(packageInput = {}) {
+  const billingMode = requiredText(
+    packageInput.billingMode ?? 'IN_CONTRACT',
+    'package.billingMode',
+  ).toUpperCase()
+  if (!['IN_CONTRACT', 'MONTHLY_EXTRA', 'AD_HOC'].includes(billingMode)) {
+    throw new RangeError('Unsupported hygiene package billing mode')
+  }
+  const valueBasis = requiredText(
+    packageInput.valueBasis ?? 'ESTIMATE',
+    'package.valueBasis',
+  ).toUpperCase()
+  if (!['PLAN', 'ESTIMATE', 'ACTUAL'].includes(valueBasis)) {
+    throw new RangeError('Unsupported hygiene package value basis')
+  }
+  const requestedMarginBps = optionalInteger(
+    packageInput.marginBps,
+    'package.marginBps',
+    { min: -100000, max: 10000 },
+  )
+  let priceNetMinor = packageInput.priceNetMinor === null || packageInput.priceNetMinor === undefined || packageInput.priceNetMinor === ''
+    ? null
+    : minorUnits(nonNegativeDecimal(packageInput.priceNetMinor, 'package.priceNetMinor'))
+  let costMinor = packageInput.costMinor === null || packageInput.costMinor === undefined || packageInput.costMinor === ''
+    ? null
+    : minorUnits(nonNegativeDecimal(packageInput.costMinor, 'package.costMinor'))
+  const marginBps = requestedMarginBps ?? 2000
+  if (priceNetMinor === null && costMinor === null) {
+    throw new TypeError('package.priceNetMinor or package.costMinor is required')
+  }
+  if (priceNetMinor === null) {
+    if (marginBps >= 10000) {
+      throw new RangeError('package.marginBps must be below 10000 when deriving price')
+    }
+    priceNetMinor = roundRatio(costMinor * 10000n, BigInt(10000 - marginBps))
+  }
+  if (costMinor === null) {
+    costMinor = roundRatio(priceNetMinor * BigInt(10000 - marginBps), 10000n)
+  }
+
+  const occurredOn = billingMode === 'AD_HOC'
+    ? dateValue(packageInput.occurredOn ?? packageInput.effectiveFrom, 'package.occurredOn')
+    : null
+  const effectiveFrom = billingMode === 'AD_HOC'
+    ? occurredOn
+    : dateValue(packageInput.effectiveFrom, 'package.effectiveFrom')
+  const effectiveTo = billingMode === 'AD_HOC' || !packageInput.effectiveTo
+    ? null
+    : dateValue(packageInput.effectiveTo, 'package.effectiveTo')
+  if (effectiveTo && effectiveTo <= effectiveFrom) {
+    throw new RangeError('package.effectiveTo must be after effectiveFrom')
+  }
+
+  const status = String(packageInput.status ?? 'POSTED').trim().toUpperCase()
+  if (!['DRAFT', 'POSTED'].includes(status)) {
+    throw new RangeError('New hygiene package version must be DRAFT or POSTED')
+  }
+
+  return {
+    billingMode,
+    costMinor: costMinor.toString(),
+    currency: normalizeCurrency(packageInput.currency ?? 'PLN'),
+    effectiveFrom,
+    effectiveTo,
+    occurredOn,
+    packageId: requiredText(packageInput.packageId ?? randomUUID(), 'package.packageId'),
+    packageName: requiredText(packageInput.packageName ?? packageInput.name, 'package.packageName'),
+    packageVersionId: requiredText(
+      packageInput.packageVersionId ?? randomUUID(),
+      'package.packageVersionId',
+    ),
+    priceNetMinor: priceNetMinor.toString(),
+    recognitionKey: requiredText(packageInput.recognitionKey, 'package.recognitionKey'),
+    replacesPackageVersionId: String(packageInput.replacesPackageVersionId ?? '').trim() || null,
+    status,
+    valueBasis,
+  }
+}
+
+function stableJson(value) {
+  if (typeof value === 'bigint') return JSON.stringify(value.toString())
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+    .join(',')}}`
+}
+
+function commandPayloadSha256(payload) {
+  return createHash('sha256').update(stableJson(payload)).digest('hex')
+}
+
+function repositoryError(code, message, statusCode = 409, details) {
+  const error = new Error(message)
+  error.code = code
+  error.statusCode = statusCode
+  if (details !== undefined) error.details = details
+  return error
+}
+
+function hygieneFinancialField(key) {
+  const normalized = String(key ?? '').replace(/[^a-z0-9]/gi, '').toLowerCase()
+  return normalized === 'pricenetminor'
+    || normalized === 'marginbps'
+    || normalized.includes('revenue')
+}
+
+function hasSubmittedValue(value) {
+  if (value === null || value === undefined) return false
+  if (typeof value === 'string') return value.trim() !== ''
+  return true
+}
+
+function restrictCostControlHygienePackage(packageInput = {}) {
+  const billingMode = String(packageInput.billingMode ?? 'IN_CONTRACT').trim().toUpperCase()
+  if (billingMode !== 'IN_CONTRACT') {
+    throw repositoryError(
+      'PROFITABILITY_HYGIENE_CONTRACT_TERMS_FORBIDDEN',
+      'COST_CONTROL can save only IN_CONTRACT hygiene packages',
+      403,
+    )
+  }
+  const forbiddenFields = Object.entries(packageInput)
+    .filter(([key, value]) => hygieneFinancialField(key) && hasSubmittedValue(value))
+    .map(([key]) => key)
+  if (forbiddenFields.length) {
+    throw repositoryError(
+      'PROFITABILITY_HYGIENE_FINANCIAL_FIELDS_FORBIDDEN',
+      'COST_CONTROL cannot set hygiene price, margin or revenue fields',
+      403,
+      { fields: forbiddenFields.sort() },
+    )
+  }
+  return Object.fromEntries([
+    ...Object.entries(packageInput).filter(([key]) => !hygieneFinancialField(key)),
+    ['billingMode', 'IN_CONTRACT'],
+  ])
+}
+
+function nullableDatabaseDate(value) {
+  return value === null || value === undefined ? null : databaseDate(value)
 }
 
 function databaseTimestamp(value) {
@@ -102,24 +264,52 @@ function databaseTimestamp(value) {
 
 function mapFinancialEntry(row) {
   return {
-    activeFrom: row.period_start,
-    activeTo: row.period_end,
+    activeFrom: nullableDatabaseDate(row.period_start),
+    activeTo: nullableDatabaseDate(row.period_end),
     amountMinor: row.amount_minor,
     category: row.category,
     currency: row.currency,
-    date: row.occurred_on,
+    date: nullableDatabaseDate(row.occurred_on),
     id: row.entry_id,
     name: row.name,
     objectId: row.object_id,
     orgId: row.org_id,
     recurrence: row.recurrence,
     source: row.source,
+    valueBasis: row.value_basis ?? 'ACTUAL',
+    valueKey: row.value_key ?? null,
   }
 }
 
 class ProfitabilityRepository {
-  constructor(client) {
+  constructor(client, options = {}) {
     this.client = assertDatabaseClient(client)
+    this.accessProfileV2Enabled = options?.accessProfileV2?.enabled === true
+    this.financialModelV21Enabled = options?.financialModelV21?.enabled === true
+    this.accessProfileRepository = this.accessProfileV2Enabled
+      ? (options.accessProfileV2.repository ?? createProfitabilityAccessProfileRepository(this.client))
+      : null
+    this.accessProfileSchema = null
+  }
+
+  async assertAccessProfileSchemaReady() {
+    if (!this.accessProfileV2Enabled) return
+    if (!this.accessProfileSchema) {
+      this.accessProfileSchema = await this.accessProfileRepository.schemaReady()
+    }
+    if (!this.accessProfileSchema.ready) {
+      const error = new Error('Profitability access profile v2 schema is not ready')
+      error.code = 'PROFITABILITY_ACCESS_PROFILE_SCHEMA_NOT_READY'
+      error.statusCode = 503
+      error.details = { missing: this.accessProfileSchema.missing }
+      throw error
+    }
+  }
+
+  async resolveAccessProfileV2({ orgId, uid }) {
+    if (!this.accessProfileV2Enabled) return null
+    await this.assertAccessProfileSchemaReady()
+    return this.accessProfileRepository.resolve({ orgId, uid })
   }
 
   async resolveAccess({ orgId, objectId = '', uid }) {
@@ -187,7 +377,15 @@ class ProfitabilityRepository {
     }
   }
 
-  async assertAccess({ action, objectId = '', orgId, uid }) {
+  async assertAccess({ action, objectId = '', orgId, uid, writeKind = WRITE_KINDS.CONTRACT_TERMS }) {
+    if (this.accessProfileV2Enabled) {
+      await this.assertAccessProfileSchemaReady()
+      if (action === PROFITABILITY_ACTIONS.READ) {
+        return this.accessProfileRepository.assertRead({ objectId, orgId, uid })
+      }
+      return this.accessProfileRepository.assertWrite({ objectId, orgId, uid, writeKind })
+    }
+
     const access = await this.resolveAccess({ orgId, objectId, uid })
     try {
       return assertProfitabilityAccess({
@@ -222,6 +420,16 @@ class ProfitabilityRepository {
   }
 
   async assertClosePeriodAccess({ objectId = '', orgId, uid }) {
+    if (this.accessProfileV2Enabled) {
+      return this.assertAccess({
+        action: PROFITABILITY_ACTIONS.EDIT,
+        objectId,
+        orgId,
+        uid,
+        writeKind: WRITE_KINDS.CONTRACT_TERMS,
+      })
+    }
+
     const access = await this.resolveAccess({ orgId, objectId, uid })
     try {
       return assertProfitabilityAccess({
@@ -318,16 +526,280 @@ class ProfitabilityRepository {
   async listServiceObjectsForClient({ clientId, orgId, uid }) {
     const normalizedClientId = requiredText(clientId, 'clientId')
     const normalizedOrgId = requiredText(orgId, 'orgId')
+    let accessProfile = null
+    if (this.accessProfileV2Enabled) {
+      await this.assertAccessProfileSchemaReady()
+      accessProfile = await this.accessProfileRepository.assertRead({
+        orgId: normalizedOrgId,
+        uid,
+      })
+    }
+    const result = accessProfile
+      ? await this.client.query(
+          `select object_id, client_id, name, timezone, status, default_currency,
+                  address, city, postal_code, created_at, updated_at
+             from public.service_object
+            where org_id = $1
+              and client_id = $2
+              and archived_at is null
+              and ($3::boolean is true or object_id = any($4::text[]))
+              and not (object_id = any($5::text[]))
+            order by name, object_id`,
+          [
+            normalizedOrgId,
+            normalizedClientId,
+            accessProfile.objectScope === OBJECT_SCOPES.ALL,
+            accessProfile.assignedObjectIds,
+            accessProfile.deniedObjectIds,
+          ],
+        )
+      : await this.client.query(
+          `select object_id, client_id, name, timezone, status, default_currency,
+                  address, city, postal_code, created_at, updated_at
+             from public.service_object
+            where org_id = $1
+              and client_id = $2
+              and archived_at is null
+            order by name, object_id`,
+          [normalizedOrgId, normalizedClientId],
+        )
+    if (accessProfile) return result.rows
+    if (result.rows.length === 0) {
+      await this.assertAccess({ action: PROFITABILITY_ACTIONS.READ, orgId: normalizedOrgId, uid })
+      return []
+    }
+
+    const authorizedRows = []
+    let firstAccessError = null
+    for (const row of result.rows) {
+      try {
+        await this.assertAccess({
+          action: PROFITABILITY_ACTIONS.READ,
+          objectId: row.object_id,
+          orgId: normalizedOrgId,
+          uid,
+        })
+        authorizedRows.push(row)
+      } catch (error) {
+        if (error?.statusCode !== 403) throw error
+        firstAccessError ??= error
+      }
+    }
+    if (authorizedRows.length > 0) return authorizedRows
+    throw firstAccessError
+  }
+
+  async assertWritableFinancialRange({ endExclusive = null, objectId, orgId, start }) {
+    if (!this.financialModelV21Enabled) return
+    const normalizedStart = dateValue(start, 'financial range start')
+    const normalizedEnd = endExclusive
+      ? dateValue(endExclusive, 'financial range end')
+      : null
     const result = await this.client.query(
-      `select object_id, client_id, name, timezone, status, default_currency,
-              address, city, postal_code, created_at, updated_at
-         from public.service_object
+      `select period_id, period_start::text as period_start, period_end::text as period_end
+         from public.financial_period
         where org_id = $1
-          and client_id = $2
-          and archived_at is null
-        order by name, object_id`,
-      [normalizedOrgId, normalizedClientId],
+          and object_id = $2
+          and status = 'CLOSED'
+          and period_end > $3::date
+          and ($4::date is null or period_start < $4::date)
+        order by period_start, period_id
+        for share`,
+      [requiredText(orgId, 'orgId'), requiredText(objectId, 'objectId'), normalizedStart, normalizedEnd],
     )
+    if (result.rows.length > 0) {
+      throw repositoryError(
+        'CLOSED_PERIOD_IMMUTABLE',
+        'A closed financial period cannot be changed without an explicit correction workflow',
+        409,
+        { periodIds: result.rows.map((row) => row.period_id) },
+      )
+    }
+  }
+
+  async withFinancialModelV21Command({
+    commandId,
+    commandKind,
+    objectId,
+    orgId,
+    payload,
+    uid,
+  }, work) {
+    if (!this.financialModelV21Enabled) return this.withTransaction(work)
+
+    const normalizedCommandId = requiredText(commandId, 'commandId')
+    if (normalizedCommandId.length > 96) {
+      throw new RangeError('commandId cannot exceed 96 characters')
+    }
+    const normalizedCommandKind = requiredText(commandKind, 'commandKind')
+    if (normalizedCommandKind.length > 64) {
+      throw new RangeError('commandKind cannot exceed 64 characters')
+    }
+    const normalizedOrgId = requiredText(orgId, 'orgId')
+    const normalizedObjectId = requiredText(objectId, 'objectId')
+    const normalizedUid = requiredText(uid, 'uid')
+    const requestSha256 = commandPayloadSha256(payload)
+
+    await this.client.query('begin')
+    let transactionFinished = false
+    try {
+      await this.client.query('set transaction isolation level repeatable read')
+      await this.client.query(
+        'select pg_advisory_xact_lock(hashtext($1), hashtext($2))',
+        [normalizedOrgId, normalizedObjectId],
+      )
+      const inserted = await this.client.query(
+        `insert into public.profitability_command_receipt
+          (org_id, command_id, object_id, command_kind, request_sha256,
+           state, created_by_uid)
+         values ($1, $2, $3, $4, $5, 'IN_PROGRESS', $6)
+         on conflict (org_id, command_id) do nothing
+         returning command_id`,
+        [
+          normalizedOrgId,
+          normalizedCommandId,
+          normalizedObjectId,
+          normalizedCommandKind,
+          requestSha256,
+          normalizedUid,
+        ],
+      )
+
+      if (inserted.rows.length === 0) {
+        const existingResult = await this.client.query(
+          `select object_id, command_kind, request_sha256, state,
+                  result_reference, error_code
+             from public.profitability_command_receipt
+            where org_id = $1 and command_id = $2
+            for update`,
+          [normalizedOrgId, normalizedCommandId],
+        )
+        const existing = existingResult.rows[0]
+        if (!existing) {
+          throw repositoryError(
+            'PROFITABILITY_COMMAND_RECEIPT_UNAVAILABLE',
+            'Command receipt disappeared during idempotency check',
+            503,
+          )
+        }
+        if (
+          existing.object_id !== normalizedObjectId ||
+          existing.command_kind !== normalizedCommandKind ||
+          existing.request_sha256 !== requestSha256
+        ) {
+          throw repositoryError(
+            'PROFITABILITY_COMMAND_ID_REUSED',
+            'commandId was already used with a different request',
+          )
+        }
+        if (existing.state === 'SUCCEEDED') {
+          await this.client.query('commit')
+          transactionFinished = true
+          return {
+            idempotentReplay: true,
+            resultReference: existing.result_reference,
+          }
+        }
+        throw repositoryError(
+          existing.state === 'FAILED'
+            ? 'PROFITABILITY_COMMAND_PREVIOUSLY_FAILED'
+            : 'PROFITABILITY_COMMAND_IN_PROGRESS',
+          existing.state === 'FAILED'
+            ? 'This command previously failed; retry with a new commandId'
+            : 'This command is already in progress',
+          409,
+          existing.error_code ? { previousErrorCode: existing.error_code } : undefined,
+        )
+      }
+
+      await this.client.query('savepoint profitability_v21_command_work')
+      try {
+        const result = await work()
+        const resultReference = requiredText(
+          result?.resultReference
+            ?? result?.package_version_id
+            ?? result?.contract_version_id
+            ?? result?.rate_id
+            ?? result?.equipment_id
+            ?? result?.snapshotId
+            ?? result?.snapshot_id
+            ?? result?.period_id
+            ?? result?.entry_id
+            ?? result?.id,
+          'command result reference',
+        )
+        await this.client.query(
+          `update public.profitability_command_receipt
+              set state = 'SUCCEEDED', result_reference = $3,
+                  updated_at = now(), completed_at = now()
+            where org_id = $1 and command_id = $2 and state = 'IN_PROGRESS'`,
+          [normalizedOrgId, normalizedCommandId, resultReference],
+        )
+        await this.client.query('commit')
+        transactionFinished = true
+        return result
+      } catch (error) {
+        await this.client.query('rollback to savepoint profitability_v21_command_work')
+        await this.client.query(
+          `update public.profitability_command_receipt
+              set state = 'FAILED', error_code = $3,
+                  updated_at = now(), completed_at = now()
+            where org_id = $1 and command_id = $2 and state = 'IN_PROGRESS'`,
+          [
+            normalizedOrgId,
+            normalizedCommandId,
+            String(error?.code ?? 'PROFITABILITY_COMMAND_FAILED').slice(0, 80),
+          ],
+        )
+        await this.client.query('commit')
+        transactionFinished = true
+        throw error
+      }
+    } catch (error) {
+      if (!transactionFinished) await this.client.query('rollback').catch(() => {})
+      throw error
+    }
+  }
+
+  async listServiceObjectsForOrganization({ orgId, uid }) {
+    const normalizedOrgId = requiredText(orgId, 'orgId')
+    let accessProfile = null
+    if (this.accessProfileV2Enabled) {
+      await this.assertAccessProfileSchemaReady()
+      accessProfile = await this.accessProfileRepository.assertRead({
+        orgId: normalizedOrgId,
+        uid,
+      })
+    }
+
+    const result = accessProfile
+      ? await this.client.query(
+          `select object_id, client_id, name, timezone, status, default_currency,
+                  address, city, postal_code, created_at, updated_at
+             from public.service_object
+            where org_id = $1
+              and archived_at is null
+              and ($2::boolean is true or object_id = any($3::text[]))
+              and not (object_id = any($4::text[]))
+            order by client_id, name, object_id`,
+          [
+            normalizedOrgId,
+            accessProfile.objectScope === OBJECT_SCOPES.ALL,
+            accessProfile.assignedObjectIds,
+            accessProfile.deniedObjectIds,
+          ],
+        )
+      : await this.client.query(
+          `select object_id, client_id, name, timezone, status, default_currency,
+                  address, city, postal_code, created_at, updated_at
+             from public.service_object
+            where org_id = $1
+              and archived_at is null
+            order by client_id, name, object_id`,
+          [normalizedOrgId],
+        )
+
+    if (accessProfile) return result.rows
     if (result.rows.length === 0) {
       await this.assertAccess({ action: PROFITABILITY_ACTIONS.READ, orgId: normalizedOrgId, uid })
       return []
@@ -410,7 +882,8 @@ class ProfitabilityRepository {
 
     const result = await this.client.query(
       `with ranked_snapshots as (
-         select p.period_start, p.period_end,
+         select p.period_start::text as period_start,
+                p.period_end::text as period_end,
                 s.snapshot_id, s.calculation_status, s.currency,
                 s.revenue_minor, s.total_cost_minor, s.margin_minor,
                 s.profitability_bps, s.completeness_bps, s.calculated_at,
@@ -597,16 +1070,20 @@ class ProfitabilityRepository {
     const [
       contractResult,
       entryResult,
+      hygieneResult,
       equipmentResult,
       periodicResult,
       eventResult,
       rateResult,
       legacyAttendanceResult,
+      targetResult,
     ] = await Promise.all([
         this.client.query(
           `select contract_version_id, billing_model, monthly_value_minor,
-                  hourly_rate_minor, service_rate_minor, currency, effective_from,
-                  effective_to, target_profitability_bps
+                  hourly_rate_minor, service_rate_minor, currency,
+                  effective_from::text as effective_from,
+                  effective_to::text as effective_to,
+                  target_profitability_bps
              from public.object_contract_version
             where org_id = $1
               and object_id = $2
@@ -617,26 +1094,69 @@ class ProfitabilityRepository {
           queryParams,
         ),
         this.client.query(
-          `select entry_id, org_id, object_id, periodic_work_id, entry_group, category,
-                  name, amount_minor, currency, occurred_on, period_start, period_end,
-                  recurrence, source
-             from public.object_financial_entry
-            where org_id = $1
-              and object_id = $2
-              and archived_at is null
-              and status = 'POSTED'
-              and (
-                (recurrence in ('ONE_TIME', 'ACTUAL_USAGE') and occurred_on >= $3::date and occurred_on < $4::date)
-                or
-                (recurrence = 'MONTHLY' and period_start < $4::date and (period_end is null or period_end > $3::date))
-              )
-            order by occurred_on, entry_id`,
+          this.financialModelV21Enabled
+            ? `select entry_id, org_id, object_id, periodic_work_id, entry_group, category,
+                      name, amount_minor, currency,
+                      occurred_on::text as occurred_on,
+                      period_start::text as period_start,
+                      period_end::text as period_end,
+                      recurrence, source, value_basis, value_key
+                 from public.profitability_effective_financial_entry
+                where org_id = $1
+                  and object_id = $2
+                  and (
+                    (recurrence in ('ONE_TIME', 'ACTUAL_USAGE') and occurred_on >= $3::date and occurred_on < $4::date)
+                    or
+                    (recurrence = 'MONTHLY' and period_start < $4::date and (period_end is null or period_end > $3::date))
+                  )
+                order by occurred_on, entry_id`
+            : `select entry_id, org_id, object_id, periodic_work_id, entry_group, category,
+                      name, amount_minor, currency,
+                      occurred_on::text as occurred_on,
+                      period_start::text as period_start,
+                      period_end::text as period_end,
+                      recurrence, source
+                 from public.object_financial_entry
+                where org_id = $1
+                  and object_id = $2
+                  and archived_at is null
+                  and status = 'POSTED'
+                  and (
+                    (recurrence in ('ONE_TIME', 'ACTUAL_USAGE') and occurred_on >= $3::date and occurred_on < $4::date)
+                    or
+                    (recurrence = 'MONTHLY' and period_start < $4::date and (period_end is null or period_end > $3::date))
+                  )
+                order by occurred_on, entry_id`,
           queryParams,
         ),
+        this.financialModelV21Enabled
+          ? this.client.query(
+              `select package_id, package_version_id, recognition_key, package_name,
+                      billing_mode, value_basis, price_net_minor, cost_minor,
+                      margin_bps, currency,
+                      effective_from::text as effective_from,
+                      effective_to::text as effective_to,
+                      occurred_on::text as occurred_on,
+                      recognized_revenue_minor
+                 from public.profitability_effective_hygiene_package
+                where org_id = $1
+                  and object_id = $2
+                  and (
+                    (billing_mode = 'AD_HOC' and occurred_on >= $3::date and occurred_on < $4::date)
+                    or
+                    (billing_mode in ('IN_CONTRACT', 'MONTHLY_EXTRA')
+                      and effective_from < $4::date
+                      and (effective_to is null or effective_to > $3::date))
+                  )
+                order by coalesce(occurred_on, effective_from), package_id, package_version_id`,
+              queryParams,
+            )
+          : Promise.resolve({ rows: [] }),
         this.client.query(
           `select equipment_id, org_id, object_id, financing, recognition_method,
                   purchase_value_minor, depreciation_months, monthly_installment_minor,
-                  currency, started_on, ended_on
+                  currency, started_on::text as started_on,
+                  ended_on::text as ended_on
              from public.object_equipment
             where org_id = $1
               and object_id = $2
@@ -648,7 +1168,9 @@ class ProfitabilityRepository {
         ),
         this.client.query(
           `select periodic_work_id, org_id, object_id, name, status, work_type,
-                  planned_on, executed_on, planned_minutes, actual_minutes
+                  planned_on::text as planned_on,
+                  executed_on::text as executed_on,
+                  planned_minutes, actual_minutes
              from public.periodic_work
             where org_id = $1
               and object_id = $2
@@ -678,7 +1200,8 @@ class ProfitabilityRepository {
         ),
         this.client.query(
           `select r.rate_id, r.org_id, r.object_id, r.worker_login, r.hourly_cost_minor,
-                  r.currency, r.effective_from, r.effective_to
+                  r.currency, r.effective_from::text as effective_from,
+                  r.effective_to::text as effective_to
              from public.worker_cost_rate r
             where r.org_id = $1
               and r.object_id = $2
@@ -703,12 +1226,71 @@ class ProfitabilityRepository {
               and e.start_at < ($4::date::timestamp at time zone o.timezone)`,
           queryParams,
         ),
+        this.accessProfileV2Enabled
+          ? this.client.query(
+              `select target_id, minimum_result_minor, minimum_margin_bps,
+                      currency, target_policy,
+                      effective_from::text as effective_from,
+                      effective_to::text as effective_to
+                 from public.profitability_target_history
+                where org_id = $1
+                  and object_id = $2
+                  and revoked_at is null
+                  and effective_from < $4::date
+                  and (effective_to is null or effective_to > $3::date)
+                order by effective_from desc, target_id desc
+                limit 2`,
+              queryParams,
+            )
+          : Promise.resolve({ rows: [] }),
       ])
 
-    const financialEntries = entryResult.rows.map(mapFinancialEntry)
+    if (targetResult.rows.length > 1) {
+      const error = new Error('More than one profitability target applies to this period')
+      error.code = 'PROFITABILITY_TARGET_AMBIGUOUS'
+      error.statusCode = 409
+      throw error
+    }
+    const target = targetResult.rows[0] ?? null
+
+    const hygieneEntryRows = hygieneResult.rows.flatMap((packageRow) => {
+      const monthly = packageRow.billing_mode !== 'AD_HOC'
+      const common = {
+        org_id: normalizedOrgId,
+        object_id: normalizedObjectId,
+        periodic_work_id: null,
+        category: 'HYGIENE_PACKAGE',
+        name: packageRow.package_name,
+        currency: packageRow.currency,
+        occurred_on: monthly ? null : packageRow.occurred_on,
+        period_start: monthly ? packageRow.effective_from : null,
+        period_end: monthly ? packageRow.effective_to : null,
+        recurrence: monthly ? 'MONTHLY' : 'ONE_TIME',
+        source: 'HYGIENE_PACKAGE',
+        value_basis: packageRow.value_basis,
+        value_key: packageRow.recognition_key,
+      }
+      const rows = [{
+        ...common,
+        entry_id: `hygiene:${packageRow.package_version_id}:cost`,
+        entry_group: 'MATERIAL',
+        amount_minor: packageRow.cost_minor,
+      }]
+      if (minorUnits(packageRow.recognized_revenue_minor) > 0n) {
+        rows.push({
+          ...common,
+          entry_id: `hygiene:${packageRow.package_version_id}:revenue`,
+          entry_group: 'REVENUE',
+          amount_minor: packageRow.recognized_revenue_minor,
+        })
+      }
+      return rows
+    })
+    const financialEntryRows = [...entryResult.rows, ...hygieneEntryRows]
+    const financialEntries = financialEntryRows.map(mapFinancialEntry)
     const periodicWorks = periodicResult.rows.map((work) => ({
       actualMinutes: work.actual_minutes,
-      executedOn: work.executed_on,
+      executedOn: nullableDatabaseDate(work.executed_on),
       id: work.periodic_work_id,
       laborSessionIds: eventResult.rows
         .filter((event) => event.periodic_work_id === work.periodic_work_id)
@@ -717,18 +1299,18 @@ class ProfitabilityRepository {
       orgId: work.org_id,
       name: work.name,
       plannedMinutes: work.planned_minutes,
-      plannedOn: work.planned_on,
+      plannedOn: nullableDatabaseDate(work.planned_on),
       status: work.status,
       workType: work.work_type,
       directCostEntries: financialEntries.filter(
         (entry) =>
           entry.id &&
-          entryResult.rows.find((row) => row.entry_id === entry.id)?.periodic_work_id === work.periodic_work_id &&
-          entryResult.rows.find((row) => row.entry_id === entry.id)?.entry_group !== 'REVENUE',
+          financialEntryRows.find((row) => row.entry_id === entry.id)?.periodic_work_id === work.periodic_work_id &&
+          financialEntryRows.find((row) => row.entry_id === entry.id)?.entry_group !== 'REVENUE',
       ),
       revenueEntries: financialEntries.filter(
         (entry) => {
-          const row = entryResult.rows.find((candidate) => candidate.entry_id === entry.id)
+          const row = financialEntryRows.find((candidate) => candidate.entry_id === entry.id)
           return row?.periodic_work_id === work.periodic_work_id && row.entry_group === 'REVENUE'
         },
       ),
@@ -737,8 +1319,8 @@ class ProfitabilityRepository {
     const contractRevenues = contractResult.rows
       .filter((contract) => contract.monthly_value_minor !== null)
       .map((contract) => ({
-        activeFrom: contract.effective_from,
-        activeTo: contract.effective_to,
+        activeFrom: databaseDate(contract.effective_from),
+        activeTo: nullableDatabaseDate(contract.effective_to),
         amountMinor: contract.monthly_value_minor,
         category: 'CONTRACT',
         currency: contract.currency,
@@ -749,7 +1331,7 @@ class ProfitabilityRepository {
       }))
 
     const additionalRevenues = financialEntries.filter((entry) => {
-      const row = entryResult.rows.find((candidate) => candidate.entry_id === entry.id)
+      const row = financialEntryRows.find((candidate) => candidate.entry_id === entry.id)
       return !row?.periodic_work_id && row?.entry_group === 'REVENUE'
     })
     const variableRevenueRequired = contractResult.rows.some((contract) =>
@@ -762,15 +1344,33 @@ class ProfitabilityRepository {
     )
 
     return {
+      accessProfileVersion: this.accessProfileV2Enabled ? 'v2' : null,
       additionalRevenues,
       clientId: serviceObject.client_id,
       contractConfigured: contractResult.rows.length > 0,
       contractRevenues,
       currency: serviceObject.default_currency,
+      financialModelVersion: this.financialModelV21Enabled ? 'v2.1' : 'foundation-v2',
+      hygienePackages: hygieneResult.rows.map((packageRow) => ({
+        billingMode: packageRow.billing_mode,
+        costMinor: packageRow.cost_minor,
+        currency: packageRow.currency,
+        effectiveFrom: databaseDate(packageRow.effective_from),
+        effectiveTo: nullableDatabaseDate(packageRow.effective_to),
+        marginBps: packageRow.margin_bps,
+        name: packageRow.package_name,
+        occurredOn: nullableDatabaseDate(packageRow.occurred_on),
+        packageId: packageRow.package_id,
+        packageVersionId: packageRow.package_version_id,
+        priceNetMinor: packageRow.price_net_minor,
+        recognitionKey: packageRow.recognition_key,
+        recognizedRevenueMinor: packageRow.recognized_revenue_minor,
+        valueBasis: packageRow.value_basis,
+      })),
       equipment: equipmentResult.rows.map((asset) => ({
         currency: asset.currency,
         depreciationMonths: asset.depreciation_months,
-        endedOn: asset.ended_on,
+        endedOn: nullableDatabaseDate(asset.ended_on),
         financing: asset.financing,
         id: asset.equipment_id,
         monthlyInstallmentMinor: asset.monthly_installment_minor,
@@ -778,7 +1378,7 @@ class ProfitabilityRepository {
         orgId: asset.org_id,
         purchaseValueMinor: asset.purchase_value_minor,
         recognitionMethod: asset.recognition_method,
-        startedOn: asset.started_on,
+        startedOn: databaseDate(asset.started_on),
       })),
       laborSessions: eventResult.rows.map((event) => ({
         durationSeconds: event.duration_sec,
@@ -793,13 +1393,13 @@ class ProfitabilityRepository {
         zoneId: event.zone_id,
       })),
       materialCosts: financialEntries.filter((entry) => {
-        const row = entryResult.rows.find((candidate) => candidate.entry_id === entry.id)
+        const row = financialEntryRows.find((candidate) => candidate.entry_id === entry.id)
         return !row?.periodic_work_id && row?.entry_group === 'MATERIAL'
       }),
       objectId: normalizedObjectId,
       orgId: normalizedOrgId,
       otherCosts: financialEntries.filter((entry) => {
-        const row = entryResult.rows.find((candidate) => candidate.entry_id === entry.id)
+        const row = financialEntryRows.find((candidate) => candidate.entry_id === entry.id)
         return !row?.periodic_work_id && !['MATERIAL', 'REVENUE'].includes(row?.entry_group)
       }),
       period: normalizedPeriod,
@@ -811,7 +1411,13 @@ class ProfitabilityRepository {
             objectId: normalizedObjectId,
           }]
         : [],
-      targetProfitabilityBps: contractResult.rows.at(-1)?.target_profitability_bps ?? null,
+      targetCurrency: target?.currency ?? null,
+      targetId: target?.target_id ?? null,
+      targetMinimumMarginBps: target?.minimum_margin_bps ?? null,
+      targetMinimumResultMinor: target?.minimum_result_minor ?? null,
+      targetPolicy: target?.target_policy ?? null,
+      targetProfitabilityBps:
+        target?.minimum_margin_bps ?? contractResult.rows.at(-1)?.target_profitability_bps ?? null,
       timezone: serviceObject.timezone,
       variableRevenueConfigured:
         additionalRevenues.length > 0 ||
@@ -819,8 +1425,8 @@ class ProfitabilityRepository {
       variableRevenueRequired,
       workerRates: rateResult.rows.map((rate) => ({
         currency: rate.currency,
-        effectiveFrom: rate.effective_from,
-        effectiveTo: rate.effective_to,
+        effectiveFrom: databaseDate(rate.effective_from),
+        effectiveTo: nullableDatabaseDate(rate.effective_to),
         hourlyCostMinor: rate.hourly_cost_minor,
         id: rate.rate_id,
         objectId: rate.object_id,
@@ -830,7 +1436,7 @@ class ProfitabilityRepository {
     }
   }
 
-  async createWorkerRateVersion({ clientId, objectId, orgId, rate = {}, reason = '', uid }) {
+  async createWorkerRateVersion({ clientId, commandId = '', objectId, orgId, rate = {}, reason = '', uid }) {
     const normalizedOrgId = requiredText(orgId, 'orgId')
     const normalizedClientId = requiredText(clientId, 'clientId')
     const normalizedObjectId = requiredText(objectId, 'objectId')
@@ -839,6 +1445,7 @@ class ProfitabilityRepository {
       objectId: normalizedObjectId,
       orgId: normalizedOrgId,
       uid,
+      writeKind: WRITE_KINDS.WORKER_RATE,
     })
     await this.verifyServiceObjectScope({
       clientId: normalizedClientId,
@@ -866,10 +1473,18 @@ class ProfitabilityRepository {
     const auditReason = String(reason || rate.reason || '').trim()
     const rateId = requiredText(rate.rateId ?? randomUUID(), 'rate.rateId')
 
-    return this.withTransaction(async () => {
+    const persist = async () => {
+      await this.assertWritableFinancialRange({
+        endExclusive: effectiveTo,
+        objectId: normalizedObjectId,
+        orgId: normalizedOrgId,
+        start: effectiveFrom,
+      })
       const versionsResult = await this.client.query(
-        `select *
-           from public.worker_cost_rate
+        `select r.*,
+                r.effective_from::text as effective_from_ymd,
+                r.effective_to::text as effective_to_ymd
+           from public.worker_cost_rate r
           where org_id = $1
             and object_id = $2
             and lower(worker_login) = lower($3)
@@ -880,26 +1495,26 @@ class ProfitabilityRepository {
       )
       const versions = versionsResult.rows
       const sameStart = versions.find(
-        (row) => String(row.effective_from).slice(0, 10) === effectiveFrom,
+        (row) => databaseDate(row.effective_from_ymd) === effectiveFrom,
       )
       const covering = versions.find((row) => {
-        const start = String(row.effective_from).slice(0, 10)
-        const end = row.effective_to ? String(row.effective_to).slice(0, 10) : null
+        const start = databaseDate(row.effective_from_ymd)
+        const end = row.effective_to_ymd ? databaseDate(row.effective_to_ymd) : null
         return start < effectiveFrom && (!end || effectiveFrom < end)
       })
       const nextVersion = versions.find(
-        (row) => String(row.effective_from).slice(0, 10) > effectiveFrom,
+        (row) => databaseDate(row.effective_from_ymd) > effectiveFrom,
       )
       if (sameStart && !auditReason) {
         const error = new Error('Replacing a worker rate requires a correction reason')
         error.code = 'WORKER_RATE_CORRECTION_REASON_REQUIRED'
         throw error
       }
-      if (!effectiveTo && sameStart?.effective_to) {
-        effectiveTo = String(sameStart.effective_to).slice(0, 10)
+      if (!effectiveTo && sameStart?.effective_to_ymd) {
+        effectiveTo = databaseDate(sameStart.effective_to_ymd)
       }
       if (nextVersion) {
-        const nextStart = String(nextVersion.effective_from).slice(0, 10)
+        const nextStart = databaseDate(nextVersion.effective_from_ymd)
         if (effectiveTo && effectiveTo > nextStart) {
           throw new RangeError('Worker rate period overlaps a later version')
         }
@@ -956,10 +1571,27 @@ class ProfitabilityRepository {
         reason: auditReason,
       })
       return row
-    })
+    }
+
+    return this.withFinancialModelV21Command({
+      commandId,
+      commandKind: 'UPSERT_WORKER_RATE',
+      objectId: normalizedObjectId,
+      orgId: normalizedOrgId,
+      payload: {
+        auditReason,
+        currency,
+        effectiveFrom,
+        effectiveTo,
+        hourlyCostMinor,
+        rateSource,
+        workerLogin,
+      },
+      uid,
+    }, persist)
   }
 
-  async createContractVersion({ clientId, contract = {}, objectId, orgId, reason = '', uid }) {
+  async createContractVersion({ clientId, commandId = '', contract = {}, objectId, orgId, reason = '', uid }) {
     const normalizedOrgId = requiredText(orgId, 'orgId')
     const normalizedClientId = requiredText(clientId, 'clientId')
     const normalizedObjectId = requiredText(objectId, 'objectId')
@@ -968,6 +1600,7 @@ class ProfitabilityRepository {
       objectId: normalizedObjectId,
       orgId: normalizedOrgId,
       uid,
+      writeKind: WRITE_KINDS.CONTRACT_TERMS,
     })
     await this.verifyServiceObjectScope({
       clientId: normalizedClientId,
@@ -1014,35 +1647,45 @@ class ProfitabilityRepository {
     }
     const auditReason = String(reason || contract.reason || '').trim()
 
-    return this.withTransaction(async () => {
+    const persist = async () => {
+      await this.assertWritableFinancialRange({
+        endExclusive: effectiveTo,
+        objectId: normalizedObjectId,
+        orgId: normalizedOrgId,
+        start: effectiveFrom,
+      })
       const versionsResult = await this.client.query(
-        `select *
-           from public.object_contract_version
+        `select v.*,
+                v.effective_from::text as effective_from_ymd,
+                v.effective_to::text as effective_to_ymd
+           from public.object_contract_version v
           where org_id = $1 and object_id = $2 and archived_at is null
           order by effective_from
           for update`,
         [normalizedOrgId, normalizedObjectId],
       )
       const versions = versionsResult.rows
-      const sameStart = versions.find((row) => String(row.effective_from).slice(0, 10) === effectiveFrom)
+      const sameStart = versions.find(
+        (row) => databaseDate(row.effective_from_ymd) === effectiveFrom,
+      )
       const covering = versions.find((row) => {
-        const start = String(row.effective_from).slice(0, 10)
-        const end = row.effective_to ? String(row.effective_to).slice(0, 10) : null
+        const start = databaseDate(row.effective_from_ymd)
+        const end = row.effective_to_ymd ? databaseDate(row.effective_to_ymd) : null
         return start < effectiveFrom && (!end || effectiveFrom < end)
       })
       const nextVersion = versions.find(
-        (row) => String(row.effective_from).slice(0, 10) > effectiveFrom,
+        (row) => databaseDate(row.effective_from_ymd) > effectiveFrom,
       )
       if (sameStart && !auditReason) {
         const error = new Error('Replacing a contract version requires a correction reason')
         error.code = 'CONTRACT_CORRECTION_REASON_REQUIRED'
         throw error
       }
-      if (!effectiveTo && sameStart?.effective_to) {
-        effectiveTo = String(sameStart.effective_to).slice(0, 10)
+      if (!effectiveTo && sameStart?.effective_to_ymd) {
+        effectiveTo = databaseDate(sameStart.effective_to_ymd)
       }
       if (nextVersion) {
-        const nextStart = String(nextVersion.effective_from).slice(0, 10)
+        const nextStart = databaseDate(nextVersion.effective_from_ymd)
         if (effectiveTo && effectiveTo > nextStart) {
           throw new RangeError('Contract period overlaps a later version')
         }
@@ -1107,22 +1750,49 @@ class ProfitabilityRepository {
         reason: auditReason,
       })
       return row
-    })
+    }
+
+    return this.withFinancialModelV21Command({
+      commandId,
+      commandKind: 'UPSERT_CONTRACT',
+      objectId: normalizedObjectId,
+      orgId: normalizedOrgId,
+      payload: {
+        auditReason,
+        billingModel,
+        contractName: String(contract.contractName ?? contract.name ?? '').trim() || null,
+        contractNumber: String(contract.contractNumber ?? '').trim() || null,
+        contractSource,
+        currency,
+        effectiveFrom,
+        effectiveTo,
+        hourlyRateMinor,
+        monthlyValueMinor,
+        serviceRateMinor,
+        targetProfitabilityBps,
+        vatRateBps,
+      },
+      uid,
+    }, persist)
   }
 
   async upsertContract(input) {
     return this.createContractVersion(input)
   }
 
-  async createFinancialEntry({ clientId, entry = {}, objectId, orgId, reason = '', uid }) {
+  async createFinancialEntry({ clientId, commandId = '', entry = {}, objectId, orgId, reason = '', uid }) {
     const normalizedOrgId = requiredText(orgId, 'orgId')
     const normalizedClientId = requiredText(clientId, 'clientId')
     const normalizedObjectId = requiredText(objectId, 'objectId')
+    const entryGroup = requiredText(entry.entryGroup ?? entry.group, 'entry.entryGroup').toUpperCase()
     await this.assertAccess({
       action: PROFITABILITY_ACTIONS.EDIT,
       objectId: normalizedObjectId,
       orgId: normalizedOrgId,
       uid,
+      writeKind: entryGroup === 'REVENUE'
+        ? WRITE_KINDS.CONTRACT_TERMS
+        : WRITE_KINDS.OPERATIONAL_COST,
     })
     await this.verifyServiceObjectScope({
       clientId: normalizedClientId,
@@ -1131,7 +1801,6 @@ class ProfitabilityRepository {
     })
 
     const entryId = requiredText(entry.entryId ?? randomUUID(), 'entry.entryId')
-    const entryGroup = requiredText(entry.entryGroup ?? entry.group, 'entry.entryGroup').toUpperCase()
     const allowedGroups = new Set([
       'REVENUE', 'MATERIAL', 'EQUIPMENT_SERVICE', 'PERIODIC_DIRECT',
       'TRANSPORT', 'COORDINATION', 'SUBCONTRACTOR', 'DELIVERY', 'TRAINING',
@@ -1162,19 +1831,47 @@ class ProfitabilityRepository {
     if (!['MANUAL', 'WAREHOUSE', 'IMPORT', 'INTEGRATION', 'CORRECTION'].includes(entrySource)) {
       throw new RangeError('Unsupported financial entry source')
     }
+    const valueBasis = String(entry.valueBasis ?? 'ACTUAL').trim().toUpperCase()
+    if (!['PLAN', 'ESTIMATE', 'ACTUAL'].includes(valueBasis)) {
+      throw new RangeError('Unsupported financial entry value basis')
+    }
+    const valueKey = String(entry.valueKey ?? '').trim() || null
+    if (this.financialModelV21Enabled && !valueKey) {
+      throw new TypeError('entry.valueKey is required for financial model v2.1')
+    }
+    if (valueKey && valueKey.length > 96) {
+      throw new RangeError('entry.valueKey cannot exceed 96 characters')
+    }
     const auditReason = String(reason || entry.reason || '').trim()
 
-    return this.withTransaction(async () => {
+    const persist = async () => {
+      await this.assertWritableFinancialRange({
+        endExclusive: recurrence === 'MONTHLY' ? periodEnd : nextCalendarDate(occurredOn),
+        objectId: normalizedObjectId,
+        orgId: normalizedOrgId,
+        start: recurrence === 'MONTHLY' ? periodStart : occurredOn,
+      })
       const inserted = await this.client.query(
-        `insert into public.object_financial_entry
-          (org_id, object_id, entry_id, periodic_work_id, equipment_id, entry_group,
-           category, name, amount_minor, currency, occurred_on, period_start,
-           period_end, recurrence, source, source_reference, description,
-           document_reference, status, created_by_uid)
-         values
-          ($1, $2, $3, $4, $5, $6, $7, $8, $9::bigint, $10, $11::date,
-           $12::date, $13::date, $14, $15, $16, $17, $18, 'POSTED', $19)
-         returning *`,
+        this.financialModelV21Enabled
+          ? `insert into public.object_financial_entry
+              (org_id, object_id, entry_id, periodic_work_id, equipment_id, entry_group,
+               category, name, amount_minor, currency, occurred_on, period_start,
+               period_end, recurrence, source, source_reference, description,
+               document_reference, status, created_by_uid, value_basis, value_key)
+             values
+              ($1, $2, $3, $4, $5, $6, $7, $8, $9::bigint, $10, $11::date,
+               $12::date, $13::date, $14, $15, $16, $17, $18, 'POSTED', $19,
+               $20, $21)
+             returning *`
+          : `insert into public.object_financial_entry
+              (org_id, object_id, entry_id, periodic_work_id, equipment_id, entry_group,
+               category, name, amount_minor, currency, occurred_on, period_start,
+               period_end, recurrence, source, source_reference, description,
+               document_reference, status, created_by_uid)
+             values
+              ($1, $2, $3, $4, $5, $6, $7, $8, $9::bigint, $10, $11::date,
+               $12::date, $13::date, $14, $15, $16, $17, $18, 'POSTED', $19)
+             returning *`,
         [
           normalizedOrgId,
           normalizedObjectId,
@@ -1195,6 +1892,7 @@ class ProfitabilityRepository {
           String(entry.description ?? '').trim() || null,
           String(entry.documentReference ?? '').trim() || null,
           uid,
+          ...(this.financialModelV21Enabled ? [valueBasis, valueKey] : []),
         ],
       )
       const row = inserted.rows[0]
@@ -1214,7 +1912,36 @@ class ProfitabilityRepository {
           : 'PORTAL',
       })
       return row
-    })
+    }
+
+    if (!this.financialModelV21Enabled) return this.withTransaction(persist)
+    return this.withFinancialModelV21Command({
+      commandId,
+      commandKind: entryGroup === 'REVENUE' ? 'CREATE_REVENUE' : 'CREATE_COST',
+      objectId: normalizedObjectId,
+      orgId: normalizedOrgId,
+      payload: {
+        amountMinor,
+        auditReason,
+        category: requiredText(entry.category, 'entry.category'),
+        currency,
+        description: String(entry.description ?? '').trim() || null,
+        documentReference: String(entry.documentReference ?? '').trim() || null,
+        equipmentId: String(entry.equipmentId ?? '').trim() || null,
+        entryGroup,
+        name: requiredText(entry.name, 'entry.name'),
+        occurredOn,
+        periodEnd,
+        periodStart,
+        periodicWorkId: String(entry.periodicWorkId ?? '').trim() || null,
+        recurrence,
+        source: entrySource,
+        sourceReference: String(entry.sourceReference ?? '').trim() || null,
+        valueBasis,
+        valueKey,
+      },
+      uid,
+    }, persist)
   }
 
   async createCost({ cost = {}, ...scope }) {
@@ -1252,7 +1979,294 @@ class ProfitabilityRepository {
     })
   }
 
-  async createEquipment({ asset = {}, clientId, objectId, orgId, reason = '', uid }) {
+  async saveHygienePackage({
+    clientId,
+    commandId,
+    objectId,
+    orgId,
+    package: packageInput = {},
+    reason = '',
+    uid,
+  }) {
+    if (!this.financialModelV21Enabled) {
+      throw repositoryError(
+        'PROFITABILITY_FINANCIAL_MODEL_NOT_READY',
+        'Hygiene packages require financial model v2.1',
+        503,
+      )
+    }
+    const normalizedOrgId = requiredText(orgId, 'orgId')
+    const normalizedClientId = requiredText(clientId, 'clientId')
+    const normalizedObjectId = requiredText(objectId, 'objectId')
+    const normalizedCommandId = requiredText(commandId, 'commandId')
+    const deterministicSuffix = createHash('sha256')
+      .update(`${normalizedOrgId}\u0000${normalizedObjectId}\u0000${normalizedCommandId}`)
+      .digest('hex')
+      .slice(0, 32)
+    const requestedBillingMode = requiredText(
+      packageInput.billingMode ?? 'IN_CONTRACT',
+      'package.billingMode',
+    ).toUpperCase()
+    const accessDecision = await this.assertAccess({
+      action: PROFITABILITY_ACTIONS.EDIT,
+      objectId: normalizedObjectId,
+      orgId: normalizedOrgId,
+      uid,
+      writeKind: requestedBillingMode === 'IN_CONTRACT'
+        ? WRITE_KINDS.OPERATIONAL_COST
+        : WRITE_KINDS.CONTRACT_TERMS,
+    })
+    const authorizedPackageInput = accessDecision?.financeProfile === 'COST_CONTROL'
+      ? restrictCostControlHygienePackage(packageInput)
+      : packageInput
+    const normalized = normalizeHygienePackage({
+      ...authorizedPackageInput,
+      packageId: authorizedPackageInput.packageId ?? `hyg-${deterministicSuffix}`,
+      packageVersionId: authorizedPackageInput.packageVersionId ?? `hygv-${deterministicSuffix}`,
+    })
+    await this.verifyServiceObjectScope({
+      clientId: normalizedClientId,
+      objectId: normalizedObjectId,
+      orgId: normalizedOrgId,
+    })
+
+    const auditReason = String(reason || packageInput.reason || '').trim()
+    const persist = async () => {
+      await this.assertWritableFinancialRange({
+        endExclusive: normalized.billingMode === 'AD_HOC'
+          ? nextCalendarDate(normalized.occurredOn)
+          : normalized.effectiveTo,
+        objectId: normalizedObjectId,
+        orgId: normalizedOrgId,
+        start: normalized.effectiveFrom,
+      })
+      const versionsResult = await this.client.query(
+        `select package_version_id, version_no, status, package_id,
+                value_basis, package_name, billing_mode, price_net_minor,
+                cost_minor, currency, recognition_key,
+                effective_from::text as effective_from,
+                effective_to::text as effective_to,
+                occurred_on::text as occurred_on
+           from public.object_hygiene_package_version
+          where org_id = $1 and object_id = $2 and package_id = $3
+          order by version_no desc
+          for update`,
+        [normalizedOrgId, normalizedObjectId, normalized.packageId],
+      )
+      const versionsForBasis = versionsResult.rows.filter(
+        (row) => row.value_basis === normalized.valueBasis,
+      )
+      const previous = normalized.replacesPackageVersionId
+        ? versionsResult.rows.find(
+            (row) => row.package_version_id === normalized.replacesPackageVersionId,
+          )
+        : null
+      if (normalized.replacesPackageVersionId && !previous) {
+        throw repositoryError(
+          'PROFITABILITY_HYGIENE_VERSION_NOT_FOUND',
+          'The hygiene package version selected for correction does not exist',
+          404,
+        )
+      }
+      if (previous && previous.value_basis !== normalized.valueBasis) {
+        throw new RangeError('A correction must keep the same value basis')
+      }
+      if (previous) {
+        const transitionStatus = previous.status === 'DRAFT' ? 'VOID' : 'ARCHIVED'
+        await this.client.query(
+          `update public.object_hygiene_package_version
+              set status = $4,
+                  updated_at = now(), updated_by_uid = $5,
+                  archived_at = case when $4 = 'ARCHIVED' then now() else null end,
+                  archived_by_uid = case when $4 = 'ARCHIVED' then $5 else null end
+            where org_id = $1 and object_id = $2 and package_version_id = $3`,
+          [
+            normalizedOrgId,
+            normalizedObjectId,
+            previous.package_version_id,
+            transitionStatus,
+            uid,
+          ],
+        )
+      }
+      const versionNo = versionsForBasis.reduce(
+        (maximum, row) => Math.max(maximum, Number(row.version_no) || 0),
+        0,
+      ) + 1
+      const inserted = await this.client.query(
+        `insert into public.object_hygiene_package_version
+          (org_id, object_id, package_id, package_version_id, version_no,
+           recognition_key, package_name, billing_mode, value_basis,
+           price_net_minor, cost_minor, currency, effective_from, effective_to,
+           occurred_on, status, created_by_uid)
+         values
+          ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+           $10::bigint, $11::bigint, $12, $13::date, $14::date,
+           $15::date, $16, $17)
+         returning *`,
+        [
+          normalizedOrgId,
+          normalizedObjectId,
+          normalized.packageId,
+          normalized.packageVersionId,
+          versionNo,
+          normalized.recognitionKey,
+          normalized.packageName,
+          normalized.billingMode,
+          normalized.valueBasis,
+          normalized.priceNetMinor,
+          normalized.costMinor,
+          normalized.currency,
+          normalized.effectiveFrom,
+          normalized.effectiveTo,
+          normalized.occurredOn,
+          normalized.status,
+          uid,
+        ],
+      )
+      const row = inserted.rows[0]
+      await this.insertAuditRow({
+        action: previous ? 'CORRECT_HYGIENE_PACKAGE' : 'CREATE_HYGIENE_PACKAGE',
+        actorUid: uid,
+        entityId: normalized.packageVersionId,
+        entityType: 'OBJECT_HYGIENE_PACKAGE_VERSION',
+        newValue: row,
+        objectId: normalizedObjectId,
+        orgId: normalizedOrgId,
+        previousValue: previous,
+        reason: auditReason,
+      })
+      return row
+    }
+
+    return this.withFinancialModelV21Command({
+      commandId: normalizedCommandId,
+      commandKind: normalized.replacesPackageVersionId
+        ? 'CORRECT_HYGIENE_PACKAGE'
+        : 'CREATE_HYGIENE_PACKAGE',
+      objectId: normalizedObjectId,
+      orgId: normalizedOrgId,
+      payload: {
+        ...normalized,
+        packageVersionId: normalized.packageVersionId,
+        reason: auditReason,
+      },
+      uid,
+    }, persist)
+  }
+
+  async archiveHygienePackage({
+    clientId,
+    commandId,
+    objectId,
+    orgId,
+    packageVersionId,
+    reason = '',
+    uid,
+  }) {
+    if (!this.financialModelV21Enabled) {
+      throw repositoryError(
+        'PROFITABILITY_FINANCIAL_MODEL_NOT_READY',
+        'Hygiene packages require financial model v2.1',
+        503,
+      )
+    }
+    const normalizedOrgId = requiredText(orgId, 'orgId')
+    const normalizedClientId = requiredText(clientId, 'clientId')
+    const normalizedObjectId = requiredText(objectId, 'objectId')
+    const normalizedVersionId = requiredText(packageVersionId, 'packageVersionId')
+    await this.verifyServiceObjectScope({
+      clientId: normalizedClientId,
+      objectId: normalizedObjectId,
+      orgId: normalizedOrgId,
+    })
+    const packageScopeResult = await this.client.query(
+      `select billing_mode
+         from public.object_hygiene_package_version
+        where org_id = $1 and object_id = $2 and package_version_id = $3
+        limit 1`,
+      [normalizedOrgId, normalizedObjectId, normalizedVersionId],
+    )
+    if (!packageScopeResult.rows[0]) {
+      throw repositoryError(
+        'PROFITABILITY_HYGIENE_VERSION_NOT_FOUND',
+        'The hygiene package version does not exist',
+        404,
+      )
+    }
+    await this.assertAccess({
+      action: PROFITABILITY_ACTIONS.EDIT,
+      objectId: normalizedObjectId,
+      orgId: normalizedOrgId,
+      uid,
+      writeKind: packageScopeResult.rows[0].billing_mode === 'IN_CONTRACT'
+        ? WRITE_KINDS.OPERATIONAL_COST
+        : WRITE_KINDS.CONTRACT_TERMS,
+    })
+    const auditReason = requiredText(reason, 'reason')
+    const persist = async () => {
+      const currentResult = await this.client.query(
+        `select *,
+                effective_from::text as effective_from_ymd,
+                effective_to::text as effective_to_ymd,
+                occurred_on::text as occurred_on_ymd
+           from public.object_hygiene_package_version
+          where org_id = $1 and object_id = $2 and package_version_id = $3
+          for update`,
+        [normalizedOrgId, normalizedObjectId, normalizedVersionId],
+      )
+      const current = currentResult.rows[0]
+      if (!current) {
+        throw repositoryError(
+          'PROFITABILITY_HYGIENE_VERSION_NOT_FOUND',
+          'The hygiene package version does not exist',
+          404,
+        )
+      }
+      await this.assertWritableFinancialRange({
+        endExclusive: current.billing_mode === 'AD_HOC'
+          ? nextCalendarDate(databaseDate(current.occurred_on_ymd))
+          : nullableDatabaseDate(current.effective_to_ymd),
+        objectId: normalizedObjectId,
+        orgId: normalizedOrgId,
+        start: databaseDate(current.effective_from_ymd),
+      })
+      const status = current.status === 'DRAFT' ? 'VOID' : 'ARCHIVED'
+      const updated = await this.client.query(
+        `update public.object_hygiene_package_version
+            set status = $4,
+                updated_at = now(), updated_by_uid = $5,
+                archived_at = case when $4 = 'ARCHIVED' then now() else null end,
+                archived_by_uid = case when $4 = 'ARCHIVED' then $5 else null end
+          where org_id = $1 and object_id = $2 and package_version_id = $3
+          returning *`,
+        [normalizedOrgId, normalizedObjectId, normalizedVersionId, status, uid],
+      )
+      const row = updated.rows[0]
+      await this.insertAuditRow({
+        action: 'ARCHIVE_HYGIENE_PACKAGE',
+        actorUid: uid,
+        entityId: normalizedVersionId,
+        entityType: 'OBJECT_HYGIENE_PACKAGE_VERSION',
+        newValue: row,
+        objectId: normalizedObjectId,
+        orgId: normalizedOrgId,
+        previousValue: current,
+        reason: auditReason,
+      })
+      return row
+    }
+    return this.withFinancialModelV21Command({
+      commandId,
+      commandKind: 'ARCHIVE_HYGIENE_PACKAGE',
+      objectId: normalizedObjectId,
+      orgId: normalizedOrgId,
+      payload: { packageVersionId: normalizedVersionId, reason: auditReason },
+      uid,
+    }, persist)
+  }
+
+  async createEquipment({ asset = {}, clientId, commandId = '', objectId, orgId, reason = '', uid }) {
     const normalizedOrgId = requiredText(orgId, 'orgId')
     const normalizedClientId = requiredText(clientId, 'clientId')
     const normalizedObjectId = requiredText(objectId, 'objectId')
@@ -1261,6 +2275,7 @@ class ProfitabilityRepository {
       objectId: normalizedObjectId,
       orgId: normalizedOrgId,
       uid,
+      writeKind: WRITE_KINDS.OPERATIONAL_COST,
     })
     await this.verifyServiceObjectScope({
       clientId: normalizedClientId,
@@ -1268,7 +2283,8 @@ class ProfitabilityRepository {
       orgId: normalizedOrgId,
     })
 
-    const equipmentId = requiredText(asset.equipmentId ?? asset.assetId ?? randomUUID(), 'asset.equipmentId')
+    const requestedEquipmentId = String(asset.equipmentId ?? asset.assetId ?? '').trim() || null
+    const equipmentId = requiredText(requestedEquipmentId ?? randomUUID(), 'asset.equipmentId')
     const financing = requiredText(asset.financing, 'asset.financing').toUpperCase()
     if (!['PURCHASE', 'LEASE', 'RENTAL'].includes(financing)) {
       throw new RangeError('Unsupported equipment financing')
@@ -1321,8 +2337,15 @@ class ProfitabilityRepository {
     if (endedOn && endedOn <= startedOn) throw new RangeError('asset.endedOn must be after startedOn')
     const auditReason = String(reason || asset.reason || '').trim()
     const serviceCostMinor = optionalNonNegativeDecimal(asset.serviceCostMinor, 'asset.serviceCostMinor')
+    const assetName = requiredText(asset.name, 'asset.name')
 
-    return this.withTransaction(async () => {
+    const persist = async () => {
+      await this.assertWritableFinancialRange({
+        endExclusive: endedOn,
+        objectId: normalizedObjectId,
+        orgId: normalizedOrgId,
+        start: startedOn,
+      })
       const previousResult = await this.client.query(
         `select * from public.object_equipment
           where org_id = $1 and object_id = $2 and equipment_id = $3
@@ -1360,7 +2383,7 @@ class ProfitabilityRepository {
           normalizedOrgId,
           normalizedObjectId,
           equipmentId,
-          requiredText(asset.name, 'asset.name'),
+          assetName,
           String(asset.category ?? '').trim() || null,
           String(asset.inventoryNumber ?? '').trim() || null,
           financing,
@@ -1390,23 +2413,35 @@ class ProfitabilityRepository {
         const serviceEntryId = randomUUID()
         const serviceDate = startedOn
         const serviceEntry = await this.client.query(
-          `insert into public.object_financial_entry
-            (org_id, object_id, entry_id, equipment_id, entry_group, category, name,
-             amount_minor, currency, occurred_on, recurrence, source, status,
-             created_by_uid)
-           values ($1, $2, $3, $4, 'EQUIPMENT_SERVICE', 'SERVICE_REPAIR', $5,
-                   $6::bigint, $7, $8::date, 'ONE_TIME', 'MANUAL', 'POSTED', $9)
-           returning *`,
+          this.financialModelV21Enabled
+            ? `insert into public.object_financial_entry
+                (org_id, object_id, entry_id, equipment_id, entry_group, category, name,
+                 amount_minor, currency, occurred_on, recurrence, source, status,
+                 created_by_uid, value_basis, value_key)
+               values ($1, $2, $3, $4, 'EQUIPMENT_SERVICE', 'SERVICE_REPAIR', $5,
+                       $6::bigint, $7, $8::date, 'ONE_TIME', 'MANUAL', 'POSTED', $9,
+                       'ACTUAL', $10)
+               returning *`
+            : `insert into public.object_financial_entry
+                (org_id, object_id, entry_id, equipment_id, entry_group, category, name,
+                 amount_minor, currency, occurred_on, recurrence, source, status,
+                 created_by_uid)
+               values ($1, $2, $3, $4, 'EQUIPMENT_SERVICE', 'SERVICE_REPAIR', $5,
+                       $6::bigint, $7, $8::date, 'ONE_TIME', 'MANUAL', 'POSTED', $9)
+               returning *`,
           [
             normalizedOrgId,
             normalizedObjectId,
             serviceEntryId,
             equipmentId,
-            `Serwis: ${requiredText(asset.name, 'asset.name')}`,
+            `Serwis: ${assetName}`,
             serviceCostMinor,
             currency,
             serviceDate,
             uid,
+            ...(this.financialModelV21Enabled
+              ? [`equipment-service:${equipmentId}:${serviceDate}`]
+              : []),
           ],
         )
         await this.insertAuditRow({
@@ -1421,7 +2456,31 @@ class ProfitabilityRepository {
         })
       }
       return row
-    })
+    }
+
+    return this.withFinancialModelV21Command({
+      commandId,
+      commandKind: 'UPSERT_EQUIPMENT',
+      objectId: normalizedObjectId,
+      orgId: normalizedOrgId,
+      payload: {
+        assetName,
+        auditReason,
+        category: String(asset.category ?? '').trim() || null,
+        currency,
+        depreciationMonths,
+        endedOn,
+        financing,
+        inventoryNumber: String(asset.inventoryNumber ?? '').trim() || null,
+        monthlyInstallmentMinor,
+        purchaseValueMinor,
+        recognitionMethod,
+        requestedEquipmentId,
+        serviceCostMinor,
+        startedOn,
+      },
+      uid,
+    }, persist)
   }
 
   async upsertAsset(input) {
@@ -1439,6 +2498,7 @@ class ProfitabilityRepository {
       objectId: normalizedObjectId,
       orgId: normalizedOrgId,
       uid,
+      writeKind: WRITE_KINDS.CONTRACT_TERMS,
     })
     const result = await this.client.query(
       `insert into public.financial_period
@@ -1459,7 +2519,7 @@ class ProfitabilityRepository {
     return result.rows[0] ?? null
   }
 
-  async closePeriod({ clientId, objectId, orgId, period, periodId = '', reason = '', uid }) {
+  async closePeriod({ clientId, commandId = '', objectId, orgId, period, periodId = '', reason = '', uid }) {
     const normalizedOrgId = requiredText(orgId, 'orgId')
     const normalizedClientId = requiredText(clientId, 'clientId')
     const normalizedObjectId = requiredText(objectId, 'objectId')
@@ -1475,32 +2535,52 @@ class ProfitabilityRepository {
       objectId: normalizedObjectId,
       orgId: normalizedOrgId,
     })
-    const input = await this.loadObjectCalculationInput({
+    const auditReason = String(reason ?? '').trim()
+    const persist = async () => {
+      const input = await this.loadObjectCalculationInput({
+        objectId: normalizedObjectId,
+        orgId: normalizedOrgId,
+        period: normalizedPeriod,
+        uid,
+      })
+      const result = calculateObjectProfitability(input)
+      if (!result.complete) {
+        const error = new Error('Financial period cannot be closed while required data is incomplete')
+        error.code = 'INCOMPLETE_DATA'
+        error.details = serializeBigInts(result.issues)
+        throw error
+      }
+      const snapshot = createProfitabilitySnapshot(result, {
+        calculatedAt: new Date().toISOString(),
+        dataVersion: this.financialModelV21Enabled
+          ? 'profitability-financial-model-v2.1'
+          : 'profitability-v1',
+        snapshotId: randomUUID(),
+      })
+      return this.saveSnapshot({
+        auditReason,
+        closePeriod: true,
+        periodId: normalizedPeriodId,
+        result,
+        snapshot,
+        transactionManaged: true,
+        uid,
+      })
+    }
+
+    return this.withFinancialModelV21Command({
+      commandId,
+      commandKind: 'CLOSE_FINANCIAL_PERIOD',
       objectId: normalizedObjectId,
       orgId: normalizedOrgId,
-      period: normalizedPeriod,
+      payload: {
+        auditReason,
+        clientId: normalizedClientId,
+        period: normalizedPeriod,
+        periodId: normalizedPeriodId,
+      },
       uid,
-    })
-    const result = calculateObjectProfitability(input)
-    if (!result.complete) {
-      const error = new Error('Financial period cannot be closed while required data is incomplete')
-      error.code = 'INCOMPLETE_DATA'
-      error.details = serializeBigInts(result.issues)
-      throw error
-    }
-    const snapshot = createProfitabilitySnapshot(result, {
-      calculatedAt: new Date().toISOString(),
-      dataVersion: 'profitability-v1',
-      snapshotId: randomUUID(),
-    })
-    return this.saveSnapshot({
-      auditReason: String(reason ?? '').trim(),
-      closePeriod: true,
-      periodId: normalizedPeriodId,
-      result,
-      snapshot,
-      uid,
-    })
+    }, persist)
   }
 
   async appendAudit({
@@ -1520,6 +2600,7 @@ class ProfitabilityRepository {
       objectId,
       orgId,
       uid: actorUid,
+      writeKind: WRITE_KINDS.CONTRACT_TERMS,
     })
     const result = await this.client.query(
       `insert into public.profitability_audit
@@ -1543,7 +2624,15 @@ class ProfitabilityRepository {
     return result.rows[0]
   }
 
-  async saveSnapshot({ auditReason = '', closePeriod = false, periodId, result, snapshot, uid }) {
+  async saveSnapshot({
+    auditReason = '',
+    closePeriod = false,
+    periodId,
+    result,
+    snapshot,
+    transactionManaged = false,
+    uid,
+  }) {
     const orgId = requiredText(result?.orgId, 'result.orgId')
     const objectId = requiredText(result?.objectId, 'result.objectId')
     if (snapshot?.correctionOfSnapshotId && !String(auditReason ?? '').trim()) {
@@ -1559,10 +2648,11 @@ class ProfitabilityRepository {
         objectId,
         orgId,
         uid,
+        writeKind: WRITE_KINDS.CONTRACT_TERMS,
       })
     }
 
-    await this.client.query('begin')
+    if (!transactionManaged) await this.client.query('begin')
     try {
       const snapshotPeriod = normalizePeriod(result.period)
       await this.client.query(
@@ -1582,7 +2672,10 @@ class ProfitabilityRepository {
         ],
       )
       const periodResult = await this.client.query(
-        `select status, period_start, period_end, currency
+        `select status,
+                period_start::text as period_start,
+                period_end::text as period_end,
+                currency
            from public.financial_period
           where org_id = $1 and object_id = $2 and period_id = $3
           for update`,
@@ -1591,8 +2684,8 @@ class ProfitabilityRepository {
       const currentPeriod = periodResult.rows[0]
       if (!currentPeriod) throw new Error('Financial period not found')
       if (
-        String(currentPeriod.period_start).slice(0, 10) !== snapshotPeriod.start ||
-        String(currentPeriod.period_end).slice(0, 10) !== snapshotPeriod.end ||
+        databaseDate(currentPeriod.period_start) !== snapshotPeriod.start ||
+        databaseDate(currentPeriod.period_end) !== snapshotPeriod.end ||
         String(currentPeriod.currency).toUpperCase() !== String(result.currency).toUpperCase()
       ) {
         const error = new Error('Financial period id already exists with a different range or currency')
@@ -1659,20 +2752,22 @@ class ProfitabilityRepository {
           JSON.stringify(payload),
         ],
       )
-      await this.client.query('commit')
+      if (!transactionManaged) await this.client.query('commit')
       return payload
     } catch (error) {
-      await this.client.query('rollback').catch(() => {})
+      if (!transactionManaged) await this.client.query('rollback').catch(() => {})
       throw error
     }
   }
 }
 
-function createProfitabilityRepository(client) {
-  return new ProfitabilityRepository(client)
+function createProfitabilityRepository(client, options) {
+  return new ProfitabilityRepository(client, options)
 }
 
 module.exports = {
+  databaseDate,
+  nullableDatabaseDate,
   ProfitabilityRepository,
   createProfitabilityRepository,
   mapFinancialEntry,

@@ -6,6 +6,7 @@ const assert = require('node:assert/strict')
 const {
   aggregateSnapshotTrend,
   ProfitabilityApiError,
+  buildPortfolioSummary,
   buildSummary,
   createProfitabilityApi,
   mapError,
@@ -192,6 +193,42 @@ test('API mapuje wzorcowy wynik 30k / 23.5k / 6.5k / 21.67% do kontraktu fronten
   assert.equal(payload.warnings.length, 0)
 })
 
+test('portfolio organizacji odczytuje wyłącznie obiekty zwrócone przez zakres dostępu', async () => {
+  const calls = []
+  const repository = {
+    async listServiceObjectsForOrganization(input) {
+      calls.push(['list', input])
+      return [{ object_id: 'OBJ-1', client_id: 'CLIENT-1', name: 'Obiekt 1', timezone: 'Europe/Warsaw' }]
+    },
+    async loadObjectCalculationInput(input) {
+      calls.push(['load', input])
+      return {
+        orgId: 'ORG-1', objectId: 'OBJ-1', clientId: 'CLIENT-1', currency: 'PLN', period: PERIOD,
+        contractRevenues: [entry('CONTRACT', '100000')], additionalRevenues: [], materialCosts: [],
+        otherCosts: [], equipment: [], periodicWorks: [], workerRates: [], laborSessions: [],
+      }
+    },
+    async listProfitabilityTrend(input) {
+      calls.push(['trend', input])
+      return {
+        source: 'PROFITABILITY_SNAPSHOT',
+        window: { start: '2025-08-01', end: '2026-08-01', months: 12 },
+        points: [],
+      }
+    },
+  }
+
+  const payload = await buildPortfolioSummary(repository, {
+    orgId: 'ORG-1', period: PERIOD, uid: 'USER-1',
+  })
+
+  assert.equal(payload.objects.length, 1)
+  assert.equal(payload.objects[0].clientId, 'CLIENT-1')
+  assert.equal(payload.objects[0].objectId, 'OBJ-1')
+  assert.deepEqual(calls[0], ['list', { orgId: 'ORG-1', uid: 'USER-1' }])
+  assert.equal(calls.find((call) => call[0] === 'trend')[1].clientId, 'CLIENT-1')
+})
+
 test('brak stawki pozostaje niepełnym wynikiem i nie jest zamieniany na koszt zero', async () => {
   const repository = {
     async listServiceObjectsForClient() {
@@ -313,8 +350,11 @@ test('publiczne POST-y delegują zapis i zamknięcie do transakcyjnego repozytor
     createRepository() {
       return repository
     },
-    async databaseRelationExists() {
-      return true
+    async databaseRelationExists(_client, relationName) {
+      return ![
+        'public.profitability_access_enforcement',
+        'public.profitability_financial_model_enforcement',
+      ].includes(relationName)
     },
     parseBearerToken() {
       return 'TOKEN'

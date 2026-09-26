@@ -2428,5 +2428,6 @@ export function createClientProfileFeature(ctx) {
     openDetails: openClientProfileDetails,
     openModal: openClientModal,
     renderDetail: renderClientProfileDetailView,
+    resetSession: () => profitabilityFeature.resetSession(),
   }
 }

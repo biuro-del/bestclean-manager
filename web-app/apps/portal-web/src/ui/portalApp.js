@@ -572,6 +572,8 @@ function flushPortalDeferredNotifications() {
 
 function resetPortalState(overrides = {}) {
   calendarFeature?.clearRemoteTimelineOrderTimers?.()
+  clientProfileFeature?.resetSession?.()
+  contractProfitabilityFeature?.resetSession?.()
   facilityManagerObjectsFeature?.resetSession?.()
   workforceScheduleFeature?.resetSession?.()
   portalDeferredNotifications.clear()
