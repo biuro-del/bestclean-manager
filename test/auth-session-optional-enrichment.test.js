@@ -119,6 +119,7 @@ test('brak ACL w opcjonalnym liczniku nie blokuje gotowego kontekstu logowania',
   )
   const load = new Function(
     'databaseRelationReadable',
+    'profitabilitySessionContextLoader',
     'buildSessionContext',
     'isWorkforceScheduleOrganizationEnabled',
     'buildPlanUsage',
@@ -130,6 +131,7 @@ test('brak ACL w opcjonalnym liczniku nie blokuje gotowego kontekstu logowania',
   })
   const buildOrganizationSessionContext = load(
     async () => false,
+    { load: async () => ({}) },
     () => ({
       planCode: 'PRO',
       limits: {},
@@ -153,6 +155,7 @@ test('niepowiazany blad bazy nadal blokuje kontekst zamiast zostac ukryty', asyn
   )
   const load = new Function(
     'databaseRelationReadable',
+    'profitabilitySessionContextLoader',
     'buildSessionContext',
     'isWorkforceScheduleOrganizationEnabled',
     'buildPlanUsage',
@@ -162,6 +165,7 @@ test('niepowiazany blad bazy nadal blokuje kontekst zamiast zostac ukryty', asyn
   const connectionFailure = Object.assign(new Error('connection reset'), { code: '08006' })
   const buildOrganizationSessionContext = load(
     async () => false,
+    { load: async () => ({}) },
     () => ({ planCode: 'PRO', limits: {}, capabilities: {} }),
     () => true,
     async () => { throw connectionFailure },
