@@ -104,7 +104,8 @@ function snapshot({ authenticated = false } = {}) {
       pgMajor: 17,
       primary: true,
       readWrite: true,
-      foundationExact: true,
+      foundationExact: authenticated,
+      foundationStatus: authenticated ? 'exact' : 'verification_required',
       roleGraphExact: true,
       accessSourceReferences: { status: 'exact' },
       sourceReadBridge: { status: 'exact' },
@@ -293,6 +294,8 @@ test('CLI is audit-only by default and rejects secret-bearing arguments', () => 
 test('environment preflight fails closed on gates, backup, dirty tree and partial schema', () => {
   const base = snapshot()
   assert.equal(validateEnvironmentSnapshot(base, options('audit')), base)
+  assert.equal(base.database.foundationExact, false)
+  assert.equal(base.database.foundationStatus, 'verification_required')
   assert.throws(() => validateEnvironmentSnapshot(base, {
     ...options('audit'),
     backupId: '1790505049270',
@@ -313,7 +316,26 @@ test('environment preflight fails closed on gates, backup, dirty tree and partia
     ...base,
     database: { ...base.database, accessProfile: { status: 'partial' } },
   }, options('audit')), { code: 'ACCESS_PROFILE_V2_NOT_EXACT' })
-  assert.throws(() => validateEnvironmentSnapshot(base, options(), {
+  assert.throws(() => validateEnvironmentSnapshot({
+    ...base,
+    database: { ...base.database, foundationStatus: 'partial' },
+  }, options('audit')), { code: 'FOUNDATION_STATE_INVALID' })
+  assert.throws(() => validateEnvironmentSnapshot({
+    ...base,
+    database: { ...base.database, roleGraphExact: false },
+  }, options('audit')), { code: 'FOUNDATION_STATE_INVALID' })
+  const authenticatedFoundationUnverified = snapshot({ authenticated: true })
+  authenticatedFoundationUnverified.database.foundationExact = false
+  authenticatedFoundationUnverified.database.foundationStatus = 'verification_required'
+  assert.throws(() => validateEnvironmentSnapshot(
+    authenticatedFoundationUnverified,
+    options(),
+    { applying: true, authenticated: true },
+  ), { code: 'FOUNDATION_STATE_INVALID' })
+  const authenticatedTargetUnverified = snapshot({ authenticated: true })
+  authenticatedTargetUnverified.database.accessProfile = { status: 'verification_required' }
+  authenticatedTargetUnverified.database.financialModel = { status: 'verification_required' }
+  assert.throws(() => validateEnvironmentSnapshot(authenticatedTargetUnverified, options(), {
     applying: true,
     authenticated: true,
   }), { code: 'ACCESS_PROFILE_V2_NOT_EXACT' })

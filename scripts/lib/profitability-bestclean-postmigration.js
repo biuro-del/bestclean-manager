@@ -196,7 +196,14 @@ function validateEnvironmentSnapshot(snapshot, options, {
   if (database.pgMajor !== 17 || database.primary !== true || database.readWrite !== true) {
     fail('DATABASE_NOT_WRITABLE_PG17_PRIMARY')
   }
-  if (database.foundationExact !== true || database.roleGraphExact !== true) {
+  const foundationStatus = database.foundationStatus
+    || (database.foundationExact === true ? 'exact' : 'partial')
+  const allowedFoundationStatuses = authenticated
+    ? new Set(['exact'])
+    : new Set(['exact', 'verification_required'])
+  if (!allowedFoundationStatuses.has(foundationStatus)
+      || database.roleGraphExact !== true
+      || (authenticated && database.foundationExact !== true)) {
     fail('FOUNDATION_STATE_INVALID')
   }
   if (database.accessSourceReferences?.status !== 'exact') {
