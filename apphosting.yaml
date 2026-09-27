@@ -170,6 +170,52 @@ env:
     value: iclean-room-database
     availability:
       - RUNTIME
+  # Rentownosc obiektow uses a dedicated least-privileged PostgreSQL session.
+  # Both authorization layers remain fail-closed and limited to Best Clean.
+  - variable: PROFITABILITY_DB_ENABLED
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: PROFITABILITY_DB_CONNECTOR
+    value: cloudsql
+    availability:
+      - RUNTIME
+  - variable: PROFITABILITY_CLOUD_SQL_IP_TYPE
+    value: PUBLIC
+    availability:
+      - RUNTIME
+  - variable: PROFITABILITY_DB_AUTH_TYPE
+    value: PASSWORD
+    availability:
+      - RUNTIME
+  - variable: PROFITABILITY_DB_NAME
+    value: iclean-room-database
+    availability:
+      - RUNTIME
+  - variable: PROFITABILITY_DB_USER
+    value: profitability_session
+    availability:
+      - RUNTIME
+  - variable: PROFITABILITY_DB_PASS
+    secret: PROFITABILITY_DB_PASS
+    availability:
+      - RUNTIME
+  - variable: PROFITABILITY_ACCESS_PROFILE_V2_ENABLED
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: PROFITABILITY_ACCESS_PROFILE_V2_ALLOWED_ORG_IDS
+    value: bestclean
+    availability:
+      - RUNTIME
+  - variable: PROFITABILITY_FINANCIAL_MODEL_V21_ENABLED
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: PROFITABILITY_FINANCIAL_MODEL_V21_ALLOWED_ORG_IDS
+    value: bestclean
+    availability:
+      - RUNTIME
   # Dedicated Grafik credentials are isolated from the legacy portal pool.
   # Both the backend and frontend canary remain limited to one organization.
   # Worker delivery is enabled only for the exact Best Clean canary;
