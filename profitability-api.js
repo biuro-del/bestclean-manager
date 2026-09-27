@@ -619,7 +619,15 @@ async function buildPortfolioSummary(repository, { orgId, clientId = '', objectI
     }
   }
 
-  const aggregate = aggregateClientProfitability(calculations)
+  // The portfolio intentionally spans multiple clients. Reuse the thoroughly
+  // tested object aggregation rules with one synthetic portfolio scope while
+  // keeping the original client ids in every projected object row.
+  const aggregate = aggregateClientProfitability(
+    calculations.map((calculation) => ({
+      ...calculation,
+      clientId: '__organization_portfolio__',
+    })),
+  )
   const category = (key) => sumBigInts(rows.map((row) => row[key]))
   const operationalOutcome = aggregateOperationalOutcome(rows)
   return {

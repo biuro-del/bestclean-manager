@@ -198,13 +198,20 @@ test('portfolio organizacji odczytuje wyłącznie obiekty zwrócone przez zakres
   const repository = {
     async listServiceObjectsForOrganization(input) {
       calls.push(['list', input])
-      return [{ object_id: 'OBJ-1', client_id: 'CLIENT-1', name: 'Obiekt 1', timezone: 'Europe/Warsaw' }]
+      return [
+        { object_id: 'OBJ-1', client_id: 'CLIENT-1', name: 'Obiekt 1', timezone: 'Europe/Warsaw' },
+        { object_id: 'OBJ-2', client_id: 'CLIENT-2', name: 'Obiekt 2', timezone: 'Europe/Warsaw' },
+      ]
     },
     async loadObjectCalculationInput(input) {
       calls.push(['load', input])
+      const clientId = input.objectId === 'OBJ-2' ? 'CLIENT-2' : 'CLIENT-1'
       return {
-        orgId: 'ORG-1', objectId: 'OBJ-1', clientId: 'CLIENT-1', currency: 'PLN', period: PERIOD,
-        contractRevenues: [entry('CONTRACT', '100000')], additionalRevenues: [], materialCosts: [],
+        orgId: 'ORG-1', objectId: input.objectId, clientId, currency: 'PLN', period: PERIOD,
+        contractRevenues: [{
+          ...entry(`CONTRACT-${input.objectId}`, '100000'),
+          objectId: input.objectId,
+        }], additionalRevenues: [], materialCosts: [],
         otherCosts: [], equipment: [], periodicWorks: [], workerRates: [], laborSessions: [],
       }
     },
@@ -222,11 +229,16 @@ test('portfolio organizacji odczytuje wyłącznie obiekty zwrócone przez zakres
     orgId: 'ORG-1', period: PERIOD, uid: 'USER-1',
   })
 
-  assert.equal(payload.objects.length, 1)
+  assert.equal(payload.objects.length, 2)
   assert.equal(payload.objects[0].clientId, 'CLIENT-1')
   assert.equal(payload.objects[0].objectId, 'OBJ-1')
+  assert.equal(payload.objects[1].clientId, 'CLIENT-2')
+  assert.equal(payload.objects[1].objectId, 'OBJ-2')
+  assert.equal(payload.summary.objectCount, 2)
+  assert.equal(payload.summary.revenueMinor, 200000n)
   assert.deepEqual(calls[0], ['list', { orgId: 'ORG-1', uid: 'USER-1' }])
   assert.equal(calls.find((call) => call[0] === 'trend')[1].clientId, 'CLIENT-1')
+  assert.equal(calls.filter((call) => call[0] === 'trend')[1][1].clientId, 'CLIENT-2')
 })
 
 test('brak stawki pozostaje niepełnym wynikiem i nie jest zamieniany na koszt zero', async () => {
