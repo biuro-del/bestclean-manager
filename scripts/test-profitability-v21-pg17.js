@@ -8,6 +8,10 @@ const { spawnSync } = require('node:child_process')
 const { Client } = require('pg')
 
 const foundation = require('./test-profitability-foundation-pg17')
+const {
+  inspectExistingFoundationPostflight,
+  POST_UPGRADE_FOUNDATION_EXTENSION_EXACT_SQL,
+} = require('./lib/profitability-foundation-production-adapters')
 
 const ROOT_DIR = path.resolve(__dirname, '..')
 const WRAPPER_PATH = path.join(
@@ -108,6 +112,98 @@ function runWrapperRequiresFailure({ psqlPath, connectionString, marker }) {
   })
   assert.notEqual(result.status, 0, 'Drifted V2.1 replay unexpectedly succeeded.')
   assert.match(`${result.stderr}\n${result.stdout}`, marker)
+}
+
+async function verifyCompositeFoundationPostflight(connectionString) {
+  const client = new Client({ connectionString })
+  await client.connect()
+  try {
+    const result = await inspectExistingFoundationPostflight(client, {
+      migrationFile: foundation.MIGRATION_PATH,
+      executorSession: true,
+    })
+    assert.equal(result.status, 'exact')
+    assert.equal(result.exact, true)
+  } finally {
+    await client.end()
+  }
+}
+
+async function verifyCompositeRejectsReviewedNameWithDrift(
+  adminConnectionString,
+  executorConnectionString,
+) {
+  const admin = new Client({ connectionString: adminConnectionString })
+  await admin.connect()
+  try {
+    await admin.query('set role profitability_owner')
+    await admin.query('drop index public.object_financial_entry_active_value_basis_uidx')
+    await admin.query(
+      `create unique index object_financial_entry_active_value_basis_uidx
+         on public.object_financial_entry
+         (org_id, object_id, value_key, value_basis)
+       where value_key is not null`,
+    )
+  } finally {
+    await admin.end()
+  }
+
+  await assert.rejects(
+    verifyCompositeFoundationPostflight(executorConnectionString),
+    /FOUNDATION_POST_UPGRADE_EXTENSION_POSTFLIGHT_FAILED/,
+  )
+
+  const repair = new Client({ connectionString: adminConnectionString })
+  await repair.connect()
+  try {
+    await repair.query('set role profitability_owner')
+    await repair.query('drop index public.object_financial_entry_active_value_basis_uidx')
+    await repair.query(
+      `create unique index object_financial_entry_active_value_basis_uidx
+         on public.object_financial_entry
+         (org_id, object_id, value_key, value_basis)
+       where value_key is not null
+         and status = 'POSTED'
+         and archived_at is null`,
+    )
+  } finally {
+    await repair.end()
+  }
+  await verifyCompositeFoundationPostflight(executorConnectionString)
+}
+
+async function verifyCompositeRejectsReorderedReviewedColumns(
+  adminConnectionString,
+  executorConnectionString,
+) {
+  const admin = new Client({ connectionString: adminConnectionString })
+  await admin.connect()
+  try {
+    await admin.query('begin')
+    await admin.query('set local role profitability_owner')
+    await admin.query(
+      'alter table public.object_financial_entry drop column value_key cascade',
+    )
+    await admin.query(
+      'alter table public.object_financial_entry drop column value_basis cascade',
+    )
+    await admin.query(
+      'alter table public.object_financial_entry add column value_key varchar(96)',
+    )
+    await admin.query(
+      `alter table public.object_financial_entry
+         add column value_basis varchar(16) not null default 'ACTUAL'`,
+    )
+    await assert.rejects(
+      admin.query(POST_UPGRADE_FOUNDATION_EXTENSION_EXACT_SQL),
+      /PROFITABILITY_POST_UPGRADE_COLUMN_EXTENSION_DRIFT/,
+    )
+  } finally {
+    await admin.query('rollback').catch(() => {})
+    await admin.end()
+  }
+
+  await verifyCompositeFoundationPostflight(executorConnectionString)
 }
 
 async function schemaFingerprint(client) {
@@ -526,6 +622,15 @@ async function runHarness() {
   )
   runRawMigrationRequiresGuard({ psqlPath: launch.psqlPath, connectionString: executorUrl })
   runWrapper({ psqlPath: launch.psqlPath, connectionString: executorUrl })
+  await verifyCompositeFoundationPostflight(executorUrl)
+  await verifyCompositeRejectsReviewedNameWithDrift(
+    launch.connectionString,
+    executorUrl,
+  )
+  await verifyCompositeRejectsReorderedReviewedColumns(
+    launch.connectionString,
+    executorUrl,
+  )
 
   const admin = new Client({ connectionString: launch.connectionString })
   await admin.connect()
@@ -567,6 +672,7 @@ async function runHarness() {
   }
 
   runWrapper({ psqlPath: launch.psqlPath, connectionString: executorUrl })
+  await verifyCompositeFoundationPostflight(executorUrl)
 
   const replayAdmin = new Client({ connectionString: launch.connectionString })
   await replayAdmin.connect()
@@ -584,6 +690,9 @@ async function runHarness() {
     checks: [
       'foundation-v2-full-harness',
       'v21-first-apply',
+      'foundation-v2-composite-post-upgrade-postflight',
+      'foundation-v2-composite-same-name-extension-drift-rejected',
+      'foundation-v2-composite-reordered-extension-columns-rejected',
       'raw-sql-entrypoint-guard',
       'partial-target-replay-rejected',
       'v21-idempotent-replay',

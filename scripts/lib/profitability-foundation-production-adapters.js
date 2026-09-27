@@ -43,6 +43,11 @@ const TARGET_STATE_GUARD_TAG = '$profitability_foundation_v2_target_state_guard$
 const EXACT_CATALOG_POSTFLIGHT_TAG = '$profitability_foundation_v2_exact_catalog_postflight$'
 const OWNER_ACL_POSTFLIGHT_TAG = '$profitability_foundation_v2_owner_acl_postflight$'
 const FINAL_GUARD_TAG = '$profitability_foundation_v2_final_guard$'
+const FINANCIAL_V21_POSTFLIGHT_TAG = '$profitability_v21_postflight$'
+const ACCESS_PROFILE_V2_MIGRATION_FILE =
+  '20260925_profitability_access_profile_v2_additive.sql'
+const FINANCIAL_MODEL_V21_MIGRATION_FILE =
+  '20260926_profitability_financial_model_v21_additive.sql'
 const FOUNDATION_MIGRATION_RELATIVE_PATH = path.join(
   'dataconnect',
   'migrations',
@@ -756,6 +761,390 @@ function createCloudSqlAdminApiAdapter(options = {}) {
     deleteEphemeralBuiltinUser,
     updateBuiltinUserPassword,
     settleBuiltinUserPasswordUpdate,
+  })
+}
+
+function replaceExactlyOnce(source, expected, replacement, code) {
+  const start = source.indexOf(expected)
+  if (start < 0 || source.indexOf(expected, start + expected.length) >= 0) {
+    throw new Error(code)
+  }
+  return `${source.slice(0, start)}${replacement}${source.slice(start + expected.length)}`
+}
+
+// Financial V2.1 deliberately extends one Foundation table.  The historical
+// Foundation fingerprint must remain immutable, so post-upgrade verification
+// projects only these reviewed additions out of the Foundation catalog before
+// recomputing the original fingerprint.  The additions themselves are checked
+// independently by the V2.1 postflight in the same read-only snapshot.
+function buildPostUpgradeFoundationExactCatalogPostflight(source) {
+  let result = source
+  result = replaceExactlyOnce(
+    result,
+    `                   and attribute_row.attnum > 0
+                   and not attribute_row.attisdropped
+              ),
+              'defaults', (`,
+    `                   and attribute_row.attnum > 0
+                   and not attribute_row.attisdropped
+                   and not (
+                     relation_row.relname = 'object_financial_entry'
+                     and attribute_row.attname = any(
+                       array['value_basis', 'value_key']::name[]
+                     )
+                   )
+              ),
+              'defaults', (`,
+    'FOUNDATION_POST_UPGRADE_COLUMNS_PROJECTION_INVALID',
+  )
+  result = replaceExactlyOnce(
+    result,
+    `                where namespace_row.nspname = 'public'
+                  and relation_row.relname = any(target_relations)
+             ),
+              'constraints', (`,
+    `                where namespace_row.nspname = 'public'
+                  and relation_row.relname = any(target_relations)
+                  and not (
+                    relation_row.relname = 'object_financial_entry'
+                    and attribute_row.attname = 'value_basis'
+                  )
+             ),
+              'constraints', (`,
+    'FOUNDATION_POST_UPGRADE_DEFAULTS_PROJECTION_INVALID',
+  )
+  result = replaceExactlyOnce(
+    result,
+    `                 where namespace_row.nspname = 'public'
+                   and relation_row.relname = any(target_relations)
+              ),
+              'indexes', (`,
+    `                 where namespace_row.nspname = 'public'
+                   and relation_row.relname = any(target_relations)
+                   and not (
+                     relation_row.relname = 'object_financial_entry'
+                     and constraint_row.conname = any(array[
+                       'object_financial_entry_value_basis_check',
+                       'object_financial_entry_value_key_check'
+                     ]::name[])
+                   )
+              ),
+              'indexes', (`,
+    'FOUNDATION_POST_UPGRADE_CONSTRAINTS_PROJECTION_INVALID',
+  )
+  result = replaceExactlyOnce(
+    result,
+    `                 where namespace_row.nspname = 'public'
+                   and relation_row.relname = any(target_relations)
+              ),
+              'immutable_function', (`,
+    `                 where namespace_row.nspname = 'public'
+                   and relation_row.relname = any(target_relations)
+                   and not (
+                     relation_row.relname = 'object_financial_entry'
+                     and index_row.relname =
+                       'object_financial_entry_active_value_basis_uidx'
+                   )
+              ),
+              'immutable_function', (`,
+    'FOUNDATION_POST_UPGRADE_INDEXES_PROJECTION_INVALID',
+  )
+  result = replaceExactlyOnce(
+    result,
+    `                where namespace_row.nspname = 'public'
+                   and relation_row.relname = any(target_relations)
+                   and not trigger_row.tgisinternal
+              ),
+              'internal_ri_triggers', (`,
+    `                where namespace_row.nspname = 'public'
+                   and relation_row.relname = any(target_relations)
+                   and not trigger_row.tgisinternal
+                   and not (
+                     relation_row.relname = 'object_financial_entry'
+                     and trigger_row.tgname =
+                       'object_financial_entry_pair_dimensions_v21'
+                   )
+              ),
+              'internal_ri_triggers', (`,
+    'FOUNDATION_POST_UPGRADE_TRIGGERS_PROJECTION_INVALID',
+  )
+  return result
+}
+
+function extractAccessProfileV2Postflight(source) {
+  const marker = '-- Idempotent postflight:'
+  const markerOffset = source.indexOf(marker)
+  if (markerOffset < 0 || source.indexOf(marker, markerOffset + marker.length) >= 0) {
+    throw new Error('ACCESS_PROFILE_V2_POSTFLIGHT_SOURCE_INVALID')
+  }
+  const start = source.indexOf('do $$', markerOffset)
+  const end = source.indexOf('\n$$;', start)
+  if (start < 0 || end < 0) {
+    throw new Error('ACCESS_PROFILE_V2_POSTFLIGHT_SOURCE_INVALID')
+  }
+  const block = source.slice(start, end + 4)
+  if (block.includes('\0') || /(^|\r?\n)\s*\\/m.test(block)) {
+    throw new Error('ACCESS_PROFILE_V2_POSTFLIGHT_SOURCE_INVALID')
+  }
+  return block
+}
+
+function loadPostUpgradeFoundationPostflights(foundationMigrationFile) {
+  try {
+    const migrationDirectory = path.dirname(path.resolve(foundationMigrationFile))
+    const accessSource = fs.readFileSync(
+      path.join(migrationDirectory, ACCESS_PROFILE_V2_MIGRATION_FILE),
+      'utf8',
+    )
+    const financialSource = fs.readFileSync(
+      path.join(migrationDirectory, FINANCIAL_MODEL_V21_MIGRATION_FILE),
+      'utf8',
+    )
+    return Object.freeze({
+      access: extractAccessProfileV2Postflight(accessSource),
+      financial: extractTaggedDoBlock(
+        financialSource,
+        FINANCIAL_V21_POSTFLIGHT_TAG,
+        'FINANCIAL_V21_POSTFLIGHT_SOURCE_INVALID',
+      ),
+    })
+  } catch (error) {
+    if (/_SOURCE_INVALID$/.test(error?.message || '')) throw error
+    throw new Error('POST_UPGRADE_FOUNDATION_POSTFLIGHT_SOURCE_UNREADABLE')
+  }
+}
+
+const POST_UPGRADE_FOUNDATION_MARKERS_SQL = `select
+  (
+      case when to_regclass('public.profitability_access_enforcement') is not null then 1 else 0 end
+    + case when to_regclass('public.organization_access_profile') is not null then 1 else 0 end
+    + case when to_regclass('public.service_object_assignment') is not null then 1 else 0 end
+    + case when to_regclass('public.profitability_target_history') is not null then 1 else 0 end
+    + case when to_regclass('public.organization_access_profile_active_uid_idx') is not null then 1 else 0 end
+    + case when to_regclass('public.organization_access_profile_lookup_idx') is not null then 1 else 0 end
+    + case when to_regclass('public.service_object_assignment_active_scope_idx') is not null then 1 else 0 end
+    + case when to_regclass('public.service_object_assignment_member_lookup_idx') is not null then 1 else 0 end
+    + case when to_regclass('public.service_object_assignment_object_lookup_idx') is not null then 1 else 0 end
+    + case when to_regclass('public.profitability_target_history_lookup_idx') is not null then 1 else 0 end
+  )::integer as access_marker_count,
+  (
+      case when exists (
+        select 1 from pg_attribute
+         where attrelid = to_regclass('public.object_financial_entry')
+           and attname = 'value_basis' and attnum > 0 and not attisdropped
+      ) then 1 else 0 end
+    + case when exists (
+        select 1 from pg_attribute
+         where attrelid = to_regclass('public.object_financial_entry')
+           and attname = 'value_key' and attnum > 0 and not attisdropped
+      ) then 1 else 0 end
+    + case when to_regclass('public.profitability_command_receipt') is not null then 1 else 0 end
+    + case when to_regclass('public.object_hygiene_package_version') is not null then 1 else 0 end
+    + case when to_regclass('public.profitability_financial_model_enforcement') is not null then 1 else 0 end
+    + case when to_regclass('public.profitability_effective_financial_entry') is not null then 1 else 0 end
+    + case when to_regclass('public.profitability_effective_hygiene_package') is not null then 1 else 0 end
+    + case when to_regclass('public.object_financial_entry_active_value_basis_uidx') is not null then 1 else 0 end
+    + case when to_regclass('public.profitability_command_receipt_created_idx') is not null then 1 else 0 end
+    + case when to_regclass('public.object_hygiene_package_active_recognition_uidx') is not null then 1 else 0 end
+    + case when to_regclass('public.object_hygiene_package_lookup_idx') is not null then 1 else 0 end
+    + case when to_regprocedure('public.profitability_v21_guard_command_receipt()') is not null then 1 else 0 end
+    + case when to_regprocedure('public.profitability_v21_guard_hygiene_package()') is not null then 1 else 0 end
+    + case when to_regprocedure('public.profitability_v21_validate_financial_pair()') is not null then 1 else 0 end
+    + case when to_regprocedure('public.profitability_v21_validate_hygiene_pair()') is not null then 1 else 0 end
+    + case when exists (
+        select 1 from pg_trigger
+         where tgrelid = to_regclass('public.profitability_command_receipt')
+           and tgname = 'profitability_command_receipt_transition_v21'
+           and not tgisinternal
+      ) then 1 else 0 end
+    + case when exists (
+        select 1 from pg_trigger
+         where tgrelid = to_regclass('public.object_hygiene_package_version')
+           and tgname = 'object_hygiene_package_transition_v21'
+           and not tgisinternal
+      ) then 1 else 0 end
+    + case when exists (
+        select 1 from pg_trigger
+         where tgrelid = to_regclass('public.object_financial_entry')
+           and tgname = 'object_financial_entry_pair_dimensions_v21'
+           and not tgisinternal
+      ) then 1 else 0 end
+    + case when exists (
+        select 1 from pg_trigger
+         where tgrelid = to_regclass('public.object_hygiene_package_version')
+           and tgname = 'object_hygiene_package_pair_dimensions_v21'
+           and not tgisinternal
+      ) then 1 else 0 end
+  )::integer as financial_marker_count`
+
+const POST_UPGRADE_FOUNDATION_EXTENSION_EXACT_SQL = `do $profitability_foundation_v2_post_upgrade_extension_exact$
+declare
+  owner_role_oid oid := (select oid from pg_roles where rolname = 'profitability_owner');
+begin
+  if owner_role_oid is null then
+    raise exception 'PROFITABILITY_POST_UPGRADE_OWNER_ROLE_MISSING';
+  end if;
+
+  if (
+    select count(*)
+      from pg_attribute attribute_row
+      join pg_type type_row
+        on type_row.oid = attribute_row.atttypid
+      join pg_namespace type_namespace
+        on type_namespace.oid = type_row.typnamespace
+      left join pg_collation collation_row
+        on collation_row.oid = attribute_row.attcollation
+      left join pg_namespace collation_namespace
+        on collation_namespace.oid = collation_row.collnamespace
+      left join pg_attrdef default_row
+        on default_row.adrelid = attribute_row.attrelid
+       and default_row.adnum = attribute_row.attnum
+     where attribute_row.attrelid = 'public.object_financial_entry'::regclass
+       and attribute_row.attnum > 0
+       and not attribute_row.attisdropped
+       and (
+         (
+           attribute_row.attname = 'value_basis'
+           and attribute_row.attnum = 26
+           and attribute_row.atttypid = 1043
+           and attribute_row.atttypmod = 20
+           and format_type(attribute_row.atttypid, attribute_row.atttypmod) =
+               'character varying(16)'
+           and type_namespace.nspname = 'pg_catalog'
+           and type_row.typname = 'varchar'
+           and type_row.typtype = 'b'
+           and type_row.typcategory = 'S'
+           and type_row.typbasetype = 0
+           and not type_row.typnotnull
+           and type_row.typalign = 'i'
+           and type_row.typstorage = 'x'
+           and attribute_row.attnotnull
+           and collation_namespace.nspname = 'pg_catalog'
+           and collation_row.collname = 'default'
+           and attribute_row.attidentity = ''
+           and attribute_row.attgenerated = ''
+           and pg_get_expr(default_row.adbin, default_row.adrelid, true) =
+               '''ACTUAL''::character varying'
+         )
+         or (
+           attribute_row.attname = 'value_key'
+           and attribute_row.attnum = 27
+           and attribute_row.atttypid = 1043
+           and attribute_row.atttypmod = 100
+           and format_type(attribute_row.atttypid, attribute_row.atttypmod) =
+               'character varying(96)'
+           and type_namespace.nspname = 'pg_catalog'
+           and type_row.typname = 'varchar'
+           and type_row.typtype = 'b'
+           and type_row.typcategory = 'S'
+           and type_row.typbasetype = 0
+           and not type_row.typnotnull
+           and type_row.typalign = 'i'
+           and type_row.typstorage = 'x'
+           and not attribute_row.attnotnull
+           and collation_namespace.nspname = 'pg_catalog'
+           and collation_row.collname = 'default'
+           and attribute_row.attidentity = ''
+           and attribute_row.attgenerated = ''
+           and default_row.oid is null
+         )
+       )
+  ) <> 2 then
+    raise exception 'PROFITABILITY_POST_UPGRADE_COLUMN_EXTENSION_DRIFT';
+  end if;
+
+  if (
+    select count(*)
+      from pg_constraint constraint_row
+     where constraint_row.conrelid = 'public.object_financial_entry'::regclass
+       and constraint_row.contype = 'c'
+       and constraint_row.convalidated
+       and not constraint_row.connoinherit
+       and not constraint_row.condeferrable
+       and not constraint_row.condeferred
+       and (
+         (
+           constraint_row.conname = 'object_financial_entry_value_basis_check'
+           and pg_get_constraintdef(constraint_row.oid, true) =
+             'CHECK (value_basis::text = ANY (ARRAY[''PLAN''::character varying, ''ESTIMATE''::character varying, ''ACTUAL''::character varying]::text[]))'
+         )
+         or (
+           constraint_row.conname = 'object_financial_entry_value_key_check'
+           and pg_get_constraintdef(constraint_row.oid, true) =
+             'CHECK (value_key IS NULL AND value_basis::text = ''ACTUAL''::text OR value_key IS NOT NULL AND value_key::text = btrim(value_key::text) AND value_key::text <> ''''::text)'
+         )
+       )
+  ) <> 2 then
+    raise exception 'PROFITABILITY_POST_UPGRADE_CONSTRAINT_EXTENSION_DRIFT';
+  end if;
+
+  if not exists (
+    select 1
+      from pg_index index_meta
+      join pg_class index_row on index_row.oid = index_meta.indexrelid
+      join pg_am access_method on access_method.oid = index_row.relam
+     where index_meta.indrelid = 'public.object_financial_entry'::regclass
+       and index_row.relname = 'object_financial_entry_active_value_basis_uidx'
+       and index_row.relowner = owner_role_oid
+       and index_row.relpersistence = 'p'
+       and access_method.amname = 'btree'
+       and index_meta.indisunique
+       and not index_meta.indisprimary
+       and not index_meta.indisexclusion
+       and index_meta.indimmediate
+       and index_meta.indisvalid
+       and index_meta.indisready
+       and index_meta.indislive
+       and not index_meta.indcheckxmin
+       and not index_meta.indisclustered
+       and not index_meta.indisreplident
+       and not index_meta.indnullsnotdistinct
+       and index_meta.indnkeyatts = 4
+       and index_meta.indnatts = 4
+       and pg_get_indexdef(index_meta.indexrelid, 0, true) =
+         'CREATE UNIQUE INDEX object_financial_entry_active_value_basis_uidx ON object_financial_entry USING btree (org_id, object_id, value_key, value_basis) WHERE value_key IS NOT NULL AND status::text = ''POSTED''::text AND archived_at IS NULL'
+       and pg_get_expr(index_meta.indpred, index_meta.indrelid, true) =
+         'value_key IS NOT NULL AND status::text = ''POSTED''::text AND archived_at IS NULL'
+  ) then
+    raise exception 'PROFITABILITY_POST_UPGRADE_INDEX_EXTENSION_DRIFT';
+  end if;
+
+  if not exists (
+    select 1
+      from pg_trigger trigger_row
+     where trigger_row.tgrelid = 'public.object_financial_entry'::regclass
+       and trigger_row.tgname = 'object_financial_entry_pair_dimensions_v21'
+       and not trigger_row.tgisinternal
+       and trigger_row.tgenabled = 'O'
+       and trigger_row.tgconstraint = 0
+       and trigger_row.tgqual is null
+       and trigger_row.tgargs = ''::bytea
+       and trigger_row.tgfoid =
+           'public.profitability_v21_validate_financial_pair()'::regprocedure
+       and pg_get_triggerdef(trigger_row.oid, true) =
+         'CREATE TRIGGER object_financial_entry_pair_dimensions_v21 BEFORE INSERT OR UPDATE ON object_financial_entry FOR EACH ROW EXECUTE FUNCTION profitability_v21_validate_financial_pair()'
+  ) then
+    raise exception 'PROFITABILITY_POST_UPGRADE_TRIGGER_EXTENSION_DRIFT';
+  end if;
+end
+$profitability_foundation_v2_post_upgrade_extension_exact$;`
+
+async function inspectPostUpgradeFoundationMarkers(client) {
+  const markerResult = await client.query(POST_UPGRADE_FOUNDATION_MARKERS_SQL)
+  if (markerResult.rows.length !== 1) {
+    throw new Error('POST_UPGRADE_FOUNDATION_MARKERS_UNVERIFIABLE')
+  }
+  const accessMarkerCount = Number(markerResult.rows[0]?.access_marker_count)
+  const financialMarkerCount = Number(markerResult.rows[0]?.financial_marker_count)
+  if (![0, 10].includes(accessMarkerCount)) {
+    throw new Error('ACCESS_PROFILE_V2_COMPOSITE_STATE_PARTIAL')
+  }
+  if (![0, 19].includes(financialMarkerCount)) {
+    throw new Error('FINANCIAL_V21_COMPOSITE_STATE_PARTIAL')
+  }
+  return Object.freeze({
+    access: accessMarkerCount === 10 ? 'present' : 'absent',
+    financial: financialMarkerCount === 19 ? 'present' : 'absent',
   })
 }
 
@@ -1945,7 +2334,17 @@ async function inspectExistingFoundationPostflight(client, options = {}) {
     const names = relations.rows.map((row) => row.table_name).sort()
     const shapeExact = names.join('\n') === [...FOUNDATION_TABLES].sort().join('\n')
       && relations.rows.every((row) => row.owner_name === 'profitability_owner')
+    const upgradeProfile = await inspectPostUpgradeFoundationMarkers(client)
     if (relations.rows.length === 0) {
+      if (upgradeProfile.access === 'present'
+          || upgradeProfile.financial === 'present') {
+        return Object.freeze({
+          status: 'partial',
+          exact: false,
+          relationCount: 0,
+          rowCount: null,
+        })
+      }
       return Object.freeze({
         status: 'absent',
         exact: false,
@@ -1982,9 +2381,35 @@ async function inspectExistingFoundationPostflight(client, options = {}) {
       rowCount += Number(count.rows[0]?.row_count || 0)
     }
     try {
-      await client.query(postflights.exactCatalog)
+      const exactCatalog = upgradeProfile.financial === 'present'
+        ? buildPostUpgradeFoundationExactCatalogPostflight(postflights.exactCatalog)
+        : postflights.exactCatalog
+      await client.query(exactCatalog)
     } catch {
       throw new Error('EXACT_CATALOG_POSTFLIGHT_FAILED')
+    }
+    if (upgradeProfile.access === 'present'
+        || upgradeProfile.financial === 'present') {
+      const upgradePostflights = loadPostUpgradeFoundationPostflights(migrationFile)
+      if (upgradeProfile.access === 'present') {
+        try {
+          await client.query(upgradePostflights.access)
+        } catch {
+          throw new Error('ACCESS_PROFILE_V2_COMPOSITE_POSTFLIGHT_FAILED')
+        }
+      }
+      if (upgradeProfile.financial === 'present') {
+        try {
+          await client.query(POST_UPGRADE_FOUNDATION_EXTENSION_EXACT_SQL)
+        } catch {
+          throw new Error('FOUNDATION_POST_UPGRADE_EXTENSION_POSTFLIGHT_FAILED')
+        }
+        try {
+          await client.query(upgradePostflights.financial)
+        } catch {
+          throw new Error('FINANCIAL_V21_COMPOSITE_POSTFLIGHT_FAILED')
+        }
+      }
     }
     try {
       await client.query('select set_config($1, $2, true)', [
@@ -2285,78 +2710,17 @@ function createProductionDependencies(options = {}) {
   }
 
   async function inspectMigrationState({ executorPassword } = {}) {
-    const postflights = loadIndependentPostflights(foundationMigrationFile)
-    const inspectWithClient = (client, mayAssumeOwner) => withReadOnlySnapshot(client, async () => {
-      const relations = await client.query(
-        `select class.relname as table_name,
-                owner.rolname as owner_name
-           from pg_class class
-           join pg_namespace namespace_row on namespace_row.oid = class.relnamespace
-           join pg_roles owner on owner.oid = class.relowner
-          where namespace_row.nspname = 'public'
-            and class.relkind = 'r'
-            and class.relname = any($1::text[])
-          order by class.relname`,
-        [[...FOUNDATION_TABLES]],
-      )
-      const names = relations.rows.map((row) => row.table_name).sort()
-      const shapeExact = names.join('\n') === [...FOUNDATION_TABLES].sort().join('\n')
-        && relations.rows.every((row) => row.owner_name === 'profitability_owner')
-      if (!shapeExact) {
-        return Object.freeze({
-          exact: false,
-          relationCount: relations.rows.length,
-          rowCount: 0,
-          relations: relations.rows,
-        })
-      }
-      if (!mayAssumeOwner) throw new Error('MIGRATION_VERIFICATION_CREDENTIAL_REQUIRED')
-      await client.query('set local role profitability_migration_runner')
-      await client.query('set local role profitability_owner')
-      let rowCount = 0
-      for (const table of relations.rows) {
-        const tableName = assertSafeIdentifier(table.table_name)
-        const count = await client.query(`select count(*)::bigint as row_count from public.${quoteIdentifier(tableName)}`)
-        rowCount += Number(count.rows[0]?.row_count || 0)
-      }
-      try {
-        await client.query(postflights.exactCatalog)
-      } catch {
-        throw new Error('EXACT_CATALOG_POSTFLIGHT_FAILED')
-      }
-      try {
-        await client.query('select set_config($1, $2, true)', [
-          'cleanzi.profitability_foundation_v2_runtime_role',
-          'profitability_runtime',
-        ])
-        await client.query('select set_config($1, $2, true)', [
-          'cleanzi.profitability_foundation_v2_session_role',
-          'profitability_session',
-        ])
-        await client.query('select set_config($1, $2, true)', [
-          'cleanzi.profitability_foundation_v2_fresh_install',
-          'false',
-        ])
-        await client.query('select set_config($1, $2, true)', [
-          'cleanzi.profitability_foundation_v2_entrypoint',
-          '',
-        ])
-        await client.query(postflights.ownerAcl)
-      } catch {
-        throw new Error('OWNER_ACL_POSTFLIGHT_FAILED')
-      }
-      try {
-        await client.query(postflights.finalGuard)
-      } catch {
-        throw new Error('FINAL_GUARD_FAILED')
-      }
-      return Object.freeze({
-        exact: true,
-        relationCount: relations.rows.length,
-        rowCount,
-        relations: relations.rows,
+    const inspectWithClient = async (client, mayAssumeOwner) => {
+      const result = await inspectExistingFoundationPostflight(client, {
+        migrationFile: foundationMigrationFile,
+        executorSession: mayAssumeOwner,
       })
-    })
+      return Object.freeze({
+        exact: result.exact,
+        relationCount: result.relationCount,
+        rowCount: result.rowCount || 0,
+      })
+    }
     if (executorPassword !== undefined) {
       const client = await pgAdapter.connectBuiltin({
         database,
@@ -2917,9 +3281,12 @@ module.exports = {
   SOURCE_REFERENCE_COLUMNS,
   SOURCE_TABLES,
   PASSWORD_GUC,
+  POST_UPGRADE_FOUNDATION_MARKERS_SQL,
+  POST_UPGRADE_FOUNDATION_EXTENSION_EXACT_SQL,
   PROVISIONER_ROLE,
   TARGET_ROLES,
   auditFreshFoundationState,
+  buildPostUpgradeFoundationExactCatalogPostflight,
   createCloudSqlAuthProxyAdapter,
   createCloudSqlAdminApiAdapter,
   createCloudSqlPgAdapter,

@@ -2153,13 +2153,22 @@ test('ambiguous provisioner creation still retains the credential for rejection 
   assert.equal(connectionAttempts.at(-1).password, `${strongPassword}-provisioner`)
 })
 
-function createMigrationInspectionClient({ drift = null } = {}) {
+function createMigrationInspectionClient({
+  drift = null,
+  foundationPresent = true,
+  accessProfile = false,
+  financialModel = false,
+  accessMarkerCount,
+  financialMarkerCount,
+} = {}) {
   const queries = []
   const configValues = []
-  const relations = adapters.FOUNDATION_TABLES.map((table_name) => ({
-    table_name,
-    owner_name: 'profitability_owner',
-  }))
+  const relations = foundationPresent
+    ? adapters.FOUNDATION_TABLES.map((table_name) => ({
+      table_name,
+      owner_name: 'profitability_owner',
+    }))
+    : []
   return {
     queries,
     configValues,
@@ -2174,11 +2183,31 @@ function createMigrationInspectionClient({ drift = null } = {}) {
         return { rows: [{ set_config: values?.[1] }] }
       }
       if (sql.includes('from pg_class class')) return { rows: relations }
+      if (sql === adapters.POST_UPGRADE_FOUNDATION_MARKERS_SQL) {
+        return {
+          rows: [{
+            access_marker_count: accessMarkerCount ?? (accessProfile ? 10 : 0),
+            financial_marker_count: financialMarkerCount ?? (financialModel ? 19 : 0),
+          }],
+        }
+      }
       if (sql.startsWith('select count(*)::bigint as row_count')) {
         return { rows: [{ row_count: '0' }] }
       }
       if (sql.startsWith('do $profitability_foundation_v2_exact_catalog_postflight$')) {
         if (drift === true || drift === 'exact') throw new Error('database fingerprint and internal details')
+        return { rows: [] }
+      }
+      if (sql.startsWith('do $$') && sql.includes('PROFITABILITY_ACCESS_V2_')) {
+        if (drift === 'access-profile-v2') throw new Error('sensitive access drift')
+        return { rows: [] }
+      }
+      if (sql.startsWith('do $profitability_foundation_v2_post_upgrade_extension_exact$')) {
+        if (drift === 'foundation-extension') throw new Error('sensitive extension drift')
+        return { rows: [] }
+      }
+      if (sql.startsWith('do $profitability_v21_postflight$')) {
+        if (drift === 'financial-v21') throw new Error('sensitive financial drift')
         return { rows: [] }
       }
       if (sql.startsWith('do $profitability_foundation_v2_owner_acl_postflight$')) {
@@ -2235,6 +2264,178 @@ test('shared Foundation postflight executes every independent production guard',
     true,
   )
   assert.equal(client.queries.at(-1), 'rollback')
+})
+
+test('shared Foundation postflight verifies reviewed Access V2 and Financial V2.1 extensions', async () => {
+  assert.match(
+    adapters.POST_UPGRADE_FOUNDATION_EXTENSION_EXACT_SQL,
+    /attribute_row\.attname = 'value_basis'[\s\S]*attribute_row\.attnum = 26[\s\S]*attribute_row\.atttypid = 1043[\s\S]*attribute_row\.atttypmod = 20/,
+  )
+  assert.match(
+    adapters.POST_UPGRADE_FOUNDATION_EXTENSION_EXACT_SQL,
+    /attribute_row\.attname = 'value_key'[\s\S]*attribute_row\.attnum = 27[\s\S]*attribute_row\.atttypid = 1043[\s\S]*attribute_row\.atttypmod = 100/,
+  )
+  assert.match(
+    adapters.POST_UPGRADE_FOUNDATION_EXTENSION_EXACT_SQL,
+    /type_namespace\.nspname = 'pg_catalog'[\s\S]*type_row\.typname = 'varchar'[\s\S]*type_row\.typtype = 'b'[\s\S]*type_row\.typcategory = 'S'[\s\S]*type_row\.typbasetype = 0[\s\S]*not type_row\.typnotnull[\s\S]*type_row\.typalign = 'i'[\s\S]*type_row\.typstorage = 'x'/,
+  )
+  assert.match(
+    adapters.POST_UPGRADE_FOUNDATION_EXTENSION_EXACT_SQL,
+    /collation_namespace\.nspname = 'pg_catalog'[\s\S]*collation_row\.collname = 'default'/,
+  )
+  assert.match(
+    adapters.POST_UPGRADE_FOUNDATION_EXTENSION_EXACT_SQL,
+    /index_meta\.indimmediate/,
+  )
+  assert.match(
+    adapters.POST_UPGRADE_FOUNDATION_EXTENSION_EXACT_SQL,
+    /not index_meta\.indcheckxmin/,
+  )
+  assert.doesNotMatch(
+    adapters.POST_UPGRADE_FOUNDATION_EXTENSION_EXACT_SQL,
+    /index_meta\.indisimmediate/,
+  )
+  const client = createMigrationInspectionClient({
+    accessProfile: true,
+    financialModel: true,
+  })
+  const result = await adapters.inspectExistingFoundationPostflight(client, {
+    migrationFile: path.join(
+      __dirname,
+      '..',
+      'dataconnect',
+      'migrations',
+      '20260925_profitability_foundation_v2_additive.sql',
+    ),
+    executorSession: true,
+  })
+
+  assert.equal(result.status, 'exact')
+  const exactCatalog = client.queries.find((sql) => sql.startsWith(
+    'do $profitability_foundation_v2_exact_catalog_postflight$',
+  ))
+  assert.match(exactCatalog, /attribute_row\.attname = any\([\s\S]*'value_basis', 'value_key'/)
+  assert.match(exactCatalog, /object_financial_entry_active_value_basis_uidx/)
+  assert.match(exactCatalog, /object_financial_entry_pair_dimensions_v21/)
+  assert.equal(
+    client.queries.some((sql) => sql.startsWith('do $$')
+      && sql.includes('PROFITABILITY_ACCESS_V2_')),
+    true,
+  )
+  assert.equal(
+    client.queries.some((sql) => sql.startsWith(
+      'do $profitability_foundation_v2_post_upgrade_extension_exact$',
+    )),
+    true,
+  )
+  assert.equal(
+    client.queries.some((sql) => sql.startsWith('do $profitability_v21_postflight$')),
+    true,
+  )
+  assert.equal(client.queries.at(-1), 'rollback')
+})
+
+test('shared Foundation postflight fails closed on partial post-upgrade footprints', async () => {
+  for (const fixture of [
+    { accessMarkerCount: 9, expected: 'ACCESS_PROFILE_V2_COMPOSITE_STATE_PARTIAL' },
+    { financialMarkerCount: 18, expected: 'FINANCIAL_V21_COMPOSITE_STATE_PARTIAL' },
+  ]) {
+    const client = createMigrationInspectionClient(fixture)
+    await assert.rejects(
+      adapters.inspectExistingFoundationPostflight(client, {
+        migrationFile: path.join(
+          __dirname,
+          '..',
+          'dataconnect',
+          'migrations',
+          '20260925_profitability_foundation_v2_additive.sql',
+        ),
+        executorSession: true,
+      }),
+      new RegExp(fixture.expected),
+    )
+    assert.equal(client.queries.at(-1), 'rollback')
+  }
+})
+
+test('shared Foundation postflight does not treat upgrade remnants without Foundation as absent', async () => {
+  for (const fixture of [
+    { accessMarkerCount: 10, financialMarkerCount: 0 },
+    { accessMarkerCount: 0, financialMarkerCount: 19 },
+  ]) {
+    const client = createMigrationInspectionClient({
+      foundationPresent: false,
+      ...fixture,
+    })
+    const result = await adapters.inspectExistingFoundationPostflight(client, {
+      migrationFile: path.join(
+        __dirname,
+        '..',
+        'dataconnect',
+        'migrations',
+        '20260925_profitability_foundation_v2_additive.sql',
+      ),
+      executorSession: true,
+    })
+    assert.deepEqual(result, {
+      status: 'partial',
+      exact: false,
+      relationCount: 0,
+      rowCount: null,
+    })
+    assert.equal(client.queries.includes(adapters.POST_UPGRADE_FOUNDATION_MARKERS_SQL), true)
+    assert.equal(client.queries.at(-1), 'rollback')
+  }
+})
+
+test('shared Foundation postflight rejects partial Financial remnants without Foundation', async () => {
+  const client = createMigrationInspectionClient({
+    foundationPresent: false,
+    financialMarkerCount: 18,
+  })
+  await assert.rejects(
+    adapters.inspectExistingFoundationPostflight(client, {
+      migrationFile: path.join(
+        __dirname,
+        '..',
+        'dataconnect',
+        'migrations',
+        '20260925_profitability_foundation_v2_additive.sql',
+      ),
+      executorSession: true,
+    }),
+    /FINANCIAL_V21_COMPOSITE_STATE_PARTIAL/,
+  )
+  assert.equal(client.queries.includes(adapters.POST_UPGRADE_FOUNDATION_MARKERS_SQL), true)
+  assert.equal(client.queries.at(-1), 'rollback')
+})
+
+test('shared Foundation postflight fails closed on Access or Financial extension drift', async () => {
+  for (const drift of ['access-profile-v2', 'foundation-extension', 'financial-v21']) {
+    const client = createMigrationInspectionClient({
+      drift,
+      accessProfile: true,
+      financialModel: true,
+    })
+    await assert.rejects(
+      adapters.inspectExistingFoundationPostflight(client, {
+        migrationFile: path.join(
+          __dirname,
+          '..',
+          'dataconnect',
+          'migrations',
+          '20260925_profitability_foundation_v2_additive.sql',
+        ),
+        executorSession: true,
+      }),
+      new RegExp(drift === 'access-profile-v2'
+        ? 'ACCESS_PROFILE_V2_COMPOSITE_POSTFLIGHT_FAILED'
+        : drift === 'foundation-extension'
+          ? 'FOUNDATION_POST_UPGRADE_EXTENSION_POSTFLIGHT_FAILED'
+          : 'FINANCIAL_V21_COMPOSITE_POSTFLIGHT_FAILED'),
+    )
+    assert.equal(client.queries.at(-1), 'rollback')
+  }
 })
 
 function exactNormalizedRoleState() {
