@@ -10,6 +10,7 @@ const {
   assertSameOrganization,
   assertWorkerOwnsOpenWorkday,
   parseWarsawLocalDateTime,
+  WORKDAY_STOP_PROPOSAL_MAX_DURATION_SEC,
 } = require('../workday-stop-proposal-policy')
 
 const START = '2026-08-10T06:00:00.000Z'
@@ -115,8 +116,9 @@ test('istniej?cy QR STOP blokuje utworzenie propozycji', () => {
   )
 })
 
-test('propozycja jest dost?pna wy??cznie dla historycznego dnia Warsaw', () => {
+test('propozycja jest dostępna dla historycznego dnia albo po osiągnięciu limitu 12 godzin', () => {
   assertHistoricalWorkday({ startAt: '2026-08-09T21:00:00.000Z', now: new Date('2026-08-10T10:00:00.000Z') })
+  assertHistoricalWorkday({ startAt: '2026-08-10T06:00:00.000Z', now: new Date('2026-08-10T18:00:00.000Z') })
   assert.throws(
     () => assertHistoricalWorkday({ startAt: '2026-08-10T07:00:00.000Z', now: new Date('2026-08-10T10:00:00.000Z') }),
     (error) => error.code === 'WORKDAY_STOP_PROPOSAL_NOT_HISTORICAL',
@@ -131,6 +133,15 @@ test('proponowany STOP musi by? po STARcie i nie mo?e by? w przysz?o?ci', () => 
   assert.throws(
     () => assertProposedStop({ startAt: START, proposedStopAt: '2026-08-10T18:01:00.000Z', now: NOW }),
     (error) => error.code === 'WORKDAY_STOP_IN_FUTURE',
+  )
+  assert.equal(WORKDAY_STOP_PROPOSAL_MAX_DURATION_SEC, 12 * 60 * 60)
+  assert.throws(
+    () => assertProposedStop({
+      startAt: START,
+      proposedStopAt: '2026-08-10T18:00:01.000Z',
+      now: new Date('2026-08-10T19:00:00.000Z'),
+    }),
+    (error) => error.code === 'WORKDAY_STOP_AFTER_12H_LIMIT',
   )
 })
 

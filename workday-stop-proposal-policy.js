@@ -10,6 +10,7 @@ const PROPOSAL_STATUSES = Object.freeze([
 
 const DECISION_ACTIONS = Object.freeze(['APPROVE', 'CORRECT', 'REJECT'])
 const WORKDAY_STOP_PROPOSAL_TIME_ZONE = 'Europe/Warsaw'
+const WORKDAY_STOP_PROPOSAL_MAX_DURATION_SEC = 12 * 60 * 60
 
 class WorkdayStopProposalError extends Error {
   constructor(statusCode, code, message, details = undefined) {
@@ -132,10 +133,17 @@ function warsawDate(value) {
 }
 
 function assertHistoricalWorkday({ startAt, now = new Date() }) {
+  const start = instant(startAt, 'startAt')
+  const current = now instanceof Date ? now : instant(now, 'now')
   const startDate = warsawDate(startAt)
-  const today = warsawDate(now instanceof Date ? now : instant(now, 'now'))
-  if (startDate >= today) {
-    throw new WorkdayStopProposalError(409, 'WORKDAY_STOP_PROPOSAL_NOT_HISTORICAL', 'Propozycja STOP jest dost?pna wy??cznie dla historycznego dnia pracy.')
+  const today = warsawDate(current)
+  const reachedLimit = current.getTime() - start.getTime() >= WORKDAY_STOP_PROPOSAL_MAX_DURATION_SEC * 1000
+  if (startDate >= today && !reachedLimit) {
+    throw new WorkdayStopProposalError(
+      409,
+      'WORKDAY_STOP_PROPOSAL_NOT_HISTORICAL',
+      'Godzinę zakończenia można uzupełnić po przekroczeniu 12 godzin albo dla wcześniejszego dnia pracy.',
+    )
   }
 }
 
@@ -162,6 +170,13 @@ function assertProposedStop({ startAt, proposedStopAt, now = new Date() }) {
   }
   if (proposed.getTime() > current.getTime()) {
     throw new WorkdayStopProposalError(422, 'WORKDAY_STOP_IN_FUTURE', 'Proponowany STOP nie mo?e by? w przysz?o?ci.')
+  }
+  if (proposed.getTime() > start.getTime() + WORKDAY_STOP_PROPOSAL_MAX_DURATION_SEC * 1000) {
+    throw new WorkdayStopProposalError(
+      422,
+      'WORKDAY_STOP_AFTER_12H_LIMIT',
+      'Godzina STOP nie może przekraczać 12 godzin od START.',
+    )
   }
   return { proposedStopAt: proposed.toISOString(), durationSec: secondsBetween(start, proposed) }
 }
@@ -214,6 +229,7 @@ function assertSameOrganization(proposalOrgId, requestedOrgId) {
 module.exports = {
   DECISION_ACTIONS,
   PROPOSAL_STATUSES,
+  WORKDAY_STOP_PROPOSAL_MAX_DURATION_SEC,
   WORKDAY_STOP_PROPOSAL_TIME_ZONE,
   WorkdayStopProposalError,
   assertDecision,
