@@ -5,8 +5,13 @@
 --
 -- Required invocation parameters (none is a secret):
 --   -v profitability_access_expected_database=iclean-room-database
---   -v profitability_access_expected_migration_runner=migration_runner
---   -v profitability_access_runtime_role=<exact runtime database role>
+--   -v profitability_access_expected_provisioner=profitability_provisioner
+--   -v profitability_access_expected_bootstrap_grantor=<exact OID-10 role>
+--   -v profitability_access_expected_executor=profitability_migration_executor
+--   -v profitability_access_expected_migration_runner=profitability_migration_runner
+--   -v profitability_access_owner_role=profitability_owner
+--   -v profitability_access_session_role=profitability_session
+--   -v profitability_access_runtime_role=profitability_runtime
 --   -v profitability_access_backup_reference=<approved backup id>
 --   -v profitability_access_confirmation=APPLY_PROFITABILITY_ACCESS_PROFILE_V2_ONLY_20260925
 
@@ -26,10 +31,45 @@
   end $$;
 \endif
 
+\if :{?profitability_access_expected_executor}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_EXPECTED_EXECUTOR_REQUIRED';
+  end $$;
+\endif
+
+\if :{?profitability_access_expected_provisioner}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_EXPECTED_PROVISIONER_REQUIRED';
+  end $$;
+\endif
+
+\if :{?profitability_access_expected_bootstrap_grantor}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_EXPECTED_BOOTSTRAP_GRANTOR_REQUIRED';
+  end $$;
+\endif
+
+\if :{?profitability_access_owner_role}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_OWNER_ROLE_REQUIRED';
+  end $$;
+\endif
+
 \if :{?profitability_access_runtime_role}
 \else
   do $$ begin
     raise exception 'PROFITABILITY_ACCESS_V2_RUNTIME_ROLE_REQUIRED';
+  end $$;
+\endif
+
+\if :{?profitability_access_session_role}
+\else
+  do $$ begin
+    raise exception 'PROFITABILITY_ACCESS_V2_SESSION_ROLE_REQUIRED';
   end $$;
 \endif
 
@@ -52,12 +92,22 @@ select
     as profitability_access_approved_database_confirmed,
   current_database() = :'profitability_access_expected_database'
     as profitability_access_database_confirmed,
-  :'profitability_access_expected_migration_runner' = 'migration_runner'
-    as profitability_access_approved_runner_confirmed,
-  session_user = 'migration_runner'
-    and current_user = 'migration_runner'
-    and session_user = :'profitability_access_expected_migration_runner'
-    as profitability_access_session_confirmed,
+  :'profitability_access_expected_provisioner' = 'profitability_provisioner'
+    as profitability_access_provisioner_name_confirmed,
+  :'profitability_access_expected_bootstrap_grantor' = pg_get_userbyid(10)
+    as profitability_access_bootstrap_grantor_confirmed,
+  :'profitability_access_expected_executor' = 'profitability_migration_executor'
+    and session_user = :'profitability_access_expected_executor'
+    and current_user = session_user
+    as profitability_access_executor_confirmed,
+  :'profitability_access_expected_migration_runner' = 'profitability_migration_runner'
+    as profitability_access_runner_name_confirmed,
+  :'profitability_access_owner_role' = 'profitability_owner'
+    as profitability_access_owner_name_confirmed,
+  :'profitability_access_session_role' = 'profitability_session'
+    as profitability_access_session_name_confirmed,
+  :'profitability_access_runtime_role' = 'profitability_runtime'
+    as profitability_access_runtime_name_confirmed,
   :'profitability_access_confirmation'
     = 'APPLY_PROFITABILITY_ACCESS_PROFILE_V2_ONLY_20260925'
     as profitability_access_execution_confirmed,
@@ -71,25 +121,269 @@ select
   current_setting('transaction_read_only') = 'off'
     and current_setting('default_transaction_read_only') = 'off'
     as profitability_access_read_write_confirmed,
-  :'profitability_access_runtime_role' not in (
-      '', 'PUBLIC', 'public', 'migration_runner', session_user, current_user
-    )
-    and exists (
-      select 1
-        from pg_roles runtime_role
-       where runtime_role.rolname = :'profitability_access_runtime_role'
-         and not runtime_role.rolsuper
-         and not runtime_role.rolbypassrls
-         and not runtime_role.rolcreaterole
-         and not runtime_role.rolcreatedb
-         and not runtime_role.rolreplication
-    )
+  exists (
+    select 1
+      from pg_roles role_row
+     where role_row.rolname = :'profitability_access_expected_executor'
+       and role_row.rolcanlogin
+       and not role_row.rolinherit
+       and not role_row.rolsuper
+       and not role_row.rolbypassrls
+       and not role_row.rolcreaterole
+       and not role_row.rolcreatedb
+       and not role_row.rolreplication
+       and role_row.rolconnlimit = -1
+       and role_row.rolvaliduntil is null
+       and role_row.rolconfig is null
+  ) as profitability_access_executor_role_confirmed,
+  exists (
+    select 1
+      from pg_roles role_row
+     where role_row.rolname = :'profitability_access_expected_provisioner'
+       and role_row.rolcanlogin
+       and not role_row.rolinherit
+       and not role_row.rolsuper
+       and not role_row.rolbypassrls
+       and role_row.rolcreaterole
+       and not role_row.rolcreatedb
+       and not role_row.rolreplication
+       and role_row.rolconnlimit = -1
+       and role_row.rolvaliduntil is null
+       and role_row.rolconfig is null
+  ) as profitability_access_provisioner_role_confirmed,
+  exists (
+    select 1
+      from pg_auth_members membership_row
+      join pg_roles granted_role on granted_role.oid = membership_row.roleid
+      join pg_roles member_role on member_role.oid = membership_row.member
+     where granted_role.rolname = :'profitability_access_expected_migration_runner'
+       and member_role.rolname = :'profitability_access_expected_executor'
+       and membership_row.grantor = (
+         select oid from pg_roles
+          where rolname = :'profitability_access_expected_provisioner'
+       )
+       and membership_row.set_option
+       and not membership_row.inherit_option
+       and not membership_row.admin_option
+  )
+    as profitability_access_executor_edge_confirmed,
+  exists (
+    select 1
+      from pg_auth_members membership_row
+      join pg_roles granted_role on granted_role.oid = membership_row.roleid
+      join pg_roles member_role on member_role.oid = membership_row.member
+     where granted_role.rolname = :'profitability_access_owner_role'
+       and member_role.rolname = :'profitability_access_expected_migration_runner'
+       and membership_row.grantor = (
+         select oid from pg_roles
+          where rolname = :'profitability_access_expected_provisioner'
+       )
+       and membership_row.set_option
+       and not membership_row.inherit_option
+       and not membership_row.admin_option
+  )
+    as profitability_access_owner_edge_confirmed,
+  exists (
+    select 1
+      from pg_auth_members membership_row
+      join pg_roles granted_role on granted_role.oid = membership_row.roleid
+      join pg_roles member_role on member_role.oid = membership_row.member
+     where granted_role.rolname = :'profitability_access_runtime_role'
+       and member_role.rolname = :'profitability_access_session_role'
+       and membership_row.grantor = (
+         select oid from pg_roles
+          where rolname = :'profitability_access_expected_provisioner'
+       )
+       and membership_row.set_option
+       and not membership_row.inherit_option
+       and not membership_row.admin_option
+  )
+    as profitability_access_runtime_edge_confirmed,
+  (
+    select count(*)
+      from pg_auth_members membership_row
+      join pg_roles granted_role on granted_role.oid = membership_row.roleid
+      join pg_roles member_role on member_role.oid = membership_row.member
+     where granted_role.rolname = any(array[
+       :'profitability_access_expected_provisioner',
+       :'profitability_access_expected_executor',
+       :'profitability_access_expected_migration_runner',
+       :'profitability_access_owner_role',
+       :'profitability_access_session_role',
+       :'profitability_access_runtime_role'
+     ])
+        or member_role.rolname = any(array[
+          :'profitability_access_expected_provisioner',
+          :'profitability_access_expected_executor',
+          :'profitability_access_expected_migration_runner',
+          :'profitability_access_owner_role',
+          :'profitability_access_session_role',
+          :'profitability_access_runtime_role'
+        ])
+  ) = 8
+  and not exists (
+    select 1
+      from pg_auth_members membership_row
+      join pg_roles granted_role on granted_role.oid = membership_row.roleid
+      join pg_roles member_role on member_role.oid = membership_row.member
+     where (
+       granted_role.rolname = any(array[
+         :'profitability_access_expected_provisioner',
+         :'profitability_access_expected_executor',
+         :'profitability_access_expected_migration_runner',
+         :'profitability_access_owner_role',
+         :'profitability_access_session_role',
+         :'profitability_access_runtime_role'
+       ])
+       or member_role.rolname = any(array[
+         :'profitability_access_expected_provisioner',
+         :'profitability_access_expected_executor',
+         :'profitability_access_expected_migration_runner',
+         :'profitability_access_owner_role',
+         :'profitability_access_session_role',
+         :'profitability_access_runtime_role'
+       ])
+     )
+       and not (
+         (
+           membership_row.grantor = (
+             select oid from pg_roles
+              where rolname = :'profitability_access_expected_provisioner'
+           )
+           and membership_row.set_option
+           and not membership_row.inherit_option
+           and not membership_row.admin_option
+           and (
+             (
+               granted_role.rolname = :'profitability_access_expected_migration_runner'
+               and member_role.rolname = :'profitability_access_expected_executor'
+             )
+             or (
+               granted_role.rolname = :'profitability_access_owner_role'
+               and member_role.rolname = :'profitability_access_expected_migration_runner'
+             )
+             or (
+               granted_role.rolname = :'profitability_access_runtime_role'
+               and member_role.rolname = :'profitability_access_session_role'
+             )
+           )
+         )
+         or (
+           granted_role.rolname = any(array[
+             :'profitability_access_expected_executor',
+             :'profitability_access_expected_migration_runner',
+             :'profitability_access_owner_role',
+             :'profitability_access_session_role',
+             :'profitability_access_runtime_role'
+           ])
+           and member_role.rolname = :'profitability_access_expected_provisioner'
+           and membership_row.grantor = 10::oid
+           and membership_row.admin_option
+           and not membership_row.inherit_option
+           and not membership_row.set_option
+         )
+       )
+  ) as profitability_access_membership_graph_confirmed,
+  exists (
+    select 1
+      from pg_roles runner_role
+     where runner_role.rolname = :'profitability_access_expected_migration_runner'
+       and not runner_role.rolcanlogin
+       and not runner_role.rolinherit
+       and not runner_role.rolsuper
+       and not runner_role.rolbypassrls
+       and not runner_role.rolcreaterole
+       and not runner_role.rolcreatedb
+       and not runner_role.rolreplication
+       and runner_role.rolconnlimit = -1
+       and runner_role.rolvaliduntil is null
+       and runner_role.rolconfig is null
+  ) and exists (
+    select 1
+      from pg_roles owner_role
+     where owner_role.rolname = :'profitability_access_owner_role'
+       and not owner_role.rolcanlogin
+       and not owner_role.rolinherit
+       and not owner_role.rolsuper
+       and not owner_role.rolbypassrls
+       and not owner_role.rolcreaterole
+       and not owner_role.rolcreatedb
+       and not owner_role.rolreplication
+       and owner_role.rolconnlimit = -1
+       and owner_role.rolvaliduntil is null
+       and owner_role.rolconfig is null
+       and has_schema_privilege(owner_role.oid, 'public', 'USAGE')
+       and has_schema_privilege(owner_role.oid, 'public', 'CREATE')
+  )
+    as profitability_access_privileged_roles_confirmed,
+  exists (
+    select 1
+      from pg_roles session_role
+     where session_role.rolname = :'profitability_access_session_role'
+       and session_role.rolcanlogin
+       and not session_role.rolinherit
+       and not session_role.rolsuper
+       and not session_role.rolbypassrls
+       and not session_role.rolcreaterole
+       and not session_role.rolcreatedb
+       and not session_role.rolreplication
+       and session_role.rolconnlimit = -1
+       and session_role.rolvaliduntil is null
+       and session_role.rolconfig is null
+       and not has_schema_privilege(session_role.oid, 'public', 'CREATE')
+  )
+    as profitability_access_session_role_confirmed,
+  exists (
+    select 1
+      from pg_roles runtime_role
+     where runtime_role.rolname = :'profitability_access_runtime_role'
+       and not runtime_role.rolcanlogin
+       and not runtime_role.rolinherit
+       and not runtime_role.rolsuper
+       and not runtime_role.rolbypassrls
+       and not runtime_role.rolcreaterole
+       and not runtime_role.rolcreatedb
+       and not runtime_role.rolreplication
+       and runtime_role.rolconnlimit = -1
+       and runtime_role.rolvaliduntil is null
+       and runtime_role.rolconfig is null
+  )
     as profitability_access_runtime_role_confirmed,
   coalesce((
     select not has_schema_privilege(runtime_role.oid, 'public', 'CREATE')
       from pg_roles runtime_role
      where runtime_role.rolname = :'profitability_access_runtime_role'
-  ), false) as profitability_access_runtime_schema_confirmed
+  ), false) as profitability_access_runtime_schema_confirmed,
+  has_column_privilege(
+      :'profitability_access_owner_role',
+      'public.organizations',
+      'org_id',
+      'REFERENCES'
+    )
+    and has_column_privilege(
+      :'profitability_access_owner_role',
+      'public.organization_member',
+      'org_id',
+      'REFERENCES'
+    )
+    and has_column_privilege(
+      :'profitability_access_owner_role',
+      'public.organization_member',
+      'uid',
+      'REFERENCES'
+    )
+    and has_column_privilege(
+      :'profitability_access_owner_role',
+      'public.service_object',
+      'org_id',
+      'REFERENCES'
+    )
+    and has_column_privilege(
+      :'profitability_access_owner_role',
+      'public.service_object',
+      'object_id',
+      'REFERENCES'
+    ) as profitability_access_source_references_confirmed
 \gset
 
 \if :profitability_access_approved_database_confirmed
@@ -106,18 +400,39 @@ select
   end $$;
 \endif
 
-\if :profitability_access_approved_runner_confirmed
+\if :profitability_access_provisioner_name_confirmed
 \else
-  do $$ begin
-    raise exception 'PROFITABILITY_ACCESS_V2_APPROVED_MIGRATION_RUNNER_MISMATCH';
-  end $$;
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_PROVISIONER_NAME_MISMATCH'; end $$;
 \endif
 
-\if :profitability_access_session_confirmed
+\if :profitability_access_bootstrap_grantor_confirmed
 \else
-  do $$ begin
-    raise exception 'PROFITABILITY_ACCESS_V2_MIGRATION_SESSION_MISMATCH';
-  end $$;
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_BOOTSTRAP_GRANTOR_MISMATCH'; end $$;
+\endif
+
+\if :profitability_access_executor_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_EXECUTOR_MISMATCH'; end $$;
+\endif
+
+\if :profitability_access_runner_name_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_RUNNER_NAME_MISMATCH'; end $$;
+\endif
+
+\if :profitability_access_owner_name_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_OWNER_NAME_MISMATCH'; end $$;
+\endif
+
+\if :profitability_access_session_name_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_SESSION_NAME_MISMATCH'; end $$;
+\endif
+
+\if :profitability_access_runtime_name_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_RUNTIME_NAME_MISMATCH'; end $$;
 \endif
 
 \if :profitability_access_execution_confirmed
@@ -155,11 +470,51 @@ select
   end $$;
 \endif
 
+\if :profitability_access_executor_role_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_EXECUTOR_ROLE_INVALID'; end $$;
+\endif
+
+\if :profitability_access_provisioner_role_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_PROVISIONER_ROLE_INVALID'; end $$;
+\endif
+
 \if :profitability_access_runtime_role_confirmed
 \else
   do $$ begin
     raise exception 'PROFITABILITY_ACCESS_V2_RUNTIME_ROLE_INVALID';
   end $$;
+\endif
+
+\if :profitability_access_executor_edge_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_EXECUTOR_EDGE_INVALID'; end $$;
+\endif
+
+\if :profitability_access_owner_edge_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_OWNER_EDGE_INVALID'; end $$;
+\endif
+
+\if :profitability_access_runtime_edge_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_RUNTIME_EDGE_INVALID'; end $$;
+\endif
+
+\if :profitability_access_membership_graph_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_MEMBERSHIP_GRAPH_INVALID'; end $$;
+\endif
+
+\if :profitability_access_privileged_roles_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_PRIVILEGED_ROLE_INVALID'; end $$;
+\endif
+
+\if :profitability_access_session_role_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_SESSION_ROLE_INVALID'; end $$;
 \endif
 
 \if :profitability_access_runtime_schema_confirmed
@@ -169,33 +524,88 @@ select
   end $$;
 \endif
 
--- Arm the raw SQL only after every production-target guard has passed. The raw
--- migration consumes this marker before BEGIN, so every retry repeats all
--- checks through this wrapper.
+\if :profitability_access_source_references_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_ACCESS_V2_SOURCE_REFERENCES_REQUIRED'; end $$;
+\endif
+
+begin;
+
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
+set local idle_in_transaction_session_timeout = '180s';
+
+select pg_advisory_xact_lock(
+  hashtextextended('cleanzi:profitability:foundation-v2:roles', 0)
+);
+
+select pg_advisory_xact_lock(
+  hashtextextended('cleanzi:profitability-access-profile:v2', 0)
+);
+
+-- Arm the raw SQL only after every production-target guard has passed. Every
+-- retry must return through this wrapper and repeat the complete role graph,
+-- target and backup checks.
 select set_config(
   'cleanzi.profitability_access_v2_entrypoint',
   'GUARDED_PROFITABILITY_ACCESS_PROFILE_V2_20260925',
-  false
+  true
+);
+
+select set_config(
+  'cleanzi.profitability_access_v2_expected_executor',
+  :'profitability_access_expected_executor',
+  true
+);
+
+select set_config(
+  'cleanzi.profitability_access_v2_expected_provisioner',
+  :'profitability_access_expected_provisioner',
+  true
+);
+
+select set_config(
+  'cleanzi.profitability_access_v2_expected_bootstrap_grantor',
+  :'profitability_access_expected_bootstrap_grantor',
+  true
+);
+
+select set_config(
+  'cleanzi.profitability_access_v2_migration_runner',
+  :'profitability_access_expected_migration_runner',
+  true
+);
+
+select set_config(
+  'cleanzi.profitability_access_v2_owner_role',
+  :'profitability_access_owner_role',
+  true
+);
+
+select set_config(
+  'cleanzi.profitability_access_v2_session_role',
+  :'profitability_access_session_role',
+  true
 );
 
 select set_config(
   'cleanzi.profitability_access_v2_runtime_role',
   :'profitability_access_runtime_role',
-  false
+  true
 );
 
 select set_config(
   'cleanzi.profitability_access_v2_backup_reference',
   :'profitability_access_backup_reference',
-  false
+  true
 );
+
+set local role :"profitability_access_expected_migration_runner";
 
 -- Keep this include after every fail-closed gate above. \ir resolves relative
 -- to this file and does not depend on the operator's working directory.
 \ir ../migrations/20260925_profitability_access_profile_v2_additive.sql
 
-select set_config('cleanzi.profitability_access_v2_entrypoint', '', false);
-select set_config('cleanzi.profitability_access_v2_runtime_role', '', false);
-select set_config('cleanzi.profitability_access_v2_backup_reference', '', false);
+commit;
 
 \echo 'PROFITABILITY_ACCESS_PROFILE_V2_MIGRATION_APPLIED'

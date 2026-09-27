@@ -1,7 +1,7 @@
 -- Review-only, additive foundation for server-side profitability access profiles.
 -- OPERATOR ENTRYPOINT: ../admin/20260925_profitability_access_profile_v2_apply.psql
--- Direct execution of this raw SQL is forbidden. Apply only through the
--- separately approved guarded runner after a production backup and preflight.
+-- Direct execution of this raw SQL is forbidden. The guarded wrapper owns the
+-- transaction and enters through the dedicated profitability role chain.
 --
 -- This migration intentionally seeds no users, organizations or access rows.
 -- Absence of an active READ/MANAGE profile must be interpreted by the backend
@@ -9,6 +9,30 @@
 
 do $profitability_access_v2_entrypoint_guard$
 declare
+  expected_executor text := nullif(
+    current_setting('cleanzi.profitability_access_v2_expected_executor', true),
+    ''
+  );
+  provisioner_role_name text := nullif(
+    current_setting('cleanzi.profitability_access_v2_expected_provisioner', true),
+    ''
+  );
+  bootstrap_grantor_name text := nullif(
+    current_setting('cleanzi.profitability_access_v2_expected_bootstrap_grantor', true),
+    ''
+  );
+  runner_role_name text := nullif(
+    current_setting('cleanzi.profitability_access_v2_migration_runner', true),
+    ''
+  );
+  owner_role_name text := nullif(
+    current_setting('cleanzi.profitability_access_v2_owner_role', true),
+    ''
+  );
+  session_role_name text := nullif(
+    current_setting('cleanzi.profitability_access_v2_session_role', true),
+    ''
+  );
   runtime_role_name text := nullif(
     current_setting('cleanzi.profitability_access_v2_runtime_role', true),
     ''
@@ -27,8 +51,19 @@ begin
     raise exception 'PROFITABILITY_ACCESS_V2_DATABASE_MISMATCH';
   end if;
 
-  if session_user <> 'migration_runner' or current_user <> session_user then
-    raise exception 'PROFITABILITY_ACCESS_V2_MIGRATION_SESSION_MISMATCH';
+  if expected_executor <> 'profitability_migration_executor'
+     or session_user <> expected_executor
+     or runner_role_name <> 'profitability_migration_runner'
+     or current_user <> runner_role_name then
+    raise exception 'PROFITABILITY_ACCESS_V2_MIGRATION_IDENTITY_MISMATCH';
+  end if;
+
+  if owner_role_name <> 'profitability_owner'
+     or provisioner_role_name <> 'profitability_provisioner'
+     or bootstrap_grantor_name <> pg_get_userbyid(10)
+     or session_role_name <> 'profitability_session'
+     or runtime_role_name <> 'profitability_runtime' then
+    raise exception 'PROFITABILITY_ACCESS_V2_ROLE_NAME_MISMATCH';
   end if;
 
   if current_setting('server_version_num')::integer not between 170000 and 179999 then
@@ -49,38 +84,220 @@ begin
     raise exception 'PROFITABILITY_ACCESS_V2_BACKUP_REFERENCE_INVALID';
   end if;
 
-  if runtime_role_name is null
-     or runtime_role_name in ('PUBLIC', 'public', 'migration_runner')
-     or not exists (
+  if not exists (
        select 1
-         from pg_roles runtime_role
-        where runtime_role.rolname = runtime_role_name
-          and not runtime_role.rolsuper
-          and not runtime_role.rolbypassrls
-          and not runtime_role.rolcreaterole
-          and not runtime_role.rolcreatedb
-          and not runtime_role.rolreplication
+         from pg_roles role_row
+        where role_row.rolname = expected_executor
+          and role_row.rolcanlogin
+          and not role_row.rolinherit
+          and not role_row.rolsuper
+          and not role_row.rolbypassrls
+          and not role_row.rolcreaterole
+          and not role_row.rolcreatedb
+          and not role_row.rolreplication
+          and role_row.rolconnlimit = -1
+          and role_row.rolvaliduntil is null
+          and role_row.rolconfig is null
+     ) then
+    raise exception 'PROFITABILITY_ACCESS_V2_EXECUTOR_ROLE_INVALID';
+  end if;
+
+  if not exists (
+       select 1
+         from pg_roles role_row
+        where role_row.rolname = provisioner_role_name
+          and role_row.rolcanlogin
+          and not role_row.rolinherit
+          and not role_row.rolsuper
+          and not role_row.rolbypassrls
+          and role_row.rolcreaterole
+          and not role_row.rolcreatedb
+          and not role_row.rolreplication
+          and role_row.rolconnlimit = -1
+          and role_row.rolvaliduntil is null
+          and role_row.rolconfig is null
+     ) then
+    raise exception 'PROFITABILITY_ACCESS_V2_PROVISIONER_ROLE_INVALID';
+  end if;
+
+  if not exists (
+       select 1
+         from pg_roles role_row
+        where role_row.rolname = runner_role_name
+          and not role_row.rolcanlogin
+          and not role_row.rolinherit
+          and not role_row.rolsuper
+          and not role_row.rolbypassrls
+          and not role_row.rolcreaterole
+          and not role_row.rolcreatedb
+          and not role_row.rolreplication
+          and role_row.rolconnlimit = -1
+          and role_row.rolvaliduntil is null
+          and role_row.rolconfig is null
+     ) or not exists (
+       select 1
+         from pg_roles role_row
+        where role_row.rolname = owner_role_name
+          and not role_row.rolcanlogin
+          and not role_row.rolinherit
+          and not role_row.rolsuper
+          and not role_row.rolbypassrls
+          and not role_row.rolcreaterole
+          and not role_row.rolcreatedb
+          and not role_row.rolreplication
+          and role_row.rolconnlimit = -1
+          and role_row.rolvaliduntil is null
+          and role_row.rolconfig is null
+          and has_schema_privilege(role_row.oid, 'public', 'USAGE')
+          and has_schema_privilege(role_row.oid, 'public', 'CREATE')
+     ) then
+    raise exception 'PROFITABILITY_ACCESS_V2_PRIVILEGED_ROLE_INVALID';
+  end if;
+
+  if not exists (
+       select 1
+         from pg_roles role_row
+        where role_row.rolname = session_role_name
+          and role_row.rolcanlogin
+          and not role_row.rolinherit
+          and not role_row.rolsuper
+          and not role_row.rolbypassrls
+          and not role_row.rolcreaterole
+          and not role_row.rolcreatedb
+          and not role_row.rolreplication
+          and role_row.rolconnlimit = -1
+          and role_row.rolvaliduntil is null
+          and role_row.rolconfig is null
+          and not has_schema_privilege(role_row.oid, 'public', 'CREATE')
+     ) then
+    raise exception 'PROFITABILITY_ACCESS_V2_SESSION_ROLE_INVALID';
+  end if;
+
+  if runtime_role_name is null or not exists (
+       select 1
+         from pg_roles role_row
+        where role_row.rolname = runtime_role_name
+          and not role_row.rolcanlogin
+          and not role_row.rolinherit
+          and not role_row.rolsuper
+          and not role_row.rolbypassrls
+          and not role_row.rolcreaterole
+          and not role_row.rolcreatedb
+          and not role_row.rolreplication
+          and role_row.rolconnlimit = -1
+          and role_row.rolvaliduntil is null
+          and role_row.rolconfig is null
+          and not has_schema_privilege(role_row.oid, 'public', 'CREATE')
      ) then
     raise exception 'PROFITABILITY_ACCESS_V2_RUNTIME_ROLE_INVALID';
+  end if;
+
+  if (
+       select count(*)
+         from pg_auth_members membership_row
+         join pg_roles granted_role on granted_role.oid = membership_row.roleid
+         join pg_roles member_role on member_role.oid = membership_row.member
+        where granted_role.rolname = any(array[
+          provisioner_role_name,
+          expected_executor,
+          runner_role_name,
+          owner_role_name,
+          session_role_name,
+          runtime_role_name
+        ])
+           or member_role.rolname = any(array[
+             provisioner_role_name,
+             expected_executor,
+             runner_role_name,
+             owner_role_name,
+             session_role_name,
+             runtime_role_name
+           ])
+     ) <> 8
+     or exists (
+       select 1
+         from pg_auth_members membership_row
+         join pg_roles granted_role on granted_role.oid = membership_row.roleid
+         join pg_roles member_role on member_role.oid = membership_row.member
+        where (
+          granted_role.rolname = any(array[
+            provisioner_role_name,
+            expected_executor,
+            runner_role_name,
+            owner_role_name,
+            session_role_name,
+            runtime_role_name
+          ])
+          or member_role.rolname = any(array[
+            provisioner_role_name,
+            expected_executor,
+            runner_role_name,
+            owner_role_name,
+            session_role_name,
+            runtime_role_name
+          ])
+        )
+          and not (
+            (
+              membership_row.grantor = (
+                select oid from pg_roles where rolname = provisioner_role_name
+              )
+              and membership_row.set_option
+              and not membership_row.inherit_option
+              and not membership_row.admin_option
+              and (
+                (granted_role.rolname = runner_role_name and member_role.rolname = expected_executor)
+                or (granted_role.rolname = owner_role_name and member_role.rolname = runner_role_name)
+                or (granted_role.rolname = runtime_role_name and member_role.rolname = session_role_name)
+              )
+            )
+            or (
+              granted_role.rolname = any(array[
+                expected_executor,
+                runner_role_name,
+                owner_role_name,
+                session_role_name,
+                runtime_role_name
+              ])
+              and member_role.rolname = provisioner_role_name
+              and membership_row.grantor = 10::oid
+              and membership_row.admin_option
+              and not membership_row.inherit_option
+              and not membership_row.set_option
+            )
+          )
+     ) then
+    raise exception 'PROFITABILITY_ACCESS_V2_MEMBERSHIP_GRAPH_INVALID';
   end if;
 
   if has_schema_privilege(runtime_role_name, 'public', 'CREATE') then
     raise exception 'PROFITABILITY_ACCESS_V2_RUNTIME_SCHEMA_CREATE_EXCESS';
   end if;
 
+  if not has_column_privilege(
+       owner_role_name, 'public.organizations', 'org_id', 'REFERENCES'
+     )
+     or not has_column_privilege(
+       owner_role_name, 'public.organization_member', 'org_id', 'REFERENCES'
+     )
+     or not has_column_privilege(
+       owner_role_name, 'public.organization_member', 'uid', 'REFERENCES'
+     )
+     or not has_column_privilege(
+       owner_role_name, 'public.service_object', 'org_id', 'REFERENCES'
+     )
+     or not has_column_privilege(
+       owner_role_name, 'public.service_object', 'object_id', 'REFERENCES'
+     ) then
+    raise exception 'PROFITABILITY_ACCESS_V2_SOURCE_REFERENCES_REQUIRED';
+  end if;
+
   -- One shot: a retry must return through the wrapper and repeat every gate.
-  perform set_config('cleanzi.profitability_access_v2_entrypoint', '', false);
+  perform set_config('cleanzi.profitability_access_v2_entrypoint', '', true);
 end
 $profitability_access_v2_entrypoint_guard$;
 
-begin;
-
-set local lock_timeout = '5s';
-set local statement_timeout = '60s';
-
-select pg_advisory_xact_lock(
-  hashtextextended('cleanzi:profitability-access-profile:v2', 0)
-);
+set local role profitability_owner;
 
 -- Fail closed when the tenant/member/object foundations are not the reviewed
 -- profitability schema. In particular, do not create parallel identity or
@@ -88,7 +305,16 @@ select pg_advisory_xact_lock(
 do $$
 declare
   required_relation text;
+  target_marker_count integer := 0;
+  target_relation text;
+  target_relation_oid oid;
+  owner_role_oid oid := (select oid from pg_roles where rolname = 'profitability_owner');
+  runtime_role_oid oid := (select oid from pg_roles where rolname = 'profitability_runtime');
 begin
+  if current_user <> 'profitability_owner' then
+    raise exception 'PROFITABILITY_ACCESS_V2_OWNER_ROLE_REQUIRED';
+  end if;
+
   foreach required_relation in array array[
     'organizations',
     'organization_member',
@@ -133,6 +359,109 @@ begin
 
   if not exists (select 1 from pg_extension where extname = 'btree_gist') then
     raise exception 'PROFITABILITY_ACCESS_V2_BTREE_GIST_REQUIRED';
+  end if;
+
+  target_marker_count :=
+      case when to_regclass('public.profitability_access_enforcement') is not null then 1 else 0 end
+    + case when to_regclass('public.organization_access_profile') is not null then 1 else 0 end
+    + case when to_regclass('public.service_object_assignment') is not null then 1 else 0 end
+    + case when to_regclass('public.profitability_target_history') is not null then 1 else 0 end
+    + case when to_regclass('public.organization_access_profile_active_uid_idx') is not null then 1 else 0 end
+    + case when to_regclass('public.organization_access_profile_lookup_idx') is not null then 1 else 0 end
+    + case when to_regclass('public.service_object_assignment_active_scope_idx') is not null then 1 else 0 end
+    + case when to_regclass('public.service_object_assignment_member_lookup_idx') is not null then 1 else 0 end
+    + case when to_regclass('public.service_object_assignment_object_lookup_idx') is not null then 1 else 0 end
+    + case when to_regclass('public.profitability_target_history_lookup_idx') is not null then 1 else 0 end;
+
+  if target_marker_count not in (0, 10) then
+    raise exception 'PROFITABILITY_ACCESS_V2_PARTIAL_TARGET:%/10', target_marker_count;
+  end if;
+
+  -- A replay may verify the reviewed state, but it must never silently repair
+  -- ownership or ACL drift before the exact postflight fingerprint runs.
+  if target_marker_count = 10 then
+    foreach target_relation in array array[
+      'profitability_access_enforcement',
+      'organization_access_profile',
+      'service_object_assignment',
+      'profitability_target_history'
+    ] loop
+      target_relation_oid := format('public.%I', target_relation)::regclass;
+
+      if not exists (
+        select 1
+          from pg_class relation_row
+         where relation_row.oid = target_relation_oid
+           and relation_row.relowner = owner_role_oid
+           and relation_row.relpersistence = 'p'
+           and not relation_row.relrowsecurity
+           and not relation_row.relforcerowsecurity
+      ) then
+        raise exception 'PROFITABILITY_ACCESS_V2_REPLAY_RELATION_FINGERPRINT_MISMATCH:%',
+          target_relation;
+      end if;
+
+      if (
+        select count(*)
+          from pg_class relation_row
+          cross join lateral aclexplode(
+            coalesce(relation_row.relacl, acldefault('r', relation_row.relowner))
+          ) privilege_row
+         where relation_row.oid = target_relation_oid
+           and privilege_row.grantee = owner_role_oid
+           and not privilege_row.is_grantable
+      -- PostgreSQL 17 table owners have eight direct ACL privileges, including
+      -- MAINTAIN. The exact runtime ACL is checked independently below.
+      ) <> 8
+      or (
+        select count(*)
+          from pg_class relation_row
+          cross join lateral aclexplode(
+            coalesce(relation_row.relacl, acldefault('r', relation_row.relowner))
+          ) privilege_row
+         where relation_row.oid = target_relation_oid
+           and privilege_row.grantee = runtime_role_oid
+           and privilege_row.privilege_type = 'SELECT'
+           and not privilege_row.is_grantable
+      ) <> 1
+      or exists (
+        select 1
+          from pg_class relation_row
+          cross join lateral aclexplode(
+            coalesce(relation_row.relacl, acldefault('r', relation_row.relowner))
+          ) privilege_row
+         where relation_row.oid = target_relation_oid
+           and (
+             privilege_row.grantee not in (owner_role_oid, runtime_role_oid)
+             or (
+               privilege_row.grantee = runtime_role_oid
+               and (
+                 privilege_row.privilege_type <> 'SELECT'
+                 or privilege_row.is_grantable
+               )
+             )
+             or (
+               privilege_row.grantee = owner_role_oid
+               and privilege_row.is_grantable
+             )
+           )
+      ) then
+        raise exception 'PROFITABILITY_ACCESS_V2_REPLAY_RELATION_ACL_MISMATCH:%',
+          target_relation;
+      end if;
+
+      if exists (
+        select 1
+          from pg_attribute attribute_row
+          cross join lateral aclexplode(attribute_row.attacl) privilege_row
+         where attribute_row.attrelid = target_relation_oid
+           and attribute_row.attnum > 0
+           and not attribute_row.attisdropped
+      ) then
+        raise exception 'PROFITABILITY_ACCESS_V2_REPLAY_COLUMN_ACL_MISMATCH:%',
+          target_relation;
+      end if;
+    end loop;
   end if;
 end
 $$;
@@ -394,10 +723,7 @@ revoke all on table public.profitability_access_enforcement from public;
 
 do $$
 declare
-  runtime_role_name text := nullif(
-    current_setting('cleanzi.profitability_access_v2_runtime_role', true),
-    ''
-  );
+  runtime_role_name constant text := 'profitability_runtime';
   runtime_role_oid oid;
   target_relation text;
   target_relation_oid oid;
@@ -414,7 +740,7 @@ begin
      and not runtime_role.rolreplication;
 
   if runtime_role_oid is null
-     or runtime_role_name in ('PUBLIC', 'public', 'migration_runner') then
+     or runtime_role_name <> 'profitability_runtime' then
     raise exception 'PROFITABILITY_ACCESS_V2_RUNTIME_ROLE_INVALID';
   end if;
 
@@ -522,7 +848,77 @@ declare
   required_constraint record;
   required_index record;
   actual_definition text;
+  target_relation text;
+  target_relation_oid oid;
+  owner_role_oid oid := (select oid from pg_roles where rolname = 'profitability_owner');
+  runtime_role_oid oid := (select oid from pg_roles where rolname = 'profitability_runtime');
 begin
+  if current_user <> 'profitability_owner'
+     or owner_role_oid is null
+     or runtime_role_oid is null then
+    raise exception 'PROFITABILITY_ACCESS_V2_POSTFLIGHT_ROLE_MISMATCH';
+  end if;
+
+  for required_column in
+    select * from (values
+      ('profitability_access_enforcement', 5),
+      ('organization_access_profile', 22),
+      ('service_object_assignment', 15),
+      ('profitability_target_history', 15)
+    ) as expected(table_name, expected_count)
+  loop
+    if (
+      select count(*)
+        from pg_attribute attribute_row
+       where attribute_row.attrelid = format('public.%I', required_column.table_name)::regclass
+         and attribute_row.attnum > 0
+         and not attribute_row.attisdropped
+    ) <> required_column.expected_count then
+      raise exception 'PROFITABILITY_ACCESS_V2_COLUMN_SET_FINGERPRINT_MISMATCH:%',
+        required_column.table_name;
+    end if;
+  end loop;
+
+  for required_constraint in
+    select * from (values
+      ('profitability_access_enforcement', 4),
+      ('organization_access_profile', 12),
+      ('service_object_assignment', 7),
+      ('profitability_target_history', 10)
+    ) as expected(table_name, expected_count)
+  loop
+    if (
+      select count(*)
+        from pg_constraint constraint_row
+       where constraint_row.conrelid = format(
+         'public.%I', required_constraint.table_name
+       )::regclass
+    ) <> required_constraint.expected_count then
+      raise exception 'PROFITABILITY_ACCESS_V2_CONSTRAINT_SET_FINGERPRINT_MISMATCH:%',
+        required_constraint.table_name;
+    end if;
+  end loop;
+
+  for required_index in
+    select * from (values
+      ('profitability_access_enforcement', 1),
+      ('organization_access_profile', 3),
+      ('service_object_assignment', 4),
+      ('profitability_target_history', 3)
+    ) as expected(table_name, expected_count)
+  loop
+    if (
+      select count(*)
+        from pg_index index_meta
+       where index_meta.indrelid = format(
+         'public.%I', required_index.table_name
+       )::regclass
+    ) <> required_index.expected_count then
+      raise exception 'PROFITABILITY_ACCESS_V2_INDEX_SET_FINGERPRINT_MISMATCH:%',
+        required_index.table_name;
+    end if;
+  end loop;
+
   for required_column in
     select *
       from (values
@@ -713,6 +1109,8 @@ begin
      where namespace_row.nspname = 'public'
        and relation_row.relname = required_index.table_name
        and index_row.relname = required_index.index_name
+       and index_row.relowner = owner_role_oid
+       and index_row.relpersistence = 'p'
        and index_meta.indisunique = required_index.is_unique
        and index_meta.indisvalid is true
        and index_meta.indisready is true;
@@ -726,7 +1124,102 @@ begin
         required_index.index_name;
     end if;
   end loop;
+
+  foreach target_relation in array array[
+    'profitability_access_enforcement',
+    'organization_access_profile',
+    'service_object_assignment',
+    'profitability_target_history'
+  ] loop
+    target_relation_oid := format('public.%I', target_relation)::regclass;
+
+    if not exists (
+      select 1
+        from pg_class relation_row
+       where relation_row.oid = target_relation_oid
+         and relation_row.relowner = owner_role_oid
+         and relation_row.relpersistence = 'p'
+         and not relation_row.relrowsecurity
+         and not relation_row.relforcerowsecurity
+    ) then
+      raise exception 'PROFITABILITY_ACCESS_V2_RELATION_FINGERPRINT_MISMATCH:%',
+        target_relation;
+    end if;
+
+    if (
+      select count(*)
+        from pg_class relation_row
+        cross join lateral aclexplode(
+          coalesce(relation_row.relacl, acldefault('r', relation_row.relowner))
+        ) privilege_row
+       where relation_row.oid = target_relation_oid
+         and privilege_row.grantee = owner_role_oid
+         and not privilege_row.is_grantable
+    -- PostgreSQL 17 table owners have eight direct ACL privileges, including
+    -- MAINTAIN. The exact runtime ACL is checked independently below.
+    ) <> 8
+    or (
+      select count(*)
+        from pg_class relation_row
+        cross join lateral aclexplode(
+          coalesce(relation_row.relacl, acldefault('r', relation_row.relowner))
+        ) privilege_row
+       where relation_row.oid = target_relation_oid
+         and privilege_row.grantee = runtime_role_oid
+         and privilege_row.privilege_type = 'SELECT'
+         and not privilege_row.is_grantable
+    ) <> 1
+    or exists (
+      select 1
+        from pg_class relation_row
+        cross join lateral aclexplode(
+          coalesce(relation_row.relacl, acldefault('r', relation_row.relowner))
+        ) privilege_row
+       where relation_row.oid = target_relation_oid
+         and (
+           (
+             privilege_row.grantee = owner_role_oid
+             and privilege_row.is_grantable
+           )
+           or (
+             privilege_row.grantee = runtime_role_oid
+             and (
+               privilege_row.privilege_type <> 'SELECT'
+               or privilege_row.is_grantable
+             )
+           )
+           or privilege_row.grantee not in (owner_role_oid, runtime_role_oid)
+         )
+    ) then
+      raise exception 'PROFITABILITY_ACCESS_V2_RELATION_ACL_FINGERPRINT_MISMATCH:%',
+        target_relation;
+    end if;
+
+    if exists (
+      select 1
+        from pg_attribute attribute_row
+        cross join lateral aclexplode(attribute_row.attacl) privilege_row
+       where attribute_row.attrelid = target_relation_oid
+         and attribute_row.attnum > 0
+         and not attribute_row.attisdropped
+    ) then
+      raise exception 'PROFITABILITY_ACCESS_V2_COLUMN_ACL_FINGERPRINT_MISMATCH:%',
+        target_relation;
+    end if;
+
+    if exists (
+      select 1
+        from pg_trigger trigger_row
+       where trigger_row.tgrelid = target_relation_oid
+         and not trigger_row.tgisinternal
+    ) or exists (
+      select 1
+        from pg_policy policy_row
+       where policy_row.polrelid = target_relation_oid
+    ) then
+      raise exception 'PROFITABILITY_ACCESS_V2_RELATION_SECURITY_FINGERPRINT_MISMATCH:%',
+        target_relation;
+    end if;
+  end loop;
 end
 $$;
-
-commit;
