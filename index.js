@@ -4774,6 +4774,18 @@ async function databaseRelationExists(client, relationName) {
   return Boolean(normalizeText(result.rows?.[0]?.relation_name))
 }
 
+async function databaseRelationReadable(client, relationName) {
+  const normalized = normalizeText(relationName)
+  if (!normalized || !(await databaseRelationExists(client, normalized))) {
+    return false
+  }
+  const result = await client.query(
+    `select has_table_privilege($1::text, 'SELECT') as can_select`,
+    [normalized],
+  )
+  return result.rows?.[0]?.can_select === true
+}
+
 async function databaseColumnExists(client, relationName, columnName) {
   const normalizedRelation = normalizeText(relationName)
   const normalizedColumn = normalizeText(columnName)
@@ -5194,24 +5206,33 @@ function profitabilityCapabilities(input) {
 
 async function buildOrganizationSessionContext(client, uid, row) {
   const enriched = { ...row }
-  if (await databaseRelationExists(client, 'public.profitability_permission')) {
-    const permissionResult = await client.query(
-      `select permission_code, object_id
-         from public.profitability_permission
-        where org_id = $1::text
-          and uid = $2::text
-          and revoked_at is null`,
-      [normalizeText(row?.org_id), normalizeText(uid)],
-    )
-    const codes = new Set(permissionResult.rows.map((entry) => normalizeText(entry.permission_code)))
-    const canEdit = codes.has('profitability:edit')
-    const canRead = canEdit
-      || codes.has('profitability:view-internal')
-      || codes.has('profitability:view-client-summary')
-      || codes.has('profitability:close-period')
-    enriched.is_finance_admin = canEdit
-    enriched.profitability_grants = {
-      profitabilityModule: canRead || canEdit ? { read: canRead, edit: canEdit } : false,
+  if (await databaseRelationReadable(client, 'public.profitability_permission')) {
+    let permissionResult = null
+    try {
+      permissionResult = await client.query(
+        `select permission_code, object_id
+           from public.profitability_permission
+          where org_id = $1::text
+            and uid = $2::text
+            and revoked_at is null`,
+        [normalizeText(row?.org_id), normalizeText(uid)],
+      )
+    } catch (error) {
+      if (normalizeText(error?.code).toUpperCase() !== '42501') {
+        throw error
+      }
+    }
+    if (permissionResult) {
+      const codes = new Set(permissionResult.rows.map((entry) => normalizeText(entry.permission_code)))
+      const canEdit = codes.has('profitability:edit')
+      const canRead = canEdit
+        || codes.has('profitability:view-internal')
+        || codes.has('profitability:view-client-summary')
+        || codes.has('profitability:close-period')
+      enriched.is_finance_admin = canEdit
+      enriched.profitability_grants = {
+        profitabilityModule: canRead || canEdit ? { read: canRead, edit: canEdit } : false,
+      }
     }
   }
   const context = buildSessionContext(uid, enriched)
@@ -5220,7 +5241,14 @@ async function buildOrganizationSessionContext(client, uid, row) {
     workforceScheduling: context.capabilities?.workforceScheduling === true
       && isWorkforceScheduleOrganizationEnabled(row?.org_id),
   }
-  context.usage = await buildPlanUsage(client, row?.org_id, context.planCode, context.limits)
+  try {
+    context.usage = await buildPlanUsage(client, row?.org_id, context.planCode, context.limits)
+  } catch (error) {
+    if (normalizeText(error?.code).toUpperCase() !== '42501') {
+      throw error
+    }
+    context.usage = {}
+  }
   return context
 }
 
@@ -5256,7 +5284,7 @@ async function buildPlanUsage(client, orgIdValue, planCodeValue, limitsValue = {
     },
   }
 
-  if (planCode !== 'PRO' || !(await databaseRelationExists(client, 'public.service_object'))) {
+  if (planCode !== 'PRO' || !(await databaseRelationReadable(client, 'public.service_object'))) {
     return usage
   }
 
@@ -5272,7 +5300,11 @@ async function buildPlanUsage(client, orgIdValue, planCodeValue, limitsValue = {
   const objectIds = objectResult.rows.map((row) => normalizeText(row.object_id)).filter(Boolean)
   Object.assign(usage.proObjects, calculateMeteredOverage(objectIds.length, usage.proObjects.included))
 
-  if (!objectIds.length || !(await databaseColumnExists(client, 'public.zone', 'object_id'))) {
+  if (
+    !objectIds.length
+    || !(await databaseRelationReadable(client, 'public.zone'))
+    || !(await databaseColumnExists(client, 'public.zone', 'object_id'))
+  ) {
     return usage
   }
 
