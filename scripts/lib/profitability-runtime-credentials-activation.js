@@ -162,7 +162,8 @@ function validateEnvironmentSnapshot(snapshot, options, { applying = false } = {
   if (snapshot.secret.exists === true && snapshot.secret.managedExact !== true) {
     fail('SECRET_CONTAINER_CONFLICT')
   }
-  if (snapshot.secret.accessorExact !== true && snapshot.secret.accessorAbsent !== true) {
+  if (snapshot.secret.appHostingPolicyExact !== true
+      && snapshot.secret.appHostingPolicyAbsent !== true) {
     fail('SECRET_ACCESS_POLICY_CONFLICT')
   }
   return snapshot
@@ -239,6 +240,8 @@ async function runAudit(options, deps) {
       managedExact: snapshot.secret.managedExact,
       accessorExact: snapshot.secret.accessorExact,
       accessorAbsent: snapshot.secret.accessorAbsent,
+      appHostingPolicyExact: snapshot.secret.appHostingPolicyExact,
+      appHostingPolicyAbsent: snapshot.secret.appHostingPolicyAbsent,
     }),
     identity: Object.freeze({
       serviceAccount: EXPECTED.runtimeServiceAccount,
@@ -253,7 +256,7 @@ async function cleanupFailedActivation(state, deps, progress) {
   let complete = true
   progress.cleanup = 'running'
 
-  if (state.secretPolicyMayHaveChanged && !state.previousSecretPolicyAccessorExact) {
+  if (state.secretPolicyMayHaveChanged && !state.previousSecretPolicyExact) {
     try {
       await deps.secretManager.removeRuntimeAccessor({
         mutate: true,
@@ -333,7 +336,8 @@ async function cleanupFailedActivation(state, deps, progress) {
 
   try {
     const stateAfter = await deps.secretManager.inspect({ containment: true })
-    if (stateAfter.accessorExact === true && state.previousSecretPolicyAccessorExact !== true) {
+    if (stateAfter.appHostingPolicyExact === true
+        && state.previousSecretPolicyExact !== true) {
       complete = false
     }
   } catch {
@@ -348,6 +352,8 @@ async function runApply(options, deps, { signal } = {}) {
   if (!deps?.secretManager || !deps?.cloudSqlAdmin || !deps?.databaseAdmin
       || typeof deps.randomSecret !== 'function'
       || typeof deps.secretManager.verifyVersionPayload !== 'function'
+      || typeof deps.secretManager.policyHasExactAppHostingSecretPolicy !== 'function'
+      || typeof deps.secretManager.setExactAppHostingSecretPolicy !== 'function'
       || typeof deps.secretManager.removeRuntimeAccessor !== 'function') {
     fail('ACTIVATION_DEPENDENCY_MISSING')
   }
@@ -356,7 +362,7 @@ async function runApply(options, deps, { signal } = {}) {
     password: null,
     secretBytes: null,
     secretVersionName: null,
-    previousSecretPolicyAccessorExact: false,
+    previousSecretPolicyExact: false,
     secretPolicyMayHaveChanged: false,
     databasePasswordMayHaveChanged: false,
     databasePasswordUpdateConfirmed: false,
@@ -420,10 +426,10 @@ async function runApply(options, deps, { signal } = {}) {
     assertNotCancelled(signal)
 
     const currentSecretPolicy = await deps.secretManager.getPolicy()
-    state.previousSecretPolicyAccessorExact =
-      deps.secretManager.policyHasExactRuntimeAccessor(currentSecretPolicy)
+    state.previousSecretPolicyExact =
+      deps.secretManager.policyHasExactAppHostingSecretPolicy(currentSecretPolicy)
     state.secretPolicyMayHaveChanged = true
-    await deps.secretManager.setExactRuntimeAccessor({ mutate: true })
+    await deps.secretManager.setExactAppHostingSecretPolicy({ mutate: true })
     progress.secretIam = 'exact_secret_only'
     assertNotCancelled(signal)
 
@@ -434,7 +440,7 @@ async function runApply(options, deps, { signal } = {}) {
     validateEnvironmentSnapshot(postflight, options, { applying: true })
     if (postflight.secret.latestVersionName !== state.secretVersionName
         || postflight.secret.latestVersionState !== 'ENABLED'
-        || postflight.secret.accessorExact !== true
+        || postflight.secret.appHostingPolicyExact !== true
         || postflight.identity.projectBroadSecretAccess === true
         || postflight.database.runtimeCredentialVerified !== true) {
       fail('RUNTIME_CREDENTIAL_POSTFLIGHT_NOT_EXACT')

@@ -22,7 +22,22 @@ const IAM_DATABASE_USER = 'biuro@bestclean.pl'
 const REMOTE = 'cleanzi01'
 const REMOTE_URL = 'https://github.com/biuro-del/Cleanzi-01.git'
 const SECRET_ACCESSOR_ROLE = 'roles/secretmanager.secretAccessor'
+const SECRET_VIEWER_ROLE = 'roles/secretmanager.viewer'
+const SECRET_VERSION_MANAGER_ROLE = 'roles/secretmanager.secretVersionManager'
 const RUNTIME_MEMBER = `serviceAccount:${EXPECTED.runtimeServiceAccount}`
+const APP_HOSTING_SERVICE_AGENT =
+  `service-${EXPECTED.projectNumber}@gcp-sa-firebaseapphosting.iam.gserviceaccount.com`
+const APP_HOSTING_SERVICE_AGENT_MEMBER = `serviceAccount:${APP_HOSTING_SERVICE_AGENT}`
+const MANAGED_SECRET_ROLES = Object.freeze(new Set([
+  SECRET_ACCESSOR_ROLE,
+  SECRET_VIEWER_ROLE,
+  SECRET_VERSION_MANAGER_ROLE,
+]))
+const EXPECTED_APP_HOSTING_SECRET_MEMBERS = Object.freeze({
+  [SECRET_ACCESSOR_ROLE]: Object.freeze([RUNTIME_MEMBER]),
+  [SECRET_VIEWER_ROLE]: Object.freeze([RUNTIME_MEMBER]),
+  [SECRET_VERSION_MANAGER_ROLE]: Object.freeze([APP_HOSTING_SERVICE_AGENT_MEMBER]),
+})
 const MANAGED_LABELS = Object.freeze({
   component: 'profitability-runtime-credentials',
   managed_by: 'cleanzi',
@@ -78,16 +93,31 @@ function policyHasExactRuntimeAccessor(policy) {
     && bindings[0].members[0] === RUNTIME_MEMBER
 }
 
+function policyHasExactAppHostingSecretPolicy(policy) {
+  const bindings = policy?.bindings || []
+  if (bindings.length !== MANAGED_SECRET_ROLES.size) return false
+  return [...MANAGED_SECRET_ROLES].every((role) => {
+    const matches = bindings.filter((binding) => text(binding.role) === role)
+    if (matches.length !== 1 || matches[0].condition) return false
+    const members = [...new Set((matches[0].members || []).map(text).filter(Boolean))].sort()
+    return JSON.stringify(members) === JSON.stringify(EXPECTED_APP_HOSTING_SECRET_MEMBERS[role])
+  })
+}
+
 function policyHasNoRuntimeAccessor(policy) {
   return !(policy?.bindings || []).some(
     (binding) => text(binding.role) === SECRET_ACCESSOR_ROLE,
   )
 }
 
+function policyHasNoAppHostingSecretPolicy(policy) {
+  return (policy?.bindings || []).length === 0
+}
+
 function policyHasNoRuntimeMember(policy) {
+  const managedMembers = new Set([RUNTIME_MEMBER, APP_HOSTING_SERVICE_AGENT_MEMBER])
   return !(policy?.bindings || []).some((binding) => (
-    text(binding.role) === SECRET_ACCESSOR_ROLE
-      && (binding.members || []).map(text).includes(RUNTIME_MEMBER)
+    (binding.members || []).map(text).some((member) => managedMembers.has(member))
   ))
 }
 
@@ -258,6 +288,8 @@ function createSecretManagerAdapter(options = {}) {
         managedExact: false,
         accessorExact: false,
         accessorAbsent: true,
+        appHostingPolicyExact: false,
+        appHostingPolicyAbsent: true,
         latestVersionName: null,
         latestVersionState: null,
       })
@@ -271,6 +303,8 @@ function createSecretManagerAdapter(options = {}) {
       managedExact: secretMetadataExact(metadata),
       accessorExact: policyHasExactRuntimeAccessor(policy),
       accessorAbsent: policyHasNoRuntimeAccessor(policy),
+      appHostingPolicyExact: policyHasExactAppHostingSecretPolicy(policy),
+      appHostingPolicyAbsent: policyHasNoAppHostingSecretPolicy(policy),
       latestVersionName: text(latest?.name) || null,
       latestVersionState: text(latest?.state) || null,
     })
@@ -387,24 +421,33 @@ function createSecretManagerAdapter(options = {}) {
     }
   }
 
-  async function setExactRuntimeAccessor({ mutate } = {}) {
+  async function setExactAppHostingSecretPolicy({ mutate } = {}) {
     requireMutation(mutate, 'SECRET_IAM_MUTATION_OPT_IN_REQUIRED')
     const current = await getPolicy()
-    if (policyHasExactRuntimeAccessor(current)) return current
-    if (!policyHasNoRuntimeAccessor(current)) throw new Error('SECRET_ACCESS_POLICY_CONFLICT')
-    const bindings = [...current.bindings]
-    bindings.push({ role: SECRET_ACCESSOR_ROLE, members: [RUNTIME_MEMBER] })
+    if (policyHasExactAppHostingSecretPolicy(current)) return current
+    if (!policyHasNoAppHostingSecretPolicy(current)) throw new Error('SECRET_ACCESS_POLICY_CONFLICT')
+    const bindings = [
+      ...current.bindings,
+      ...Object.entries(EXPECTED_APP_HOSTING_SECRET_MEMBERS).map(([role, members]) => ({
+        role,
+        members: [...members],
+      })),
+    ]
     const updated = await setPolicy({ ...current, bindings }, { mutate: true })
-    if (!policyHasExactRuntimeAccessor(updated)) throw new Error('SECRET_IAM_POSTFLIGHT_FAILED')
+    if (!policyHasExactAppHostingSecretPolicy(updated)) throw new Error('SECRET_IAM_POSTFLIGHT_FAILED')
     return updated
   }
+
+  const setExactRuntimeAccessor = setExactAppHostingSecretPolicy
 
   async function removeRuntimeAccessor({ mutate, containment = false } = {}) {
     requireMutation(mutate, 'SECRET_IAM_MUTATION_OPT_IN_REQUIRED')
     const current = await getPolicy({ containment })
+    const managedMembers = new Set([RUNTIME_MEMBER, APP_HOSTING_SERVICE_AGENT_MEMBER])
     const bindings = current.bindings.flatMap((binding) => {
-      if (binding.role !== SECRET_ACCESSOR_ROLE) return [binding]
-      const members = (binding.members || []).filter((member) => member !== RUNTIME_MEMBER)
+      const members = (binding.members || []).filter(
+        (member) => !managedMembers.has(text(member)),
+      )
       return members.length ? [{ ...binding, members }] : []
     })
     if (policyHasNoRuntimeMember(current)) return current
@@ -423,8 +466,10 @@ function createSecretManagerAdapter(options = {}) {
     ensureContainer,
     getPolicy,
     inspect,
+    policyHasExactAppHostingSecretPolicy,
     policyHasExactRuntimeAccessor,
     removeRuntimeAccessor,
+    setExactAppHostingSecretPolicy,
     setExactRuntimeAccessor,
     verifyVersionPayload,
   })
@@ -719,17 +764,25 @@ function createProfitabilityRuntimeCredentialDependencies(options = {}) {
 }
 
 module.exports = {
+  APP_HOSTING_SERVICE_AGENT,
+  APP_HOSTING_SERVICE_AGENT_MEMBER,
   BROAD_SECRET_ROLES,
+  EXPECTED_APP_HOSTING_SECRET_MEMBERS,
   MANAGED_LABELS,
+  MANAGED_SECRET_ROLES,
   RUNTIME_MEMBER,
   SECRET_ACCESSOR_ROLE,
+  SECRET_VERSION_MANAGER_ROLE,
+  SECRET_VIEWER_ROLE,
   clonePolicy,
   createGoogleCloudRequestAdapter,
   createProfitabilityRuntimeCredentialDependencies,
   createRuntimeDatabaseAdapter,
   createRuntimeIdentityAdapter,
   createSecretManagerAdapter,
+  policyHasExactAppHostingSecretPolicy,
   policyHasExactRuntimeAccessor,
+  policyHasNoAppHostingSecretPolicy,
   policyHasNoRuntimeAccessor,
   policyHasNoRuntimeMember,
   secretMetadataExact,

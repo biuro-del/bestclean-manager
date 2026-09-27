@@ -68,6 +68,8 @@ function snapshot(overrides = {}) {
       managedExact: false,
       accessorExact: false,
       accessorAbsent: true,
+      appHostingPolicyExact: false,
+      appHostingPolicyAbsent: true,
       latestVersionName: null,
       latestVersionState: null,
     },
@@ -122,6 +124,8 @@ function fakeDependencies({
               managedExact: true,
               accessorExact: postflight && !failPostflight ? state.accessor : false,
               accessorAbsent: !state.accessor,
+              appHostingPolicyExact: postflight && !failPostflight ? state.accessor : false,
+              appHostingPolicyAbsent: !state.accessor,
               latestVersionName: state.latestVersionName,
               latestVersionState: state.latestVersionState,
             }
@@ -152,8 +156,8 @@ function fakeDependencies({
         events.push('secret:get-policy')
         return previousPolicy
       },
-      policyHasExactRuntimeAccessor() { return false },
-      async setExactRuntimeAccessor() {
+      policyHasExactAppHostingSecretPolicy() { return false },
+      async setExactAppHostingSecretPolicy() {
         events.push('secret:set-accessor')
         state.accessor = true
       },
@@ -170,7 +174,10 @@ function fakeDependencies({
       async disableVersion() { events.push('cleanup:disable-version') },
       async inspect() {
         events.push('cleanup:inspect-secret')
-        return { accessorExact: state.accessor }
+        return {
+          accessorExact: state.accessor,
+          appHostingPolicyExact: state.accessor,
+        }
       },
     },
     cloudSqlAdmin: {
@@ -253,6 +260,19 @@ test('preflight fails closed for active gates, broad IAM, or a conflicting secre
       secret: { exists: true, managedExact: false, accessorAbsent: true },
     }), options(), { applying: true }),
     /SECRET_CONTAINER_CONFLICT/,
+  )
+  assert.throws(
+    () => validateEnvironmentSnapshot(snapshot({
+      secret: {
+        exists: true,
+        managedExact: true,
+        accessorExact: true,
+        accessorAbsent: false,
+        appHostingPolicyExact: false,
+        appHostingPolicyAbsent: false,
+      },
+    }), options(), { applying: true }),
+    /SECRET_ACCESS_POLICY_CONFLICT/,
   )
 })
 

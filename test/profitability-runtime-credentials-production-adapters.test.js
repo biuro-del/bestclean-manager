@@ -5,13 +5,19 @@ const test = require('node:test')
 
 const { EXPECTED } = require('../scripts/lib/profitability-runtime-credentials-activation')
 const {
+  APP_HOSTING_SERVICE_AGENT_MEMBER,
+  EXPECTED_APP_HOSTING_SECRET_MEMBERS,
   MANAGED_LABELS,
   RUNTIME_MEMBER,
   SECRET_ACCESSOR_ROLE,
+  SECRET_VERSION_MANAGER_ROLE,
+  SECRET_VIEWER_ROLE,
   createRuntimeDatabaseAdapter,
   createRuntimeIdentityAdapter,
   createSecretManagerAdapter,
+  policyHasExactAppHostingSecretPolicy,
   policyHasExactRuntimeAccessor,
+  policyHasNoAppHostingSecretPolicy,
   policyHasNoRuntimeAccessor,
   policyHasNoRuntimeMember,
   secretMetadataExact,
@@ -166,14 +172,12 @@ test('Secret Manager adapter resolves an ambiguous create before reporting persi
   )
 })
 
-test('Secret Manager IAM replacement preserves unrelated roles and makes accessor exact', async () => {
+test('Secret Manager IAM replacement grants only exact App Hosting secret access', async () => {
   const calls = []
   let policy = {
     version: 3,
     etag: 'etag-1',
-    bindings: [
-      { role: 'roles/secretmanager.viewer', members: ['user:auditor@example.com'] },
-    ],
+    bindings: [],
   }
   const api = {
     async request(method, url, options = {}) {
@@ -189,7 +193,9 @@ test('Secret Manager IAM replacement preserves unrelated roles and makes accesso
   const adapter = createSecretManagerAdapter({ api })
   const updated = await adapter.setExactRuntimeAccessor({ mutate: true })
   assert.equal(policyHasExactRuntimeAccessor(updated), true)
+  assert.equal(policyHasExactAppHostingSecretPolicy(updated), true)
   assert.equal(policyHasNoRuntimeAccessor(updated), false)
+  assert.equal(policyHasNoAppHostingSecretPolicy(updated), false)
   assert.equal(policyHasNoRuntimeAccessor({
     bindings: [{
       role: SECRET_ACCESSOR_ROLE,
@@ -200,7 +206,20 @@ test('Secret Manager IAM replacement preserves unrelated roles and makes accesso
     updated.bindings.find((binding) => binding.role === SECRET_ACCESSOR_ROLE),
     { role: SECRET_ACCESSOR_ROLE, members: [RUNTIME_MEMBER] },
   )
-  assert.ok(updated.bindings.some((binding) => binding.role === 'roles/secretmanager.viewer'))
+  assert.deepEqual(
+    updated.bindings.find((binding) => binding.role === SECRET_VIEWER_ROLE),
+    { role: SECRET_VIEWER_ROLE, members: [RUNTIME_MEMBER] },
+  )
+  assert.deepEqual(
+    updated.bindings.find((binding) => binding.role === SECRET_VERSION_MANAGER_ROLE),
+    { role: SECRET_VERSION_MANAGER_ROLE, members: [APP_HOSTING_SERVICE_AGENT_MEMBER] },
+  )
+  assert.deepEqual(EXPECTED_APP_HOSTING_SECRET_MEMBERS, {
+    [SECRET_ACCESSOR_ROLE]: [RUNTIME_MEMBER],
+    [SECRET_VIEWER_ROLE]: [RUNTIME_MEMBER],
+    [SECRET_VERSION_MANAGER_ROLE]: [APP_HOSTING_SERVICE_AGENT_MEMBER],
+  })
+  assert.equal(updated.bindings.length, 3)
   const setCall = calls.find((call) => call.url.endsWith(':setIamPolicy'))
   assert.equal(setCall.options.data.policy.etag, 'etag-1')
   assert.equal(calls.filter((call) => call.url.endsWith(':getIamPolicy')).length, 1)
@@ -210,7 +229,7 @@ test('Secret Manager IAM CAS refuses a concurrent policy change without losing b
   let policy = {
     version: 3,
     etag: 'etag-1',
-    bindings: [{ role: 'roles/secretmanager.viewer', members: ['user:auditor@example.com'] }],
+    bindings: [],
   }
   const api = {
     async request(method, url, options = {}) {
@@ -221,7 +240,7 @@ test('Secret Manager IAM CAS refuses a concurrent policy change without losing b
           etag: 'etag-2',
           bindings: [
             ...policy.bindings,
-            { role: 'roles/secretmanager.viewer', members: ['user:concurrent@example.com'] },
+            { role: 'roles/logging.viewer', members: ['user:concurrent@example.com'] },
           ],
         }
         return snapshot
@@ -244,13 +263,28 @@ test('Secret Manager IAM CAS refuses a concurrent policy change without losing b
   )))
 })
 
-test('Secret Manager containment removes only the runtime accessor from the current policy', async () => {
+test('Secret Manager containment removes only managed App Hosting secret grants', async () => {
   let policy = {
     version: 3,
     etag: 'etag-7',
     bindings: [
-      { role: 'roles/secretmanager.viewer', members: ['user:auditor@example.com'] },
+      {
+        role: SECRET_VIEWER_ROLE,
+        members: [RUNTIME_MEMBER, 'user:auditor@example.com'],
+      },
       { role: SECRET_ACCESSOR_ROLE, members: [RUNTIME_MEMBER, 'serviceAccount:other@example.com'] },
+      {
+        role: SECRET_VERSION_MANAGER_ROLE,
+        members: [APP_HOSTING_SERVICE_AGENT_MEMBER, 'serviceAccount:other@example.com'],
+      },
+      {
+        role: SECRET_ACCESSOR_ROLE,
+        members: [APP_HOSTING_SERVICE_AGENT_MEMBER],
+      },
+      {
+        role: 'roles/secretmanager.admin',
+        members: [RUNTIME_MEMBER, 'group:security@example.com'],
+      },
     ],
   }
   const api = {
@@ -270,23 +304,94 @@ test('Secret Manager containment removes only the runtime accessor from the curr
   })
   assert.equal(policyHasNoRuntimeMember(updated), true)
   assert.ok(updated.bindings.some((binding) => (
-    binding.role === 'roles/secretmanager.viewer'
+    binding.role === SECRET_VIEWER_ROLE
       && binding.members.includes('user:auditor@example.com')
+      && !binding.members.includes(RUNTIME_MEMBER)
   )))
   assert.ok(updated.bindings.some((binding) => (
     binding.role === SECRET_ACCESSOR_ROLE
       && binding.members.includes('serviceAccount:other@example.com')
   )))
+  assert.ok(updated.bindings.some((binding) => (
+    binding.role === SECRET_VERSION_MANAGER_ROLE
+      && binding.members.includes('serviceAccount:other@example.com')
+      && !binding.members.includes(APP_HOSTING_SERVICE_AGENT_MEMBER)
+  )))
+  assert.ok(updated.bindings.some((binding) => (
+    binding.role === 'roles/secretmanager.admin'
+      && binding.members.includes('group:security@example.com')
+      && !binding.members.includes(RUNTIME_MEMBER)
+  )))
+  assert.equal(updated.bindings.some((binding) => (
+    (binding.members || []).includes(APP_HOSTING_SERVICE_AGENT_MEMBER)
+  )), false)
+})
+
+test('Secret Manager containment detects a forbidden P4SA accessor', () => {
+  const policy = {
+    bindings: [{
+      role: SECRET_ACCESSOR_ROLE,
+      members: [APP_HOSTING_SERVICE_AGENT_MEMBER],
+    }],
+  }
+  assert.equal(policyHasNoRuntimeMember(policy), false)
 })
 
 test('Secret Manager IAM refuses to replace an unexpected existing accessor', async () => {
+  const forbiddenAccessors = [
+    APP_HOSTING_SERVICE_AGENT_MEMBER,
+    'serviceAccount:firebase-app-hosting-compute@iclean-room.iam.gserviceaccount.com',
+    'serviceAccount:other@example.com',
+  ]
+  for (const forbiddenMember of forbiddenAccessors) {
+    const api = {
+      async request(method, url) {
+        if (method === 'GET' && url.endsWith(':getIamPolicy')) {
+          return {
+            version: 3,
+            etag: 'etag-1',
+            bindings: [{ role: SECRET_ACCESSOR_ROLE, members: [forbiddenMember] }],
+          }
+        }
+        throw new Error('unexpected mutation')
+      }
+    }
+    await assert.rejects(
+      createSecretManagerAdapter({ api }).setExactRuntimeAccessor({ mutate: true }),
+      /SECRET_ACCESS_POLICY_CONFLICT/,
+    )
+  }
+})
+
+test('Secret Manager IAM refuses unexpected App Hosting viewer or version-manager bindings', async () => {
+  for (const role of [SECRET_VIEWER_ROLE, SECRET_VERSION_MANAGER_ROLE]) {
+    const api = {
+      async request(method, url) {
+        if (method === 'GET' && url.endsWith(':getIamPolicy')) {
+          return {
+            version: 3,
+            etag: 'etag-1',
+            bindings: [{ role, members: ['serviceAccount:other@example.com'] }],
+          }
+        }
+        throw new Error('unexpected mutation')
+      },
+    }
+    await assert.rejects(
+      createSecretManagerAdapter({ api }).setExactRuntimeAccessor({ mutate: true }),
+      /SECRET_ACCESS_POLICY_CONFLICT/,
+    )
+  }
+})
+
+test('Secret Manager IAM refuses every unrelated existing secret binding', async () => {
   const api = {
     async request(method, url) {
       if (method === 'GET' && url.endsWith(':getIamPolicy')) {
         return {
           version: 3,
           etag: 'etag-1',
-          bindings: [{ role: SECRET_ACCESSOR_ROLE, members: ['serviceAccount:other@example.com'] }],
+          bindings: [{ role: 'roles/logging.viewer', members: ['user:auditor@example.com'] }],
         }
       }
       throw new Error('unexpected mutation')
