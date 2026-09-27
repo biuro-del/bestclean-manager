@@ -16,6 +16,8 @@ const {
   policyHasNoRuntimeMember,
   secretMetadataExact,
   secretResourceName,
+  secretResourceNames,
+  secretVersionNameExact,
 } = require('../scripts/lib/profitability-runtime-credentials-production-adapters')
 
 function managedSecret() {
@@ -28,6 +30,11 @@ function managedSecret() {
 
 test('managed Secret Manager container is pinned to exact metadata', () => {
   assert.equal(secretMetadataExact(managedSecret()), true)
+  const numericName = `projects/${EXPECTED.projectNumber}/secrets/${EXPECTED.secretId}`
+  assert.equal(secretMetadataExact({ ...managedSecret(), name: numericName }), true)
+  assert.deepEqual(secretResourceNames(), [secretResourceName(), numericName])
+  assert.equal(secretVersionNameExact(`${numericName}/versions/7`), true)
+  assert.equal(secretVersionNameExact('projects/999999999999/secrets/PROFITABILITY_DB_PASS/versions/7'), false)
   assert.equal(secretMetadataExact({
     ...managedSecret(),
     labels: { ...MANAGED_LABELS, extra: 'unsafe' },
@@ -97,6 +104,66 @@ test('Secret Manager adapter sends payload only in the API body and never return
     expectedPayload: Buffer.alloc(48, 12),
   }), false)
   await assert.rejects(adapter.addVersion({ payload }), /SECRET_VERSION_CREATE_OPT_IN_REQUIRED/)
+})
+
+test('Secret Manager adapter accepts canonical numeric project names returned by Google', async () => {
+  const numericName = `projects/${EXPECTED.projectNumber}/secrets/${EXPECTED.secretId}`
+  let storedPayload = null
+  const api = {
+    async request(method, url, options = {}) {
+      if (method === 'GET' && url.endsWith(`/secrets/${EXPECTED.secretId}`)) {
+        return { ...managedSecret(), name: numericName }
+      }
+      if (method === 'POST' && url.endsWith(':addVersion')) {
+        storedPayload = options.data.payload.data
+        return { name: `${numericName}/versions/8`, state: 'ENABLED' }
+      }
+      if (method === 'GET' && url.endsWith(`${numericName}/versions/8:access`)) {
+        return { payload: { data: storedPayload } }
+      }
+      throw new Error(`unexpected API call ${method} ${url}`)
+    },
+  }
+  const adapter = createSecretManagerAdapter({ api })
+  const payload = Buffer.alloc(48, 13)
+
+  assert.deepEqual(await adapter.ensureContainer({ mutate: true }), {
+    created: false,
+    name: secretResourceName(),
+  })
+  const version = await adapter.addVersion({ payload, mutate: true })
+  assert.deepEqual(version, { name: `${numericName}/versions/8`, state: 'ENABLED' })
+  assert.equal(await adapter.verifyVersionPayload({
+    versionName: version.name,
+    expectedPayload: payload,
+  }), true)
+})
+
+test('Secret Manager adapter resolves an ambiguous create before reporting persistent state', async () => {
+  const numericName = `projects/${EXPECTED.projectNumber}/secrets/${EXPECTED.secretId}`
+  let exists = false
+  const api = {
+    async request(method, url) {
+      if (method === 'GET' && url.endsWith(`/secrets/${EXPECTED.secretId}`)) {
+        if (!exists) {
+          const error = new Error('not found')
+          error.status = 404
+          throw error
+        }
+        return { ...managedSecret(), name: numericName }
+      }
+      if (method === 'POST' && url.endsWith('/secrets')) {
+        exists = true
+        throw new Error('SECRET_CREATE_FAILED')
+      }
+      throw new Error(`unexpected API call ${method} ${url}`)
+    },
+  }
+
+  assert.deepEqual(
+    await createSecretManagerAdapter({ api }).ensureContainer({ mutate: true }),
+    { created: true, name: secretResourceName() },
+  )
 })
 
 test('Secret Manager IAM replacement preserves unrelated roles and makes accessor exact', async () => {

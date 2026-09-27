@@ -92,7 +92,7 @@ function policyHasNoRuntimeMember(policy) {
 }
 
 function secretMetadataExact(secret) {
-  if (!secret || text(secret.name) !== secretResourceName()) return false
+  if (!secret || !secretResourceNames().includes(text(secret.name))) return false
   const labels = secret.labels || {}
   const expectedEntries = Object.entries(MANAGED_LABELS)
   return Boolean(Object.keys(labels).length === expectedEntries.length
@@ -103,6 +103,20 @@ function secretMetadataExact(secret) {
 
 function secretResourceName() {
   return `projects/${EXPECTED.project}/secrets/${EXPECTED.secretId}`
+}
+
+function secretResourceNames() {
+  return Object.freeze([
+    secretResourceName(),
+    `projects/${EXPECTED.projectNumber}/secrets/${EXPECTED.secretId}`,
+  ])
+}
+
+function secretVersionNameExact(value) {
+  const candidate = text(value)
+  return secretResourceNames().some((name) => (
+    candidate.startsWith(`${name}/versions/`)
+  ))
 }
 
 function createGoogleCloudRequestAdapter(options = {}) {
@@ -269,16 +283,32 @@ function createSecretManagerAdapter(options = {}) {
       if (!secretMetadataExact(existing)) throw new Error('SECRET_CONTAINER_CONFLICT')
       return Object.freeze({ created: false, name: secretName })
     }
-    const created = await api.request(
-      'POST',
-      `${SECRET_MANAGER_BASE_URL}/projects/${EXPECTED.project}/secrets`,
-      {
-        query: { secretId: EXPECTED.secretId },
-        data: { labels: MANAGED_LABELS, replication: { automatic: {} } },
-        code: 'SECRET_CREATE_FAILED',
-      },
-    )
-    if (!secretMetadataExact(created)) throw new Error('SECRET_CREATE_POSTFLIGHT_FAILED')
+    let created
+    try {
+      created = await api.request(
+        'POST',
+        `${SECRET_MANAGER_BASE_URL}/projects/${EXPECTED.project}/secrets`,
+        {
+          query: { secretId: EXPECTED.secretId },
+          data: { labels: MANAGED_LABELS, replication: { automatic: {} } },
+          code: 'SECRET_CREATE_FAILED',
+        },
+      )
+    } catch (error) {
+      // A timed-out create can still have committed server-side. Resolve that
+      // ambiguity before reporting that no persistent change occurred.
+      const recovered = await inspectMetadata({ containment: true })
+      if (secretMetadataExact(recovered)) {
+        return Object.freeze({ created: true, name: secretName })
+      }
+      throw error
+    }
+    if (!secretMetadataExact(created)) {
+      const recovered = await inspectMetadata({ containment: true })
+      if (!secretMetadataExact(recovered)) {
+        throw new Error('SECRET_CREATE_POSTFLIGHT_FAILED')
+      }
+    }
     return Object.freeze({ created: true, name: secretName })
   }
 
@@ -294,7 +324,7 @@ function createSecretManagerAdapter(options = {}) {
       code: 'SECRET_VERSION_CREATE_FAILED',
     })
     const name = text(version?.name)
-    if (!name.startsWith(`${secretName}/versions/`) || text(version?.state) !== 'ENABLED') {
+    if (!secretVersionNameExact(name) || text(version?.state) !== 'ENABLED') {
       throw new Error('SECRET_VERSION_CREATE_POSTFLIGHT_FAILED')
     }
     return Object.freeze({ name, state: 'ENABLED' })
@@ -302,7 +332,7 @@ function createSecretManagerAdapter(options = {}) {
 
   async function verifyVersionPayload({ versionName, expectedPayload } = {}) {
     const name = text(versionName)
-    if (!name.startsWith(`${secretName}/versions/`)
+    if (!secretVersionNameExact(name)
         || !Buffer.isBuffer(expectedPayload)
         || expectedPayload.length < 32) {
       throw new Error('SECRET_VERSION_PAYLOAD_VERIFICATION_INVALID')
@@ -326,7 +356,7 @@ function createSecretManagerAdapter(options = {}) {
   async function destroyVersion({ versionName, mutate, containment } = {}) {
     requireMutation(mutate, 'SECRET_VERSION_DESTROY_OPT_IN_REQUIRED')
     const name = text(versionName)
-    if (!name.startsWith(`${secretName}/versions/`)) {
+    if (!secretVersionNameExact(name)) {
       throw new Error('SECRET_VERSION_NAME_INVALID')
     }
     const version = await api.request('POST', `${SECRET_MANAGER_BASE_URL}/${name}:destroy`, {
@@ -342,7 +372,7 @@ function createSecretManagerAdapter(options = {}) {
   async function disableVersion({ versionName, mutate, containment } = {}) {
     requireMutation(mutate, 'SECRET_VERSION_DISABLE_OPT_IN_REQUIRED')
     const name = text(versionName)
-    if (!name.startsWith(`${secretName}/versions/`)) {
+    if (!secretVersionNameExact(name)) {
       throw new Error('SECRET_VERSION_NAME_INVALID')
     }
     const version = await api.request('POST', `${SECRET_MANAGER_BASE_URL}/${name}:disable`, {
@@ -704,4 +734,6 @@ module.exports = {
   policyHasNoRuntimeMember,
   secretMetadataExact,
   secretResourceName,
+  secretResourceNames,
+  secretVersionNameExact,
 }

@@ -2,6 +2,7 @@
 
 const EXPECTED = Object.freeze({
   project: 'iclean-room',
+  projectNumber: '1080573912983',
   instance: 'iclean-room-instance',
   region: 'europe-west3',
   database: 'iclean-room-database',
