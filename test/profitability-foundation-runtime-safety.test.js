@@ -90,7 +90,7 @@ test('v2 history remains available without the retired legacy permission table',
   assert.ok(!checked.includes('public.profitability_permission'))
 })
 
-test('legacy mode fails closed when its permission table is absent', async () => {
+test('runtime entry stays closed when the mandatory organization rollout gate is disabled', async () => {
   const harness = createApiHarness({
     v2: false,
     async relationExists(_client, relation) {
@@ -100,8 +100,8 @@ test('legacy mode fails closed when its permission table is absent', async () =>
   await executeHistory(harness)
 
   assert.equal(harness.responses.length, 0)
-  assert.equal(harness.errors[0]?.status, 503)
-  assert.equal(harness.errors[0]?.code, 'PROFITABILITY_SCHEMA_NOT_READY')
+  assert.equal(harness.errors[0]?.status, 404)
+  assert.equal(harness.errors[0]?.code, 'PROFITABILITY_NOT_ENABLED')
   assert.equal(harness.repositoryCreated(), false)
 })
 

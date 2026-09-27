@@ -5,6 +5,7 @@ const assert = require('node:assert/strict')
 
 const {
   PROFITABILITY_ACCESS_PROFILE_MODES,
+  gateProfitabilityModuleCapabilities,
   isProfitabilityAccessProfileOrganizationAllowed,
   parseAllowedOrganizationIds,
   resolveProfitabilityAccessProfileOrganizationMode,
@@ -51,6 +52,39 @@ test('a malformed allowlist invalidates the whole rollout instead of widening ac
   })
   assert.equal(policy.enabled, false)
   assert.equal(policy.configurationValid, false)
+})
+
+test('global gate masks profitability for a platform owner outside the rollout organization', () => {
+  const ownerProCapabilities = {
+    profitabilityModule: {
+      enabled: true,
+      canRead: true,
+      canEdit: true,
+      readCode: 'PROFITABILITY_ACCESS_ALLOWED',
+      editCode: 'PROFITABILITY_ACCESS_ALLOWED',
+    },
+  }
+  const environment = {
+    PROFITABILITY_ACCESS_PROFILE_V2_ENABLED: 'true',
+    PROFITABILITY_ACCESS_PROFILE_V2_ALLOWED_ORG_IDS: 'bestclean',
+  }
+
+  assert.deepEqual(
+    gateProfitabilityModuleCapabilities(ownerProCapabilities, 'other-org', environment),
+    {
+      profitabilityModule: {
+        enabled: false,
+        canRead: false,
+        canEdit: false,
+        readCode: 'PROFITABILITY_NOT_ENABLED',
+        editCode: 'PROFITABILITY_NOT_ENABLED',
+      },
+    },
+  )
+  assert.equal(
+    gateProfitabilityModuleCapabilities(ownerProCapabilities, 'bestclean', environment),
+    ownerProCapabilities,
+  )
 })
 
 test('persistent enforcement marker prevents fallback to legacy when rollout is off or incomplete', async () => {

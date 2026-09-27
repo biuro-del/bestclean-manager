@@ -1,0 +1,193 @@
+-- DATABASE-ADMIN CANDIDATE ONLY. Never run without separate migration approval.
+-- This is the only supported entrypoint for the 20260927 profitability
+-- source-read bridge. The raw SQL rejects direct execution.
+--
+-- Required variables:
+--   profitability_source_read_expected_database=iclean-room-database
+--   profitability_source_read_expected_executor=<authenticated executor>
+--   profitability_source_read_expected_source_owner=firebaseowner_iclean-room-database_public
+--   profitability_source_read_runtime_role=profitability_runtime
+--   profitability_source_read_backup_reference=<fresh 13-digit backup id>
+--   profitability_source_read_confirmation=APPLY_PROFITABILITY_SOURCE_READ_BRIDGE_ONLY_20260927
+
+\set ON_ERROR_STOP on
+
+\if :{?profitability_source_read_expected_database}
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_EXPECTED_DATABASE_REQUIRED'; end $$;
+\endif
+\if :{?profitability_source_read_expected_executor}
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_EXPECTED_EXECUTOR_REQUIRED'; end $$;
+\endif
+\if :{?profitability_source_read_expected_source_owner}
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_EXPECTED_SOURCE_OWNER_REQUIRED'; end $$;
+\endif
+\if :{?profitability_source_read_runtime_role}
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_RUNTIME_ROLE_REQUIRED'; end $$;
+\endif
+\if :{?profitability_source_read_backup_reference}
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_BACKUP_REFERENCE_REQUIRED'; end $$;
+\endif
+\if :{?profitability_source_read_confirmation}
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_CONFIRMATION_REQUIRED'; end $$;
+\endif
+
+select
+  :'profitability_source_read_expected_database' = 'iclean-room-database'
+    as profitability_source_read_approved_database_confirmed,
+  current_database() = :'profitability_source_read_expected_database'
+    as profitability_source_read_database_confirmed,
+  :'profitability_source_read_expected_executor' = session_user
+    and current_user = session_user
+    as profitability_source_read_executor_confirmed,
+  :'profitability_source_read_expected_source_owner'
+    = 'firebaseowner_iclean-room-database_public'
+    as profitability_source_read_source_owner_name_confirmed,
+  :'profitability_source_read_runtime_role' = 'profitability_runtime'
+    as profitability_source_read_runtime_name_confirmed,
+  :'profitability_source_read_confirmation'
+    = 'APPLY_PROFITABILITY_SOURCE_READ_BRIDGE_ONLY_20260927'
+    as profitability_source_read_confirmation_confirmed,
+  :'profitability_source_read_backup_reference' ~ '^[0-9]{13}$'
+    as profitability_source_read_backup_confirmed,
+  current_setting('server_version_num')::integer between 170000 and 179999
+    as profitability_source_read_pg17_confirmed,
+  not pg_is_in_recovery() as profitability_source_read_primary_confirmed,
+  current_setting('transaction_read_only') = 'off'
+    and current_setting('default_transaction_read_only') = 'off'
+    as profitability_source_read_read_write_confirmed,
+  coalesce(pg_has_role(
+    session_user,
+    (select oid from pg_roles
+      where rolname = :'profitability_source_read_expected_source_owner'),
+    'SET'
+  ), false) as profitability_source_read_owner_set_confirmed,
+  exists (
+    select 1 from pg_roles role_row
+     where role_row.rolname = :'profitability_source_read_runtime_role'
+       and not role_row.rolcanlogin
+       and not role_row.rolinherit
+       and not role_row.rolsuper
+       and not role_row.rolbypassrls
+       and not role_row.rolcreaterole
+       and not role_row.rolcreatedb
+       and not role_row.rolreplication
+       and role_row.rolconnlimit = -1
+       and role_row.rolvaliduntil is null
+       and role_row.rolconfig is null
+  ) as profitability_source_read_runtime_role_confirmed,
+  (
+    select count(*) = 3
+      from pg_class relation_row
+      join pg_namespace namespace_row
+        on namespace_row.oid = relation_row.relnamespace
+      join pg_roles owner_row on owner_row.oid = relation_row.relowner
+     where namespace_row.nspname = 'public'
+       and relation_row.relname = any(array['organization_member', 'event', 'zone'])
+       and relation_row.relkind in ('r', 'p')
+       and relation_row.relpersistence = 'p'
+       and owner_row.rolname = :'profitability_source_read_expected_source_owner'
+  ) as profitability_source_read_relations_confirmed
+\gset
+
+\if :profitability_source_read_approved_database_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_APPROVED_DATABASE_MISMATCH'; end $$;
+\endif
+\if :profitability_source_read_database_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_DATABASE_MISMATCH'; end $$;
+\endif
+\if :profitability_source_read_executor_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_EXECUTOR_MISMATCH'; end $$;
+\endif
+\if :profitability_source_read_source_owner_name_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_SOURCE_OWNER_NAME_MISMATCH'; end $$;
+\endif
+\if :profitability_source_read_runtime_name_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_RUNTIME_ROLE_NAME_MISMATCH'; end $$;
+\endif
+\if :profitability_source_read_confirmation_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_CONFIRMATION_MISMATCH'; end $$;
+\endif
+\if :profitability_source_read_backup_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_BACKUP_REFERENCE_INVALID'; end $$;
+\endif
+\if :profitability_source_read_pg17_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_POSTGRESQL_17_REQUIRED'; end $$;
+\endif
+\if :profitability_source_read_primary_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_PRIMARY_DATABASE_REQUIRED'; end $$;
+\endif
+\if :profitability_source_read_read_write_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_READ_WRITE_SESSION_REQUIRED'; end $$;
+\endif
+\if :profitability_source_read_owner_set_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_SOURCE_OWNER_SET_REQUIRED'; end $$;
+\endif
+\if :profitability_source_read_runtime_role_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_RUNTIME_ROLE_INVALID'; end $$;
+\endif
+\if :profitability_source_read_relations_confirmed
+\else
+  do $$ begin raise exception 'PROFITABILITY_SOURCE_READ_SOURCE_OWNER_MISMATCH'; end $$;
+\endif
+
+begin;
+
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
+set local idle_in_transaction_session_timeout = '180s';
+
+select pg_advisory_xact_lock(
+  hashtextextended('cleanzi:profitability:source-read-bridge:20260927', 0)
+);
+
+select set_config(
+  'cleanzi.profitability_source_read_entrypoint',
+  'GUARDED_PROFITABILITY_SOURCE_READ_BRIDGE_20260927',
+  true
+);
+select set_config(
+  'cleanzi.profitability_source_read_expected_executor',
+  :'profitability_source_read_expected_executor',
+  true
+);
+select set_config(
+  'cleanzi.profitability_source_read_source_owner',
+  :'profitability_source_read_expected_source_owner',
+  true
+);
+select set_config(
+  'cleanzi.profitability_source_read_runtime_role',
+  :'profitability_source_read_runtime_role',
+  true
+);
+select set_config(
+  'cleanzi.profitability_source_read_backup_reference',
+  :'profitability_source_read_backup_reference',
+  true
+);
+
+set local role :"profitability_source_read_expected_source_owner";
+
+\ir ../migrations/20260927_profitability_source_read_bridge_additive.sql
+
+commit;
+
+\echo 'PROFITABILITY_SOURCE_READ_BRIDGE_20260927_APPLIED'

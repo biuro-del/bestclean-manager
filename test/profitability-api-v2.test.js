@@ -163,6 +163,61 @@ async function executeGet(financeProfile, { view = '', clientId = 'client-1', ob
   return { errors, repositoryOptions, response: responses[0] }
 }
 
+test('global organization gate returns 404 without opening the profitability database', async () => {
+  for (const testCase of [
+    {
+      environment: {
+        PROFITABILITY_ACCESS_PROFILE_V2_ENABLED: 'true',
+        PROFITABILITY_ACCESS_PROFILE_V2_ALLOWED_ORG_IDS: 'bestclean',
+      },
+      orgId: 'other-org',
+    },
+    {
+      environment: {
+        PROFITABILITY_ACCESS_PROFILE_V2_ENABLED: 'true',
+        PROFITABILITY_ACCESS_PROFILE_V2_ALLOWED_ORG_IDS: '',
+      },
+      orgId: 'bestclean',
+    },
+  ]) {
+    let connections = 0
+    const errors = []
+    const api = createProfitabilityApi({
+      environment: testCase.environment,
+      async connectDbClient() {
+        connections += 1
+        throw new Error('database connection must not be attempted')
+      },
+      createRepository() {
+        throw new Error('repository must not be created')
+      },
+      async databaseRelationExists() { return true },
+      parseBearerToken() { return 'token' },
+      async readJsonBody() { return {} },
+      sendApiError(_res, status, code, message, details) {
+        errors.push({ status, code, message, details })
+      },
+      sendJson() {
+        throw new Error('response must be an error')
+      },
+      async verifyFirebaseIdToken() {
+        return { uid: 'uid-owner', role: 'OWNER', planCode: 'PRO' }
+      },
+    })
+
+    await api.handle(
+      { method: 'GET' },
+      {},
+      new URL(`http://localhost/api/portal/profitability?orgId=${testCase.orgId}&clientId=client-1&period=2026-09`),
+    )
+
+    assert.equal(connections, 0)
+    assert.equal(errors.length, 1)
+    assert.equal(errors[0].status, 404)
+    assert.equal(errors[0].code, 'PROFITABILITY_NOT_ENABLED')
+  }
+})
+
 test('COST_CONTROL response is allowlisted server-side and contains no hidden finance fields or sentinels', async () => {
   const result = await executeGet('COST_CONTROL')
   assert.deepEqual(result.errors, [])

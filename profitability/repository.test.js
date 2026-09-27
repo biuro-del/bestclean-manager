@@ -149,6 +149,12 @@ test('repozytorium buduje wejście kalkulacji tylko z zapytań orgId + objectId'
   for (const call of objectQueries) {
     assert.deepEqual(call.params.slice(0, 2), ['ORG-1', 'OBJ-1'])
   }
+  const attendanceQuery = client.calls.find((call) => /from public\.event e/.test(call.sql)
+    && /select e\.event_id/.test(call.sql))
+  assert.match(attendanceQuery.sql, /z\.client_id = o\.client_id/)
+  assert.match(attendanceQuery.sql, /\$2::varchar as object_id/)
+  assert.match(attendanceQuery.sql, /null::varchar as periodic_work_id/)
+  assert.doesNotMatch(attendanceQuery.sql, /e\.object_id|z\.object_id/)
 })
 
 test('repozytorium sprawdza backendową politykę przed odczytem', async () => {

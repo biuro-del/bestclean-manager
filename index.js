@@ -116,6 +116,9 @@ const {
 } = require('./mobile-coordinator-zone-policy')
 const { mapProposal } = require('./workday-stop-proposal-repository')
 const { resolveProfitabilityAccess } = require('./profitability-entitlement-policy')
+const {
+  gateProfitabilityModuleCapabilities,
+} = require('./profitability-access-profile-rollout')
 const { correlateCleanStartToPlan } = require('./service-execution-correlation')
 const {
   createOrganizationWithTrial,
@@ -5200,7 +5203,7 @@ async function getRequesterMemberships(client, uid, orgId = '') {
 function profitabilityCapabilities(input) {
   const read = resolveProfitabilityAccess({ ...input, action: 'read' })
   const edit = resolveProfitabilityAccess({ ...input, action: 'edit' })
-  return {
+  return gateProfitabilityModuleCapabilities({
     profitabilityModule: {
       enabled: hasPlanCapability(read.planCode, 'profitabilityModule'),
       canRead: read.allowed,
@@ -5208,7 +5211,7 @@ function profitabilityCapabilities(input) {
       readCode: read.code,
       editCode: edit.code,
     },
-  }
+  }, input?.requestOrgId, process.env)
 }
 
 async function buildOrganizationSessionContext(client, uid, row) {

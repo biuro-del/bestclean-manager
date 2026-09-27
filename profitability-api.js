@@ -16,6 +16,7 @@ const {
 } = require('./profitability')
 const {
   PROFITABILITY_ACCESS_PROFILE_MODES,
+  isProfitabilityAccessProfileOrganizationAllowed,
   resolveProfitabilityAccessProfileOrganizationMode,
   resolveProfitabilityAccessProfileRollout,
 } = require('./profitability-access-profile-rollout')
@@ -799,6 +800,13 @@ function createProfitabilityApi(dependencies = {}) {
     let client
     try {
       const orgId = identifier(requestUrl.searchParams.get('orgId'), 'orgId', 64)
+      if (!isProfitabilityAccessProfileOrganizationAllowed(accessProfileRollout, orgId)) {
+        throw new ProfitabilityApiError(
+          404,
+          'PROFITABILITY_NOT_ENABLED',
+          'Moduł rentowności nie jest dostępny dla tej organizacji.',
+        )
+      }
       const requestedView = text(requestUrl.searchParams.get('view')).toLowerCase()
       const portfolioRequest = method === 'GET' && requestedView === 'portfolio'
       const rawClientId = text(requestUrl.searchParams.get('clientId'))

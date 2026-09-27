@@ -29,6 +29,10 @@ const DEFAULT_CLOUD_SQL_RECONCILIATION_TIMEOUT_MS = 10000
 const DEFAULT_CLOUD_SQL_RECONCILIATION_POLL_INTERVAL_MS = 500
 const DEFAULT_GOOGLE_CLOUD_REQUEST_TIMEOUT_MS = 30000
 const MAX_GOOGLE_CLOUD_REQUEST_TIMEOUT_MS = 30000
+const DEFAULT_PG_CONNECT_TIMEOUT_MS = 30000
+const DEFAULT_PG_QUERY_TIMEOUT_MS = 60000
+const MAX_PG_CONNECT_TIMEOUT_MS = 30000
+const MAX_PG_QUERY_TIMEOUT_MS = 120000
 const CLOUD_SQL_ADMIN_SCOPE = 'https://www.googleapis.com/auth/cloud-platform'
 const CLOUD_SQL_ADMIN_BASE_URL = 'https://sqladmin.googleapis.com/sql/v1beta4'
 const PROVISIONER_ROLE = 'profitability_provisioner'
@@ -417,6 +421,79 @@ function createCloudSqlAdminApiAdapter(options = {}) {
     throw new Error('CLOUD_SQL_USER_STATE_CONFLICT')
   }
 
+  async function inspectExactBuiltinUser(name, { containment = false } = {}) {
+    const userName = assertSafeIdentifier(name, 'CLOUD_SQL_USER_NAME_INVALID')
+    const users = await listUsers({ containment })
+    const matches = users.filter((user) => user?.name === userName)
+    if (matches.length !== 1) throw new Error('CLOUD_SQL_USER_STATE_AMBIGUOUS')
+    const user = matches[0]
+    const userType = text(user?.type).toUpperCase()
+    if (text(user?.host) || (userType && userType !== 'BUILT_IN')) {
+      throw new Error('CLOUD_SQL_USER_STATE_CONFLICT')
+    }
+    return user
+  }
+
+  async function updateBuiltinUserPassword({
+    name,
+    password,
+    mutate,
+    operationTimeoutMs,
+    operationPollIntervalMs,
+  } = {}) {
+    requireMutation({ mutate }, 'CLOUD_SQL_PASSWORD_UPDATE_OPT_IN_REQUIRED')
+    const userName = assertSafeIdentifier(name, 'CLOUD_SQL_USER_NAME_INVALID')
+    const ephemeralPassword = assertPassword(password)
+    await inspectExactBuiltinUser(userName)
+    let operation = null
+    try {
+      operation = await request('PUT', `${instancePath}/users`, {
+        query: { name: userName },
+        data: { name: userName, password: ephemeralPassword },
+      })
+      operation = await waitForOperation(operation, {
+        timeoutMs: operationTimeoutMs,
+        pollIntervalMs: operationPollIntervalMs,
+      })
+      return Object.freeze({
+        status: 'updated',
+        operation: Object.freeze({ name: text(operation?.name), status: 'DONE' }),
+      })
+    } catch (cause) {
+      const error = new Error('CLOUD_SQL_PASSWORD_UPDATE_AMBIGUOUS')
+      const evidence = cause?.cloudSqlOperation || operation
+      if (evidence?.name) {
+        error.cloudSqlOperation = Object.freeze({
+          name: text(evidence.name),
+          status: text(evidence.status) || 'UNKNOWN',
+        })
+      }
+      throw error
+    }
+  }
+
+  async function settleBuiltinUserPasswordUpdate({ operationName } = {}) {
+    const normalized = text(operationName)
+    if (!normalized) {
+      return Object.freeze({ terminal: false, succeeded: false, operationName: null })
+    }
+    try {
+      const operation = await inspectOperation(normalized, { containment: true })
+      const settled = await waitForOperation(operation, { containment: true })
+      return Object.freeze({
+        terminal: true,
+        succeeded: true,
+        operationName: text(settled?.name) || normalized,
+      })
+    } catch (error) {
+      return Object.freeze({
+        terminal: error?.cloudSqlOperation?.status === 'DONE',
+        succeeded: false,
+        operationName: normalized,
+      })
+    }
+  }
+
   async function inspectOperation(operationName, { containment = false } = {}) {
     const name = requireText(operationName, 'CLOUD_SQL_OPERATION_NAME_REQUIRED')
     return request(
@@ -669,6 +746,7 @@ function createCloudSqlAdminApiAdapter(options = {}) {
     inspectCloudRunRevision,
     listUsers,
     inspectBuiltinUser,
+    inspectExactBuiltinUser,
     inspectOperation,
     waitForOperation,
     settleCreateOperation,
@@ -676,6 +754,73 @@ function createCloudSqlAdminApiAdapter(options = {}) {
     waitForBuiltinUserReconciliation,
     createEphemeralBuiltinUser,
     deleteEphemeralBuiltinUser,
+    updateBuiltinUserPassword,
+    settleBuiltinUserPasswordUpdate,
+  })
+}
+
+function boundedMilliseconds(value, fallback, maximum, code) {
+  const normalized = Number(value ?? fallback)
+  if (!Number.isInteger(normalized) || normalized < 1 || normalized > maximum) {
+    throw new Error(code)
+  }
+  return normalized
+}
+
+function runBoundedOperation(factory, options = {}) {
+  const timeoutMs = boundedMilliseconds(
+    options.timeoutMs,
+    options.defaultTimeoutMs,
+    options.maximumTimeoutMs,
+    'PG_OPERATION_TIMEOUT_INVALID',
+  )
+  const signal = options.signal
+  const abortCode = options.abortCode || 'PG_OPERATION_ABORTED'
+  const timeoutCode = options.timeoutCode || 'PG_OPERATION_TIMEOUT'
+  if (signal?.aborted) {
+    try {
+      Promise.resolve(options.onInterrupt?.()).catch(() => {})
+    } catch {}
+    return Promise.reject(new Error(abortCode))
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let timeout = null
+    let onAbort = null
+    const finish = (callback, value) => {
+      if (settled) return
+      settled = true
+      if (timeout) clearTimeout(timeout)
+      if (onAbort && signal) signal.removeEventListener('abort', onAbort)
+      callback(value)
+    }
+    const interrupt = (code) => {
+      try {
+        Promise.resolve(options.onInterrupt?.()).catch(() => {})
+      } catch {}
+      finish(reject, new Error(code))
+    }
+    timeout = setTimeout(() => interrupt(timeoutCode), timeoutMs)
+    if (signal) {
+      onAbort = () => interrupt(abortCode)
+      signal.addEventListener('abort', onAbort, { once: true })
+      if (signal.aborted) {
+        onAbort()
+        return
+      }
+    }
+    let operation
+    try {
+      operation = factory()
+    } catch (error) {
+      finish(reject, error)
+      return
+    }
+    Promise.resolve(operation).then(
+      (value) => finish(resolve, value),
+      (error) => finish(reject, error),
+    )
   })
 }
 
@@ -690,9 +835,30 @@ function createCloudSqlPgAdapter(options = {}) {
   const ipType = text(options.ipType).toUpperCase() === 'PRIVATE'
     ? IpAddressTypes.PRIVATE
     : IpAddressTypes.PUBLIC
+  const defaultSignal = options.signal
+  const connectTimeoutMs = boundedMilliseconds(
+    options.connectTimeoutMs,
+    DEFAULT_PG_CONNECT_TIMEOUT_MS,
+    MAX_PG_CONNECT_TIMEOUT_MS,
+    'PG_CONNECT_TIMEOUT_INVALID',
+  )
+  const queryTimeoutMs = boundedMilliseconds(
+    options.queryTimeoutMs,
+    DEFAULT_PG_QUERY_TIMEOUT_MS,
+    MAX_PG_QUERY_TIMEOUT_MS,
+    'PG_QUERY_TIMEOUT_INVALID',
+  )
   let closed = false
 
-  async function connect({ database, user, password, authType, applicationName } = {}) {
+  async function connect({
+    database,
+    user,
+    password,
+    authType,
+    applicationName,
+    containment = false,
+    signal: callSignal,
+  } = {}) {
     if (closed) throw new Error('CLOUD_SQL_CONNECTOR_ALREADY_CLOSED')
     const dbName = requireText(database, 'PG_DATABASE_REQUIRED')
     const dbUser = requireText(user, 'PG_USER_REQUIRED')
@@ -701,19 +867,67 @@ function createCloudSqlPgAdapter(options = {}) {
     if (normalizedAuthType === 'PASSWORD') assertPassword(password)
     if (normalizedAuthType === 'IAM' && password !== undefined) throw new Error('IAM_PASSWORD_FORBIDDEN')
 
-    const connectorOptions = await connector.getOptions({
-      instanceConnectionName,
-      ipType,
-      authType: normalizedAuthType === 'IAM' ? AuthTypes.IAM : AuthTypes.PASSWORD,
-    })
+    const signal = containment === true ? undefined : (callSignal || defaultSignal)
+    const connectorOptions = await runBoundedOperation(
+      () => connector.getOptions({
+        instanceConnectionName,
+        ipType,
+        authType: normalizedAuthType === 'IAM' ? AuthTypes.IAM : AuthTypes.PASSWORD,
+      }),
+      {
+        signal,
+        timeoutMs: connectTimeoutMs,
+        defaultTimeoutMs: DEFAULT_PG_CONNECT_TIMEOUT_MS,
+        maximumTimeoutMs: MAX_PG_CONNECT_TIMEOUT_MS,
+        abortCode: 'PG_CONNECT_ABORTED',
+        timeoutCode: 'PG_CONNECT_TIMEOUT',
+      },
+    )
     const client = new ClientClass({
       ...connectorOptions,
       database: dbName,
       user: dbUser,
       ...(normalizedAuthType === 'PASSWORD' ? { password } : {}),
       application_name: text(applicationName) || 'cleanzi-profitability-foundation-v2-operator',
+      connectionTimeoutMillis: connectTimeoutMs,
+      query_timeout: queryTimeoutMs,
+      statement_timeout: queryTimeoutMs,
+      idle_in_transaction_session_timeout: queryTimeoutMs,
     })
-    await client.connect()
+    const rawEnd = typeof client.end === 'function' ? client.end.bind(client) : null
+    let endPromise = null
+    const interruptClient = () => {
+      if (!rawEnd) return undefined
+      if (!endPromise) endPromise = Promise.resolve().then(() => rawEnd())
+      return endPromise
+    }
+    await runBoundedOperation(() => client.connect(), {
+      signal,
+      timeoutMs: connectTimeoutMs,
+      defaultTimeoutMs: DEFAULT_PG_CONNECT_TIMEOUT_MS,
+      maximumTimeoutMs: MAX_PG_CONNECT_TIMEOUT_MS,
+      abortCode: 'PG_CONNECT_ABORTED',
+      timeoutCode: 'PG_CONNECT_TIMEOUT',
+      onInterrupt: interruptClient,
+    })
+    if (typeof client.query === 'function') {
+      const rawQuery = client.query.bind(client)
+      client.query = (...args) => runBoundedOperation(() => rawQuery(...args), {
+        signal,
+        timeoutMs: queryTimeoutMs,
+        defaultTimeoutMs: DEFAULT_PG_QUERY_TIMEOUT_MS,
+        maximumTimeoutMs: MAX_PG_QUERY_TIMEOUT_MS,
+        abortCode: 'PG_QUERY_ABORTED',
+        timeoutCode: 'PG_QUERY_TIMEOUT',
+        onInterrupt: interruptClient,
+      })
+    }
+    if (rawEnd) {
+      client.end = () => {
+        if (!endPromise) endPromise = Promise.resolve().then(() => rawEnd())
+        return endPromise
+      }
+    }
     return client
   }
 
@@ -1636,7 +1850,12 @@ function createPsqlAdapter(options = {}) {
 
 function defaultExecFile(command, args, options) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { ...options, encoding: 'utf8', windowsHide: true }, (error, stdout, stderr) => {
+    execFile(command, args, {
+      ...options,
+      encoding: 'utf8',
+      windowsHide: true,
+      shell: false,
+    }, (error, stdout, stderr) => {
       if (error) {
         const safe = new Error('READ_ONLY_COMMAND_FAILED')
         safe.exitCode = error.code
@@ -1653,7 +1872,11 @@ function createGitStatusAdapter(options = {}) {
   const run = options.run || defaultExecFile
   async function git(cwd, args) {
     const repo = path.resolve(requireText(cwd, 'GIT_CWD_REQUIRED'))
-    const result = await run('git', args, { cwd: repo, maxBuffer: 1024 * 1024 })
+    const result = await run('git', args, {
+      cwd: repo,
+      maxBuffer: 1024 * 1024,
+      shell: false,
+    })
     return String(result?.stdout || '').trim()
   }
   async function inspect(cwd) {
@@ -1683,7 +1906,119 @@ function createGitStatusAdapter(options = {}) {
     const [head = ''] = output.split(/\s+/)
     return /^[0-9a-f]{40}$/i.test(head) ? head.toLowerCase() : null
   }
-  return Object.freeze({ inspect, assertHead, inspectRemoteHead })
+  async function inspectRemoteUrl(cwd, { remote = 'cleanzi01' } = {}) {
+    const remoteName = requireText(remote, 'GIT_REMOTE_REQUIRED')
+    if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,200}$/.test(remoteName)) {
+      throw new Error('GIT_REF_INVALID')
+    }
+    // Fetch is Git's default URL direction. `--fetch` is not a supported
+    // `git remote get-url` option (including Git for Windows) and made the
+    // otherwise read-only production audit fail before any database check.
+    return git(cwd, ['remote', 'get-url', remoteName])
+  }
+  return Object.freeze({ inspect, assertHead, inspectRemoteHead, inspectRemoteUrl })
+}
+
+async function inspectExistingFoundationPostflight(client, options = {}) {
+  requireClient(client)
+  const migrationFile = path.resolve(requireText(
+    options.migrationFile,
+    'FOUNDATION_MIGRATION_FILE_REQUIRED',
+  ))
+  const postflights = loadIndependentPostflights(migrationFile)
+  const executorSession = options.executorSession === true
+  const allowUnverified = options.allowUnverified === true
+
+  return withReadOnlySnapshot(client, async () => {
+    const relations = await client.query(
+      `select class.relname as table_name,
+              owner.rolname as owner_name
+         from pg_class class
+         join pg_namespace namespace_row on namespace_row.oid = class.relnamespace
+         join pg_roles owner on owner.oid = class.relowner
+        where namespace_row.nspname = 'public'
+          and class.relkind = 'r'
+          and class.relname = any($1::text[])
+        order by class.relname`,
+      [[...FOUNDATION_TABLES]],
+    )
+    const names = relations.rows.map((row) => row.table_name).sort()
+    const shapeExact = names.join('\n') === [...FOUNDATION_TABLES].sort().join('\n')
+      && relations.rows.every((row) => row.owner_name === 'profitability_owner')
+    if (relations.rows.length === 0) {
+      return Object.freeze({
+        status: 'absent',
+        exact: false,
+        relationCount: 0,
+        rowCount: 0,
+      })
+    }
+    if (!shapeExact) {
+      return Object.freeze({
+        status: 'partial',
+        exact: false,
+        relationCount: relations.rows.length,
+        rowCount: null,
+      })
+    }
+    if (!executorSession) {
+      if (!allowUnverified) throw new Error('MIGRATION_VERIFICATION_CREDENTIAL_REQUIRED')
+      return Object.freeze({
+        status: 'verification_required',
+        exact: false,
+        relationCount: relations.rows.length,
+        rowCount: null,
+      })
+    }
+
+    await client.query('set local role profitability_migration_runner')
+    await client.query('set local role profitability_owner')
+    let rowCount = 0
+    for (const table of relations.rows) {
+      const tableName = assertSafeIdentifier(table.table_name)
+      const count = await client.query(
+        `select count(*)::bigint as row_count from public.${quoteIdentifier(tableName)}`,
+      )
+      rowCount += Number(count.rows[0]?.row_count || 0)
+    }
+    try {
+      await client.query(postflights.exactCatalog)
+    } catch {
+      throw new Error('EXACT_CATALOG_POSTFLIGHT_FAILED')
+    }
+    try {
+      await client.query('select set_config($1, $2, true)', [
+        'cleanzi.profitability_foundation_v2_runtime_role',
+        'profitability_runtime',
+      ])
+      await client.query('select set_config($1, $2, true)', [
+        'cleanzi.profitability_foundation_v2_session_role',
+        'profitability_session',
+      ])
+      await client.query('select set_config($1, $2, true)', [
+        'cleanzi.profitability_foundation_v2_fresh_install',
+        'false',
+      ])
+      await client.query('select set_config($1, $2, true)', [
+        'cleanzi.profitability_foundation_v2_entrypoint',
+        '',
+      ])
+      await client.query(postflights.ownerAcl)
+    } catch {
+      throw new Error('OWNER_ACL_POSTFLIGHT_FAILED')
+    }
+    try {
+      await client.query(postflights.finalGuard)
+    } catch {
+      throw new Error('FINAL_GUARD_FAILED')
+    }
+    return Object.freeze({
+      status: 'exact',
+      exact: true,
+      relationCount: relations.rows.length,
+      rowCount,
+    })
+  })
 }
 
 function secretString(value) {
@@ -2576,6 +2911,8 @@ module.exports = {
   CLOUD_SQL_PROXY_SHA256,
   CLOUD_SQL_PROXY_VERSION,
   DEFAULT_PSQL_PATH,
+  DEFAULT_PG_CONNECT_TIMEOUT_MS,
+  DEFAULT_PG_QUERY_TIMEOUT_MS,
   FOUNDATION_TABLES,
   SOURCE_REFERENCE_COLUMNS,
   SOURCE_TABLES,
@@ -2595,6 +2932,7 @@ module.exports = {
   grantProvisionerDatabaseAcl,
   grantProvisionerSchemaAcl,
   inspectFoundationState,
+  inspectExistingFoundationPostflight,
   inspectSourceReferenceAcl,
   lockRolePassword,
   matchesGeneratedBootstrapUser,

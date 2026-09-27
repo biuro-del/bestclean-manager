@@ -318,6 +318,18 @@ test('publiczne POST-y delegują zapis i zamknięcie do transakcyjnego repozytor
   const errors = []
   let requestBody = {}
   const repository = {
+    async resolveAccessProfileV2() {
+      return {
+        financeProfile: 'OWNER_FULL',
+        objectScope: 'ALL',
+        capabilities: {
+          editContractTerms: true,
+          editProfitabilityTargets: true,
+          editWorkerRates: true,
+          editOperationalCosts: true,
+        },
+      }
+    },
     async createContractVersion(input) {
       calls.push({ method: 'createContractVersion', input })
       return { id: 'CONTRACT-1' }
@@ -344,15 +356,26 @@ test('publiczne POST-y delegują zapis i zamknięcie do transakcyjnego repozytor
     },
   }
   const api = createProfitabilityApi({
+    environment: {
+      PROFITABILITY_ACCESS_PROFILE_V2_ENABLED: 'true',
+      PROFITABILITY_ACCESS_PROFILE_V2_ALLOWED_ORG_IDS: 'ORG-1',
+    },
     async connectDbClient() {
-      return { release() {} }
+      return {
+        async query(sql) {
+          if (/profitability_access_enforcement/i.test(sql)) {
+            return { rows: [{ schema_version: 'v2' }] }
+          }
+          throw new Error(`Unexpected query: ${sql}`)
+        },
+        release() {},
+      }
     },
     createRepository() {
       return repository
     },
     async databaseRelationExists(_client, relationName) {
       return ![
-        'public.profitability_access_enforcement',
         'public.profitability_financial_model_enforcement',
       ].includes(relationName)
     },

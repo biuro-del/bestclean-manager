@@ -99,4 +99,12 @@ test('session construction blocks only profitability when the v2 schema or ACL d
   assert.match(loader, /accessProfileV2Blocked = true/)
   assert.match(loader, /client\?\.release\?\.\(\)/)
   assert.match(loader, /return blockedPatch\(\)/)
+  assert.match(loader, /isProfitabilityAccessProfileOrganizationAllowed\(accessProfileRollout, organizationId\)/)
+})
+
+test('platform organization context applies the same global profitability gate', () => {
+  const server = source('index.js')
+
+  assert.match(server, /gateProfitabilityModuleCapabilities\(\{/)
+  assert.match(server, /\}, input\?\.requestOrgId, process\.env\)/)
 })

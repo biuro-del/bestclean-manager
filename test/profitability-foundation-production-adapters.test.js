@@ -2,7 +2,9 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
+const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 const { EventEmitter } = require('node:events')
 const { PassThrough } = require('node:stream')
@@ -122,6 +124,118 @@ test('Cloud SQL adapter is read-only by default and never returns the bootstrap 
     /CLOUD_SQL_DELETE_OPT_IN_REQUIRED/,
   )
   assert.equal(requests, 0)
+})
+
+test('Cloud SQL users.update is opt-in, targets the exact provisioner and never returns its password', async () => {
+  const calls = []
+  const adapter = adapters.createCloudSqlAdminApiAdapter({
+    projectId: 'iclean-room',
+    instanceId: 'iclean-room-instance',
+    sleep: async () => {},
+    request: async ({ method, url, data }) => {
+      calls.push({ method, url, data })
+      if (method === 'GET' && url.endsWith('/users')) {
+        return {
+          data: {
+            items: [{ name: 'profitability_provisioner', type: 'BUILT_IN', host: '' }],
+          },
+        }
+      }
+      if (method === 'PUT') {
+        return { data: { name: 'update-provisioner-op', status: 'PENDING' } }
+      }
+      if (method === 'GET' && url.includes('/operations/')) {
+        return { data: { name: 'update-provisioner-op', status: 'DONE' } }
+      }
+      throw new Error('unexpected request')
+    },
+  })
+
+  await assert.rejects(
+    adapter.updateBuiltinUserPassword({
+      name: 'profitability_provisioner',
+      password: strongPassword,
+    }),
+    /CLOUD_SQL_PASSWORD_UPDATE_OPT_IN_REQUIRED/,
+  )
+
+  const result = await adapter.updateBuiltinUserPassword({
+    name: 'profitability_provisioner',
+    password: strongPassword,
+    mutate: true,
+  })
+  assert.deepEqual(result, {
+    status: 'updated',
+    operation: { name: 'update-provisioner-op', status: 'DONE' },
+  })
+  const update = calls.find((call) => call.method === 'PUT')
+  assert.match(update.url, /\/users\?name=profitability_provisioner$/)
+  assert.deepEqual(update.data, {
+    name: 'profitability_provisioner',
+    password: strongPassword,
+  })
+  assert.equal(JSON.stringify(result).includes(strongPassword), false)
+})
+
+test('ambiguous Cloud SQL users.update exposes only operation metadata for containment settlement', async () => {
+  let clock = 0
+  let terminal = false
+  const adapter = adapters.createCloudSqlAdminApiAdapter({
+    projectId: 'iclean-room',
+    instanceId: 'iclean-room-instance',
+    now: () => clock,
+    sleep: async () => { clock += 1 },
+    request: async ({ method, url }) => {
+      if (method === 'GET' && url.endsWith('/users')) {
+        return {
+          data: {
+            items: [{ name: 'profitability_provisioner', type: 'BUILT_IN', host: '' }],
+          },
+        }
+      }
+      if (method === 'PUT') {
+        return { data: { name: 'update-ambiguous-op', status: 'PENDING' } }
+      }
+      if (method === 'GET' && url.includes('/operations/')) {
+        return {
+          data: {
+            name: 'update-ambiguous-op',
+            status: terminal ? 'DONE' : 'PENDING',
+          },
+        }
+      }
+      throw new Error('unexpected request')
+    },
+  })
+
+  let failure
+  try {
+    await adapter.updateBuiltinUserPassword({
+      name: 'profitability_provisioner',
+      password: strongPassword,
+      mutate: true,
+      operationTimeoutMs: 1,
+      operationPollIntervalMs: 1,
+    })
+  } catch (error) {
+    failure = error
+  }
+  assert.equal(failure?.message, 'CLOUD_SQL_PASSWORD_UPDATE_AMBIGUOUS')
+  assert.deepEqual(failure?.cloudSqlOperation, {
+    name: 'update-ambiguous-op',
+    status: 'PENDING',
+  })
+  assert.equal(failure.message.includes(strongPassword), false)
+
+  terminal = true
+  const settlement = await adapter.settleBuiltinUserPasswordUpdate({
+    operationName: failure.cloudSqlOperation.name,
+  })
+  assert.deepEqual(settlement, {
+    terminal: true,
+    succeeded: true,
+    operationName: 'update-ambiguous-op',
+  })
 })
 
 test('Cloud SQL adapter creates and deletes an ephemeral BUILT_IN user with operation polling', async () => {
@@ -721,6 +835,87 @@ test('Cloud SQL PG adapter separates IAM and PASSWORD authentication and closes 
     adapter.connectIamAdmin({ database: 'iclean-room-database', user: 'admin' }),
     /CLOUD_SQL_CONNECTOR_ALREADY_CLOSED/,
   )
+})
+
+test('Cloud SQL PG adapter bounds queries and interrupts the underlying client exactly once', async () => {
+  const clients = []
+  class FakeConnector {
+    async getOptions() { return { host: 'connector-host', port: 5432 } }
+    async close() {}
+  }
+  class FakeClient {
+    constructor(config) {
+      this.config = config
+      this.endCount = 0
+      clients.push(this)
+    }
+    async connect() {}
+    async query() { return new Promise(() => {}) }
+    async end() { this.endCount += 1 }
+  }
+  const adapter = adapters.createCloudSqlPgAdapter({
+    instanceConnectionName: 'iclean-room:europe-west3:iclean-room-instance',
+    ConnectorClass: FakeConnector,
+    ClientClass: FakeClient,
+    queryTimeoutMs: 5,
+  })
+  const client = await adapter.connectBuiltin({
+    database: 'iclean-room-database',
+    user: 'profitability_migration_executor',
+    password: strongPassword,
+  })
+
+  await assert.rejects(client.query('select pg_sleep(60)'), /PG_QUERY_TIMEOUT/)
+  await client.end()
+  assert.equal(clients[0].endCount, 1)
+  assert.equal(clients[0].config.connectionTimeoutMillis, 30000)
+  assert.equal(clients[0].config.query_timeout, 5)
+  assert.equal(clients[0].config.statement_timeout, 5)
+})
+
+test('Cloud SQL PG adapter propagates abort, while a containment connection stays independently bounded', async () => {
+  const controller = new AbortController()
+  const clients = []
+  class FakeConnector {
+    async getOptions() { return { host: 'connector-host', port: 5432 } }
+    async close() {}
+  }
+  class FakeClient {
+    constructor() {
+      this.endCount = 0
+      clients.push(this)
+    }
+    async connect() {}
+    async query() { return { rows: [{ ok: true }] } }
+    async end() { this.endCount += 1 }
+  }
+  const adapter = adapters.createCloudSqlPgAdapter({
+    instanceConnectionName: 'iclean-room:europe-west3:iclean-room-instance',
+    ConnectorClass: FakeConnector,
+    ClientClass: FakeClient,
+    signal: controller.signal,
+    connectTimeoutMs: 50,
+    queryTimeoutMs: 50,
+  })
+  const ordinary = await adapter.connectBuiltin({
+    database: 'iclean-room-database',
+    user: 'profitability_migration_executor',
+    password: strongPassword,
+  })
+  controller.abort()
+  await assert.rejects(ordinary.query('select 1'), /PG_QUERY_ABORTED/)
+  await Promise.resolve()
+  assert.equal(clients[0].endCount, 1)
+
+  const containment = await adapter.connectBuiltin({
+    database: 'iclean-room-database',
+    user: 'profitability_provisioner',
+    password: strongPassword,
+    containment: true,
+  })
+  assert.deepEqual(await containment.query('select 1'), { rows: [{ ok: true }] })
+  await containment.end()
+  assert.equal(clients[1].endCount, 1)
 })
 
 test('fresh-state evaluation fails closed on role, table, extension and server drift', () => {
@@ -1368,6 +1563,7 @@ test('git status adapter performs only read-only inspection and verifies exact f
     ['branch --show-current', 'codex/object-profitability-foundation-v2-20260925\n'],
     ['rev-parse HEAD', 'ba27918251f5d584d4f40084edccbddf810be0da\n'],
     ['status --porcelain=v1 --untracked-files=all', ''],
+    ['remote get-url cleanzi01', 'https://github.com/biuro-del/Cleanzi-01.git\n'],
   ])
   const adapter = adapters.createGitStatusAdapter({
     run: async (command, args, options) => {
@@ -1380,10 +1576,35 @@ test('git status adapter performs only read-only inspection and verifies exact f
     'ba27918251f5d584d4f40084edccbddf810be0da',
   )
   assert.equal(state.clean, true)
-  assert.equal(calls.length, 3)
+  assert.equal(
+    await adapter.inspectRemoteUrl('.', { remote: 'cleanzi01' }),
+    'https://github.com/biuro-del/Cleanzi-01.git',
+  )
+  assert.equal(calls.length, 4)
   assert.equal(calls.every((call) => call.command === 'git'), true)
-  assert.equal(calls.some((call) => /commit|push|reset|clean/.test(call.args.join(' '))), false)
+  assert.equal(calls.every((call) => call.options.shell === false), true)
+  assert.equal(
+    calls.some((call) => /\b(?:commit|push|reset|clean)\b/.test(call.args.join(' '))),
+    false,
+  )
   await assert.rejects(adapter.assertHead('.', 'ba27918'), /EXPECTED_HEAD_INVALID/)
+})
+
+test('git status adapter resolves fetch URL through a real shell-free Git process', async (t) => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'cleanzi-git-status-adapter-'))
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }))
+  execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore', windowsHide: true, shell: false })
+  execFileSync(
+    'git',
+    ['remote', 'add', 'cleanzi01', 'https://github.com/biuro-del/Cleanzi-01.git'],
+    { cwd: repo, stdio: 'ignore', windowsHide: true, shell: false },
+  )
+
+  const adapter = adapters.createGitStatusAdapter()
+  assert.equal(
+    await adapter.inspectRemoteUrl(repo, { remote: 'cleanzi01' }),
+    'https://github.com/biuro-del/Cleanzi-01.git',
+  )
 })
 
 test('production dependency facade maps source, Cloud SQL backup and guarded psql contracts', async () => {
@@ -1975,6 +2196,46 @@ function createMigrationInspectionClient({ drift = null } = {}) {
     async end() {},
   }
 }
+
+test('shared Foundation postflight executes every independent production guard', async () => {
+  const client = createMigrationInspectionClient()
+  const result = await adapters.inspectExistingFoundationPostflight(client, {
+    migrationFile: path.join(
+      __dirname,
+      '..',
+      'dataconnect',
+      'migrations',
+      '20260925_profitability_foundation_v2_additive.sql',
+    ),
+    executorSession: true,
+  })
+
+  assert.deepEqual(result, {
+    status: 'exact',
+    exact: true,
+    relationCount: adapters.FOUNDATION_TABLES.length,
+    rowCount: 0,
+  })
+  assert.equal(
+    client.queries.some((sql) => sql.startsWith(
+      'do $profitability_foundation_v2_exact_catalog_postflight$',
+    )),
+    true,
+  )
+  assert.equal(
+    client.queries.some((sql) => sql.startsWith(
+      'do $profitability_foundation_v2_owner_acl_postflight$',
+    )),
+    true,
+  )
+  assert.equal(
+    client.queries.some((sql) => sql.startsWith(
+      'do $profitability_foundation_v2_final_guard$',
+    )),
+    true,
+  )
+  assert.equal(client.queries.at(-1), 'rollback')
+})
 
 function exactNormalizedRoleState() {
   const role = (rolname, rolcanlogin, rolcreaterole = false) => ({

@@ -55,6 +55,23 @@ function isProfitabilityAccessProfileOrganizationAllowed(policy, organizationIdV
   )
 }
 
+function gateProfitabilityModuleCapabilities(capabilities, organizationId, environment = {}) {
+  const policy = resolveProfitabilityAccessProfileRollout(environment)
+  if (isProfitabilityAccessProfileOrganizationAllowed(policy, organizationId)) {
+    return capabilities
+  }
+  return {
+    ...capabilities,
+    profitabilityModule: {
+      enabled: false,
+      canRead: false,
+      canEdit: false,
+      readCode: 'PROFITABILITY_NOT_ENABLED',
+      editCode: 'PROFITABILITY_NOT_ENABLED',
+    },
+  }
+}
+
 async function resolveProfitabilityAccessProfileOrganizationMode({
   client,
   organizationId: organizationIdValue,
@@ -133,6 +150,7 @@ async function resolveProfitabilityAccessProfileSessionMode(input) {
 module.exports = {
   PROFITABILITY_ACCESS_ENFORCEMENT_RELATION,
   PROFITABILITY_ACCESS_PROFILE_MODES,
+  gateProfitabilityModuleCapabilities,
   isProfitabilityAccessProfileOrganizationAllowed,
   parseAllowedOrganizationIds,
   resolveProfitabilityAccessProfileOrganizationMode,

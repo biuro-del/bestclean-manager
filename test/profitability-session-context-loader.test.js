@@ -7,6 +7,11 @@ const {
   createProfitabilitySessionContextLoader,
 } = require('../profitability/session-context-loader')
 
+const ENABLED_ENVIRONMENT = Object.freeze({
+  PROFITABILITY_ACCESS_PROFILE_V2_ENABLED: 'true',
+  PROFITABILITY_ACCESS_PROFILE_V2_ALLOWED_ORG_IDS: 'bestclean',
+})
+
 function profile(overrides = {}) {
   return {
     org_id: 'bestclean',
@@ -42,6 +47,7 @@ test('session finance reads use only the dedicated profitability client and alwa
   }
   const loader = createProfitabilitySessionContextLoader({
     connectProfitabilityClient: async () => dedicatedClient,
+    environment: ENABLED_ENVIRONMENT,
     requiredFinancialRelations: ['public.profitability_effective_financial_entry'],
     resolveAccessProfileMode: async (client) => {
       assert.equal(client, dedicatedClient)
@@ -79,6 +85,7 @@ test('dedicated profitability connection failure blocks finance without throwing
       error.code = 'ECONNREFUSED'
       throw error
     },
+    environment: ENABLED_ENVIRONMENT,
   })
 
   assert.deepEqual(
@@ -101,6 +108,7 @@ test('legacy grants are read through the dedicated client and resolver failures 
   }
   const loader = createProfitabilitySessionContextLoader({
     connectProfitabilityClient: async () => dedicatedClient,
+    environment: ENABLED_ENVIRONMENT,
     resolveAccessProfileMode: async () => ({ mode: 'LEGACY' }),
     resolveFinancialModelMode: async () => ({ mode: 'FOUNDATION_V2' }),
     relationExists: async (client, relation) => {
@@ -118,6 +126,7 @@ test('legacy grants are read through the dedicated client and resolver failures 
 
   const failingLoader = createProfitabilitySessionContextLoader({
     connectProfitabilityClient: async () => dedicatedClient,
+    environment: ENABLED_ENVIRONMENT,
     resolveAccessProfileMode: async () => { throw new Error('resolver failed') },
   })
   assert.deepEqual(
@@ -128,4 +137,57 @@ test('legacy grants are read through the dedicated client and resolver failures 
     },
   )
   assert.equal(released, 2)
+})
+
+test('global organization gate blocks before opening a profitability database connection', async () => {
+  for (const environment of [
+    { PROFITABILITY_DB_ENABLED: 'true' },
+    { PROFITABILITY_ACCESS_PROFILE_V2_ENABLED: 'true' },
+    {
+      PROFITABILITY_ACCESS_PROFILE_V2_ENABLED: 'true',
+      PROFITABILITY_ACCESS_PROFILE_V2_ALLOWED_ORG_IDS: '',
+    },
+    {
+      PROFITABILITY_ACCESS_PROFILE_V2_ENABLED: 'true',
+      PROFITABILITY_ACCESS_PROFILE_V2_ALLOWED_ORG_IDS: 'bestclean,***',
+    },
+  ]) {
+    let connections = 0
+    const loader = createProfitabilitySessionContextLoader({
+      environment,
+      async connectProfitabilityClient() {
+        connections += 1
+        throw new Error('database connection must not be attempted')
+      },
+    })
+
+    assert.deepEqual(
+      await loader.load({ uid: 'uid-owner', row: { org_id: 'bestclean' } }),
+      {
+        profitability_access_profile_v2_blocked: true,
+        profitability_financial_model_v21_blocked: true,
+      },
+    )
+    assert.equal(connections, 0)
+  }
+})
+
+test('an organization outside the exact allowlist is blocked before database access', async () => {
+  let connections = 0
+  const loader = createProfitabilitySessionContextLoader({
+    environment: ENABLED_ENVIRONMENT,
+    async connectProfitabilityClient() {
+      connections += 1
+      throw new Error('database connection must not be attempted')
+    },
+  })
+
+  assert.deepEqual(
+    await loader.load({ uid: 'uid-owner', row: { org_id: 'other-org' } }),
+    {
+      profitability_access_profile_v2_blocked: true,
+      profitability_financial_model_v21_blocked: true,
+    },
+  )
+  assert.equal(connections, 0)
 })

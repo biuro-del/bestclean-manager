@@ -1181,17 +1181,19 @@ class ProfitabilityRepository {
           queryParams,
         ),
         this.client.query(
-          `select e.event_id, e.org_id, coalesce(e.object_id, z.object_id) as object_id,
+          `select e.event_id, e.org_id, $2::varchar as object_id,
                   e.worker_login, e.start_at,
-                  e.end_at, e.duration_sec, e.periodic_work_id, e.task_id, e.zone_id,
+                  e.end_at, e.duration_sec, null::varchar as periodic_work_id,
+                  e.task_id, e.zone_id,
                   (e.start_at at time zone o.timezone)::date::text as work_date
              from public.event e
              join public.service_object o
                on o.org_id = e.org_id and o.object_id = $2
-             left join public.zone z
-               on z.org_id = e.org_id and z.id = e.zone_id
+             join public.zone z
+               on z.org_id = e.org_id
+              and z.id = e.zone_id
+              and z.client_id = o.client_id
             where e.org_id = $1
-              and (e.object_id = $2 or (e.object_id is null and z.object_id = $2))
               and e.start_at >= ($3::date::timestamp at time zone o.timezone)
               and e.start_at < ($4::date::timestamp at time zone o.timezone)
               and e.start_at is not null
@@ -1219,9 +1221,7 @@ class ProfitabilityRepository {
              join public.service_object o
                on o.org_id = e.org_id and o.object_id = $2
             where e.org_id = $1
-              and e.object_id is null
-              and z.object_id is null
-              and (z.client_id = o.client_id or z.id is null)
+              and (z.id is null or z.client_id is null)
               and e.start_at >= ($3::date::timestamp at time zone o.timezone)
               and e.start_at < ($4::date::timestamp at time zone o.timezone)`,
           queryParams,

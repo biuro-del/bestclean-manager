@@ -5,6 +5,7 @@ const {
 } = require('./access-profile-repository')
 const {
   PROFITABILITY_ACCESS_PROFILE_MODES,
+  isProfitabilityAccessProfileOrganizationAllowed,
   resolveProfitabilityAccessProfileRollout,
   resolveProfitabilityAccessProfileSessionMode,
 } = require('../profitability-access-profile-rollout')
@@ -76,6 +77,7 @@ function legacyGrantPatch(rows = []) {
 function createProfitabilitySessionContextLoader(options = {}) {
   const connectProfitabilityClient = options.connectProfitabilityClient
   const environment = options.environment ?? process.env
+  const accessProfileRollout = resolveProfitabilityAccessProfileRollout(environment)
   const relationExists = options.relationExists ?? databaseRelationExists
   const requiredFinancialRelations = Object.freeze([
     ...(options.requiredFinancialRelations ?? []),
@@ -100,6 +102,11 @@ function createProfitabilitySessionContextLoader(options = {}) {
   async function load({ uid, row }) {
     if (typeof connectProfitabilityClient !== 'function') return blockedPatch()
 
+    const organizationId = text(row?.org_id)
+    if (!isProfitabilityAccessProfileOrganizationAllowed(accessProfileRollout, organizationId)) {
+      return blockedPatch()
+    }
+
     let client = null
     try {
       client = await connectProfitabilityClient()
@@ -109,7 +116,6 @@ function createProfitabilitySessionContextLoader(options = {}) {
 
     const patch = {}
     try {
-      const organizationId = text(row?.org_id)
       const normalizedUid = text(uid)
       const accessProfileMode = await resolveAccessProfileMode(client, organizationId)
       const financialModelMode = await resolveFinancialModelMode(client, organizationId)
